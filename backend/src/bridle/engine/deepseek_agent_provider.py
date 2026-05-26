@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from bridle.engine.agent_tool_registry import AgentToolRegistry
+from bridle.engine.context_template import ContextTemplateBuilder
 from bridle.engine.deepseek_client import DeepSeekHttpError
 from bridle.engine.deepseek_tools_schema import build_deepseek_tools
 from bridle.engine.proposal_path_validator import ProposalPathValidator
@@ -50,7 +51,21 @@ class DeepSeekAgentProvider:
     async def generate(self, context: AgentContext) -> AgentProposalSchema:
         registry = self._registry
         policy = registry._policy  # noqa: SLF001 — worker-built registry shares policy
-        messages = _build_messages(context)
+        tool_descriptors = registry.tool_descriptors()
+        tool_context = [d.model_dump() for d in tool_descriptors]
+        child_agent_results = (
+            context.tool_capabilities.get("child_agent_results", [])
+            if context.tool_capabilities
+            else []
+        )
+        builder = ContextTemplateBuilder(
+            context,
+            tool_context=tool_context,
+            child_agent_results=child_agent_results,
+            run_id=self._run_id,
+            node_id=self._node_id,
+        )
+        messages = builder.build_messages()
         tools = build_deepseek_tools(strict=self._strict_tools)
 
         log_event(
@@ -63,7 +78,7 @@ class DeepSeekAgentProvider:
         start = time.monotonic()
 
         try:
-            for round_idx in range(self._max_tool_rounds):
+            for _round_idx in range(self._max_tool_rounds):
                 response = await self._client.chat_completion(
                     messages=messages,
                     model=self._model,
@@ -100,6 +115,7 @@ class DeepSeekAgentProvider:
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id"),
+                            "name": tool_name,
                             "content": registry.tool_result_content(result),
                         })
                     continue
@@ -219,32 +235,6 @@ def _validate_proposal(proposal: AgentProposalSchema, context: AgentContext) -> 
     cmd_errors = validate_proposal_tests_to_run(proposal, snap, context.tests)
     if cmd_errors:
         raise DeepSeekProviderError("CommandPolicyError", "; ".join(cmd_errors))
-
-
-def _build_messages(context: AgentContext) -> list[dict]:
-    system = (
-        "You are a coding agent. You may ONLY use the provided tools to read allowed files, "
-        "propose patches, run allowlisted tests, or report blocked status. "
-        "Do not claim you executed tools you did not call. "
-        "When finished, respond with a single JSON object matching: "
-        '{"summary": string, "file_patches": [{"path","change_type","diff"}], "tests_to_run": [string]}'
-    )
-    user_payload = {
-        "instruction": context.instruction,
-        "node": context.node,
-        "allowed_files": context.allowed_files,
-        "tests": context.tests,
-        "metrics": context.metrics,
-        "constraints": context.constraints,
-        "review_checks": context.review_checks,
-        "expected_outputs": context.expected_outputs,
-        "accessible_context": context.accessible_context,
-        "tool_capabilities": context.tool_capabilities,
-    }
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
-    ]
 
 
 def _map_http_error(status_code: int) -> str:

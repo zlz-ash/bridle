@@ -134,6 +134,7 @@ class NodeAgentWorkerService:
         allowed_files = boundary["write_set"]
 
         accessible_context = await NodeService.get_accessible_context(db, node.id)
+        child_agent_results = await NodeAgentWorkerService._build_child_agent_results(db, node)
         node_tests = node.tests if isinstance(node.tests, list) else []
         sandbox_policy = SandboxPolicy.for_run(
             run_id=run_id,
@@ -165,6 +166,7 @@ class NodeAgentWorkerService:
                 "output_dir": str(workspace.output_dir),
                 "aggregate_dir": str(workspace.aggregate_dir),
             }
+        tool_capabilities["child_agent_results"] = child_agent_results
         ctx = AgentContext(
             instruction=instruction,
             node={
@@ -302,6 +304,49 @@ class NodeAgentWorkerService:
             "conflict_contributions": list(boundary.get("conflict_contributions") or []),
             "container_policy": dict(boundary.get("container_policy") or {}),
         }
+
+    @staticmethod
+    async def _build_child_agent_results(db: AsyncSession, node: NodeRecord) -> list[dict]:
+        depends_on = node.depends_on if isinstance(node.depends_on, list) else []
+        if not depends_on:
+            return []
+
+        sibling_result = await db.execute(
+            select(NodeRecord).where(
+                NodeRecord.plan_id == node.plan_id,
+                NodeRecord.plan_node_id.in_(depends_on),
+            )
+        )
+        siblings = list(sibling_result.scalars().all())
+        sibling_ids = {s.id for s in siblings}
+
+        if not sibling_ids:
+            return []
+
+        result_q = await db.execute(
+            select(NodeAgentResultRecord).where(
+                NodeAgentResultRecord.node_id.in_(sibling_ids),
+                NodeAgentResultRecord.status.in_(["completed", "failed"]),
+            )
+        )
+        results = list(result_q.scalars().all())
+
+        sibling_map = {s.id: s for s in siblings}
+        summaries = []
+        for r in results:
+            sib = sibling_map.get(r.node_id)
+            if not sib:
+                continue
+            payload = r.payload if isinstance(r.payload, dict) else {}
+            summaries.append({
+                "node_id": sib.plan_node_id,
+                "status": r.status,
+                "result_summary": (r.summary or "")[:200],
+                "test_summary": str(payload.get("test_summary", ""))[:100],
+                "metrics_summary": str(payload.get("metrics_summary", ""))[:100],
+            })
+
+        return summaries
 
     @staticmethod
     def _normalize_paths(paths: list) -> list[str]:

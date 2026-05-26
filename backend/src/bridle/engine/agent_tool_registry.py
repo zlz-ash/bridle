@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from bridle.engine.context_types import ToolDescriptor
 from bridle.engine.deepseek_tools_schema import V1_TOOL_NAMES
 from bridle.engine.proposal_test_validator import resolve_allowed_test_commands
 from bridle.engine.sandbox_policy import SandboxPolicy
@@ -14,6 +15,68 @@ from bridle.schemas.proposal import AgentContext
 
 class AgentToolRegistry:
     """Execute registered tools through sandbox policy."""
+
+    _TOOL_DESCRIPTORS: list[ToolDescriptor] = [
+        ToolDescriptor(
+            name="read_allowed_file",
+            purpose="Read one file that is explicitly allowed for this node run.",
+            when_to_use=(
+                "When you need to inspect the current content of an allowed file before proposing changes."
+            ),
+            input_summary="path: string — relative path of the file to read.",
+            output_summary="File content as a string, or an error if the path is not allowed.",
+            constraints="Can only read files listed in allowed_files. Cannot read files outside the node boundary.",
+        ),
+        ToolDescriptor(
+            name="propose_file_patch",
+            purpose="Propose a patch for an allowed file without writing to disk.",
+            when_to_use=(
+                "When you have decided what changes to make to a file and want to record them as a diff."
+            ),
+            input_summary="path: string, change_type: string (modify|add|remove), diff: string — unified diff.",
+            output_summary="Confirmation of the proposed patch with status, or an error if the path is not allowed.",
+            constraints=(
+                "Can only patch files listed in allowed_files. "
+                "Does not write to disk. Diff must be valid unified format."
+            ),
+        ),
+        ToolDescriptor(
+            name="run_allowed_tests",
+            purpose="Run test commands from the node allowlist via sandbox policy.",
+            when_to_use=(
+                "When you have proposed patches and want to verify them by running the allowed test commands."
+            ),
+            input_summary="commands: array of strings — test commands to execute.",
+            output_summary="Test execution results including pass/fail status for each command.",
+            constraints=(
+                "Can only run commands listed in the node's tests allowlist. Commands run in sandbox with timeout."
+            ),
+        ),
+        ToolDescriptor(
+            name="report_blocked",
+            purpose="Report a blocking issue without changing node status.",
+            when_to_use=(
+                "When you cannot proceed due to missing dependencies, ambiguous requirements, or access denial."
+            ),
+            input_summary="reason: string — why you are blocked. evidence: object — supporting evidence (optional).",
+            output_summary="Confirmation that the blocked status was recorded.",
+            constraints="Does not modify any files. Use only when genuinely unable to proceed.",
+        ),
+        ToolDescriptor(
+            name="child_agent_result_summary",
+            purpose="Read result summaries from child or adjacent node agents.",
+            when_to_use=(
+                "When you need to review results from prerequisite or adjacent nodes to inform your own work."
+            ),
+            input_summary="node_ids: array of strings — node IDs whose results to read.",
+            output_summary="Array of result summaries with status, test summary, and metrics summary per node.",
+            constraints=(
+                "Can only read results from nodes you are allowed to access per visibility rules. "
+                "Reserved — not yet callable."
+            ),
+            reserved=True,
+        ),
+    ]
 
     def __init__(self, executor: SandboxedToolExecutor) -> None:
         self._executor = executor
@@ -32,6 +95,10 @@ class AgentToolRegistry:
             command_timeout_seconds=int(snap.get("command_timeout_seconds", 60)),
         )
         return cls(SandboxedToolExecutor(policy))
+
+    @classmethod
+    def tool_descriptors(cls) -> list[ToolDescriptor]:
+        return list(cls._TOOL_DESCRIPTORS)
 
     async def execute(
         self,
