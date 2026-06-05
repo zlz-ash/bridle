@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.api.errors import ConflictError, NotFoundError
 from bridle.engine.plan_change_validator import PlanChangeValidator
+from bridle.events.bus import publish_event_safe
 from bridle.logging.jsonl import log_event
 from bridle.models.node import NodeRecord
 from bridle.models.plan import PlanRecord
@@ -50,6 +51,7 @@ class PlanChangeProposalService:
         await db.commit()
         await db.refresh(record)
         log_event("plan_change_proposed", "completed", detail={"proposal_id": record.id, "plan_id": data.plan_id})
+        publish_event_safe("plan_change_created", {"proposal_id": record.id, "plan_id": data.plan_id})
         return PlanChangeProposalService._to_read(record)
 
     @staticmethod
@@ -66,6 +68,7 @@ class PlanChangeProposalService:
         await db.commit()
         await db.refresh(record)
         log_event("plan_change_approved", "completed", detail={"proposal_id": proposal_id})
+        publish_event_safe("plan_change_approved", {"proposal_id": proposal_id})
         return PlanChangeProposalService._to_read(record)
 
     @staticmethod
@@ -78,6 +81,7 @@ class PlanChangeProposalService:
         await db.commit()
         await db.refresh(record)
         log_event("plan_change_rejected", "completed", detail={"proposal_id": proposal_id})
+        publish_event_safe("plan_change_rejected", {"proposal_id": proposal_id})
         return PlanChangeProposalService._to_read(record)
 
     @staticmethod
@@ -149,6 +153,7 @@ class PlanChangeProposalService:
             await db.commit()
             await PlanService._refresh_current_plan_file(db, record.plan_id)
             log_event("plan_change_applied", "completed", detail={"proposal_id": proposal_id})
+            publish_event_safe("plan_change_applied", {"proposal_id": proposal_id})
         except Exception as exc:
             await db.rollback()
             record = await PlanChangeProposalService._load(db, proposal_id)

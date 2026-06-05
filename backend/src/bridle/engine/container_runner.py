@@ -36,6 +36,7 @@ class ContainerRequest:
     health_check: list[str] = field(default_factory=list)
     privileged: bool = False
     allowed_mount_roots: list[str] = field(default_factory=list)
+    extra_hosts: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,10 @@ class FakeContainerRunner:
     def inspect(self, container_id: str) -> ContainerResult:
         _, result = self._load(container_id)
         return result
+
+    def remove(self, container_id: str) -> None:
+        self._containers.pop(container_id, None)
+        self._logs.pop(container_id, None)
 
     def collect_logs(self, container_id: str) -> list[str]:
         self._load(container_id)
@@ -359,6 +364,8 @@ class LocalContainerRuntimeRunner(FakeContainerRunner):
         for mount in request.mounts:
             mode = "ro" if mount.readonly else "rw"
             command.extend(["--mount", f"type=bind,src={mount.source},dst={mount.target},{mode}"])
+        for host_mapping in request.extra_hosts or []:
+            command.extend(["--add-host", host_mapping])
         if request.health_check:
             command.extend(["--health-cmd", " ".join(request.health_check)])
         command.extend(["--stop-timeout", str(request.timeout_seconds)])
@@ -420,21 +427,42 @@ class LocalContainerRuntimeRunner(FakeContainerRunner):
     def inspect(self, container_id: str) -> ContainerResult:
         if not self.use_docker:
             return super().inspect(container_id)
-        request, current = self._load(container_id)
         status_result = self._run_command(
-            [self.executable, "inspect", "-f", "{{.State.Status}}", container_id]
+            [
+                self.executable,
+                "inspect",
+                "-f",
+                "{{.State.Status}}|{{.Name}}|{{.HostConfig.NetworkMode}}",
+                container_id,
+            ]
         )
-        health = "unknown"
-        if status_result.returncode == 0:
-            state = status_result.stdout.strip()
-            health = "healthy" if state == "running" else state
+        if status_result.returncode != 0:
+            return ContainerResult(
+                container_id=container_id,
+                name="",
+                status="failed",
+                network_mode="bridge",
+                health="missing",
+            )
+        state, name, net_mode = (status_result.stdout.strip() + "||").split("|", 2)[:3]
+        network_mode: NetworkMode = "none" if net_mode == "none" else "bridge"
+        health = "healthy" if state == "running" else state
         return ContainerResult(
             container_id=container_id,
-            name=current.name,
+            name=name.lstrip("/"),
             status="running" if health == "healthy" else "failed",
-            network_mode=current.network_mode,
+            network_mode=network_mode,
             health=health,
         )
+
+    def remove(self, container_id: str) -> None:
+        if not self.use_docker:
+            self._containers.pop(container_id, None)
+            self._logs.pop(container_id, None)
+            return
+        self._run_command([self.executable, "rm", "-f", container_id])
+        self._containers.pop(container_id, None)
+        self._logs.pop(container_id, None)
 
     def stop(self, container_id: str) -> ContainerResult:
         if not self.use_docker:

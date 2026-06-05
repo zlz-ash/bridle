@@ -3,9 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import typer
+from dotenv import load_dotenv
+
+
+def _load_env_files(workspace: Path) -> list[Path]:
+    """Load .env files. Priority: workspace/.env > backend/.env (does not override real env)."""
+    loaded: list[Path] = []
+    # backend/.env sits at repo root: cli.py -> bridle -> src -> backend
+    backend_env = Path(__file__).resolve().parents[2] / ".env"
+    for candidate in (workspace / ".env", backend_env):
+        if candidate.is_file():
+            load_dotenv(candidate, override=False)
+            loaded.append(candidate)
+    return loaded
 
 app = typer.Typer(name="bridle", help="Persistence-first AI Coding workflow kernel")
 
@@ -21,6 +35,11 @@ def version() -> None:
     typer.echo(f"bridle {__version__}")
 
 
+def _repo_root() -> Path:
+    """Repository root (contains ``docker/``). cli.py lives under backend/src/bridle/."""
+    return Path(__file__).resolve().parents[3]
+
+
 @app.command()
 def serve(
     workspace: Path = typer.Option(
@@ -30,12 +49,76 @@ def serve(
     ),
     host: str = "0.0.0.0",
     port: int = 8900,
+    rebuild_images: bool = typer.Option(
+        False,
+        "--rebuild-images",
+        help="即使镜像已存在也强制重 build",
+    ),
+    skip_image_build: bool = typer.Option(
+        False,
+        "--skip-image-build",
+        help="跳过 docker daemon 探活和镜像 build（仅开发用）",
+    ),
+    no_auto_git_init: bool = typer.Option(
+        False,
+        "--no-auto-git-init",
+        help="不自动把 workspace 初始化为 git 仓库（高级用户）",
+    ),
 ) -> None:
     """Start the API server anchored to a workspace."""
     from bridle.config import set_workspace
 
     set_workspace(workspace)
+    # uvicorn reload mode forks a worker that does NOT inherit our module globals;
+    # propagate workspace via env so the child can recover via get_config() fallback.
+    os.environ["BRIDLE_WORKSPACE"] = str(workspace)
     typer.echo(f"Workspace: {workspace}")
+
+    if not no_auto_git_init:
+        from bridle.services.git_workspace_initializer import (
+            GitWorkspaceInitError,
+            GitWorkspaceInitializer,
+        )
+
+        try:
+            GitWorkspaceInitializer(workspace, log=typer.echo).ensure_repo()
+        except GitWorkspaceInitError as exc:
+            typer.echo(f"启动失败 [{exc.code}]: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+
+    loaded = _load_env_files(workspace)
+    for env_path in loaded:
+        typer.echo(f"Loaded env: {env_path}")
+
+    if not skip_image_build:
+        from bridle.services.image_bootstrap import ImageBootstrapError, ImageBootstrapService
+
+        try:
+            ImageBootstrapService(
+                repo_root=_repo_root(),
+                log=typer.echo,
+            ).ensure_ready(force_rebuild=rebuild_images)
+        except ImageBootstrapError as exc:
+            typer.echo(f"启动失败 [{exc.code}]: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+
+    # Ensure tables exist in the workspace SQLite DB (no alembic in repo yet).
+    import asyncio as _asyncio
+    import bridle.models  # noqa: F401 — register all ORM tables
+    from bridle.database import _ensure_engine
+    from bridle.models.base import Base
+    import bridle.database as _db_mod
+
+    async def _create_tables() -> None:
+        _ensure_engine()
+        async with _db_mod._engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    _asyncio.run(_create_tables())
+    typer.echo("DB tables ensured")
+
+    if os.getenv("BRIDLE_AGENT_PROVIDER", "fake") != "fake":
+        typer.echo(f"Provider: {os.getenv('BRIDLE_AGENT_PROVIDER')}  Model: {os.getenv('BRIDLE_AGENT_MODEL', '?')}")
 
     import uvicorn
 

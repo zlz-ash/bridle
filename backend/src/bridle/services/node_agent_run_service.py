@@ -16,6 +16,7 @@ from bridle.coding_config import (
     TERMINAL_RUN_STATUSES,
 )
 from bridle.engine.proposal_path_validator import ProposalPathValidator
+from bridle.events.bus import publish_event_safe
 from bridle.logging.jsonl import log_event
 from bridle.models.node import NodeRecord
 from bridle.models.node_agent_heartbeat import NodeAgentHeartbeatRecord
@@ -78,6 +79,15 @@ class NodeAgentRunService:
             run_id=record.id,
             detail={"session_id": session_id, "plan_node_id": node.plan_node_id},
         )
+        publish_event_safe(
+            "node_agent_run_updated",
+            {
+                "run_id": record.id,
+                "node_id": node.id,
+                "status": record.status,
+                "phase": record.phase,
+            },
+        )
         return NodeAgentRunService._to_read(record)
 
     @staticmethod
@@ -93,7 +103,8 @@ class NodeAgentRunService:
     @staticmethod
     async def get_run(db: AsyncSession, run_id: str) -> NodeAgentRunReadSchema:
         record = await NodeAgentRunService._load_run(db, run_id)
-        return NodeAgentRunService._to_read(record)
+        result_rec = await NodeAgentRunService._latest_result(db, run_id)
+        return NodeAgentRunService._to_read(record, result_record=result_rec)
 
     @staticmethod
     async def record_heartbeat(db: AsyncSession, run_id: str, data: HeartbeatSchema) -> NodeAgentRunReadSchema:
@@ -144,6 +155,15 @@ class NodeAgentRunService:
             node_id=record.node_id,
             run_id=run_id,
             detail={"phase": data.phase, "progress": data.progress},
+        )
+        publish_event_safe(
+            "node_agent_run_updated",
+            {
+                "run_id": run_id,
+                "node_id": record.node_id,
+                "status": record.status,
+                "phase": record.phase,
+            },
         )
         return NodeAgentRunService._to_read(record)
 
@@ -196,7 +216,12 @@ class NodeAgentRunService:
             if record.started_at:
                 record.duration_ms = int((now - record.started_at).total_seconds() * 1000)
             record.result_summary = data.summary[:500]
+            await NodeAgentRunService._set_node_needs_review(db, record.node_id)
         else:
+            # 非 completed 的非 blocked 终态（如 failed/timed_out 经 submit_result 路径）
+            # 仍要同步 NodeRecord 状态，UI 才能看到
+            if (data.status if data.status in TERMINAL_RUN_STATUSES else "failed") in {"failed", "timed_out"}:
+                await NodeAgentRunService._set_node_failed_retryable(db, record.node_id)
             record.status = data.status if data.status in TERMINAL_RUN_STATUSES else "failed"
             record.finished_at = now
 
@@ -211,6 +236,15 @@ class NodeAgentRunService:
             run_id=run_id,
             detail={"result_type": data.result_type},
         )
+        publish_event_safe(
+            "node_agent_run_updated",
+            {
+                "run_id": run_id,
+                "node_id": record.node_id,
+                "status": record.status,
+                "phase": record.phase,
+            },
+        )
         return NodeAgentRunService._to_read(record)
 
     @staticmethod
@@ -224,6 +258,15 @@ class NodeAgentRunService:
         await db.commit()
         await db.refresh(record)
         log_event("node_agent_run_cancelled", "completed", node_id=record.node_id, run_id=run_id)
+        publish_event_safe(
+            "node_agent_run_updated",
+            {
+                "run_id": run_id,
+                "node_id": record.node_id,
+                "status": record.status,
+                "phase": record.phase,
+            },
+        )
         return NodeAgentRunService._to_read(record)
 
     @staticmethod
@@ -264,10 +307,30 @@ class NodeAgentRunService:
 
     @staticmethod
     async def _set_node_needs_review(db: AsyncSession, node_id: str) -> None:
+        await NodeAgentRunService._set_node_status(db, node_id, "needs_review")
+
+    @staticmethod
+    async def _set_node_failed_retryable(db: AsyncSession, node_id: str) -> None:
+        await NodeAgentRunService._set_node_status(db, node_id, "failed_retryable")
+
+    @staticmethod
+    async def _set_node_status(db: AsyncSession, node_id: str, new_status: str) -> None:
         result = await db.execute(select(NodeRecord).where(NodeRecord.id == node_id))
         node = result.scalar_one_or_none()
-        if node is not None:
-            node.status = "needs_review"
+        if node is None:
+            return
+        old_status = node.status
+        node.status = new_status
+        if old_status != new_status:
+            publish_event_safe(
+                "node_status_changed",
+                {
+                    "node_id": node.id,
+                    "plan_node_id": node.plan_node_id,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                },
+            )
 
     @staticmethod
     async def _load_run(db: AsyncSession, run_id: str) -> NodeAgentRunRecord:
@@ -312,6 +375,12 @@ class NodeAgentRunService:
             test_summary=payload.get("test_summary"),
             metrics_summary=payload.get("metrics_summary"),
             integration_result=payload.get("integration"),
+            budget_report=payload.get("budget_report")
+            if isinstance(payload.get("budget_report"), dict)
+            else None,
+            replan_decision=payload.get("replan_decision")
+            if isinstance(payload.get("replan_decision"), dict)
+            else None,
         )
 
     @staticmethod
@@ -325,11 +394,19 @@ class NodeAgentRunService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_latest_for_node(db: AsyncSession, node_id: str) -> NodeAgentRunReadSchema | None:
+        runs = await NodeAgentRunService.list_by_node(db, node_id)
+        return runs[0] if runs else None
+
+    @staticmethod
     async def list_by_node(db: AsyncSession, node_id: str) -> list[NodeAgentRunReadSchema]:
         result = await db.execute(
             select(NodeAgentRunRecord)
             .where(NodeAgentRunRecord.node_id == node_id)
-            .order_by(NodeAgentRunRecord.created_at.desc())
+            .order_by(
+                NodeAgentRunRecord.created_at.desc(),
+                NodeAgentRunRecord.started_at.desc(),
+            )
         )
         reads: list[NodeAgentRunReadSchema] = []
         for record in result.scalars().all():

@@ -26,6 +26,7 @@ class CapabilityPolicyService:
         allowed_files: list[str],
         node_tests: list[str],
         sandbox_snapshot: dict | None = None,
+        network_allowed: bool = False,
     ) -> dict:
         """Per-run capability manifest for agent providers."""
         return {
@@ -47,6 +48,7 @@ class CapabilityPolicyService:
                 "report_blocked": {"allowed": True},
                 "apply_patch": {"allowed": False},
                 "run_command": {"allowed": False},
+                "web_search": {"allowed": network_allowed, "requires_network": True},
             },
             "sandbox": sandbox_snapshot or {},
         }

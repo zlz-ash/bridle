@@ -32,6 +32,13 @@ class ToolResultSummarizer:
         status = data.get("status", "unknown")
         summary["status"] = status
 
+        category = data.get("category")
+        if category:
+            summary["category"] = category
+        retryable = data.get("retryable")
+        if retryable is not None:
+            summary["retryable"] = retryable
+
         if status == "failed":
             error_code = data.get("error_code", "")
             if error_code:
@@ -63,6 +70,12 @@ class ToolResultSummarizer:
         error_code = summary.get("error_code")
         if error_code:
             parts.append(f"error_code={error_code}")
+        category = summary.get("category")
+        if category:
+            parts.append(f"category={category}")
+        retryable = summary.get("retryable")
+        if retryable is not None:
+            parts.append(f"retryable={retryable}")
         return "; ".join(parts)
 
 

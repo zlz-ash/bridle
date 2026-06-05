@@ -157,16 +157,33 @@ class AgentProviderFactory:
     - HTTPS_PROXY: proxy URL (default: http://127.0.0.1:7890)
     - BRIDLE_DEEPSEEK_STRICT_TOOLS: use beta strict tools (default: false)
     - BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS: tool loop limit (default: 8)
+    - BRIDLE_DEEPSEEK_MAX_TOOL_CALLS: total tool calls per generate (default: 32)
+    - BRIDLE_DEEPSEEK_MAX_WALL_SECONDS: wall-clock budget per generate (default: 300)
     """
 
     DEFAULT_PROXY = "http://127.0.0.1:7890"
     DEFAULT_TIMEOUT = 120
     DEFAULT_MODEL = "unknown"
     DEFAULT_MAX_TOOL_ROUNDS = 8
+    DEFAULT_MAX_TOOL_CALLS = 32
+    DEFAULT_MAX_WALL_SECONDS = 300.0
 
     @staticmethod
-    def create(context: AgentContext | None = None) -> AgentProvider:
-        """Create a provider based on current environment config."""
+    def create(
+        context: AgentContext | None = None,
+        *,
+        budget_override: dict[str, float] | None = None,
+    ) -> AgentProvider:
+        """Create a provider based on current environment config.
+
+        Args:
+            context: AgentContext for tool registry (deepseek path requires it).
+            budget_override: Optional per-call budget that overrides env-based
+                defaults for deepseek's tool loop. Keys: max_rounds (int),
+                max_tool_calls (int), max_wall_seconds (float). Missing keys
+                fall back to env defaults. Used by node worker to scale budget
+                with each node's estimated_minutes.
+        """
         cfg = AgentProviderFactory.get_config()
         provider_name = cfg["provider"]
         api_key = cfg["api_key"]
@@ -195,10 +212,11 @@ class AgentProviderFactory:
         if provider_name == "configured_stub":
             return ConfiguredStubProvider(model=model, timeout_seconds=timeout, proxy=proxy)
 
-        if provider_name == "deepseek":
+        if provider_name == "deepseek" or provider_name == "openai_compatible":
             from bridle.engine.agent_tool_registry import AgentToolRegistry
             from bridle.engine.deepseek_agent_provider import DeepSeekAgentProvider
-            from bridle.engine.deepseek_client import DEEPSEEK_BETA_BASE, DEEPSEEK_DEFAULT_BASE, HttpDeepSeekClient
+            from bridle.engine.deepseek_client import DEEPSEEK_BETA_BASE, DEEPSEEK_DEFAULT_BASE
+            from bridle.engine.openai_client import HttpOpenAICompatibleClient
 
             if context is None:
                 logger.warning(
@@ -208,20 +226,29 @@ class AgentProviderFactory:
                         "status": "fallback",
                         "detail": {
                             "configured_provider": provider_name,
-                            "reason": "DeepSeek requires AgentContext for sandbox registry",
+                            "reason": "Provider requires AgentContext for sandbox registry",
                         },
                     },
                 )
                 return FakeAgentProvider()
 
-            base_url = DEEPSEEK_BETA_BASE if cfg["deepseek_strict_tools"] else DEEPSEEK_DEFAULT_BASE
+            if cfg["deepseek_strict_tools"]:
+                base_url = cfg["beta_base_url"] or DEEPSEEK_BETA_BASE
+            else:
+                base_url = cfg["base_url"] or DEEPSEEK_DEFAULT_BASE
             registry = AgentToolRegistry.from_context(context)
-            client = HttpDeepSeekClient(api_key=api_key, base_url=base_url, proxy=proxy)
+            client = HttpOpenAICompatibleClient(api_key=api_key, base_url=base_url, proxy=proxy)
             snap = context.tool_capabilities.get("sandbox", {}) if context.tool_capabilities else {}
+            override = budget_override or {}
+            max_tool_rounds = int(override.get("max_rounds", cfg["deepseek_max_tool_rounds"]))
+            max_tool_calls = int(override.get("max_tool_calls", cfg["deepseek_max_tool_calls"]))
+            max_wall_seconds = float(override.get("max_wall_seconds", cfg["deepseek_max_wall_seconds"]))
             return DeepSeekAgentProvider(
                 client=client,
                 model=model,
-                max_tool_rounds=cfg["deepseek_max_tool_rounds"],
+                max_tool_rounds=max_tool_rounds,
+                max_tool_calls=max_tool_calls,
+                max_wall_seconds=max_wall_seconds,
                 registry=registry,
                 strict_tools=cfg["deepseek_strict_tools"],
                 timeout_seconds=float(timeout),
@@ -251,10 +278,26 @@ class AgentProviderFactory:
             "provider": os.getenv("BRIDLE_AGENT_PROVIDER", "fake"),
             "model": os.getenv("BRIDLE_AGENT_MODEL", AgentProviderFactory.DEFAULT_MODEL),
             "api_key": os.getenv("BRIDLE_AGENT_API_KEY", ""),
-            "timeout_seconds": int(os.getenv("BRIDLE_AGENT_TIMEOUT_SECONDS", str(AgentProviderFactory.DEFAULT_TIMEOUT))),
+            "timeout_seconds": int(
+                os.getenv("BRIDLE_AGENT_TIMEOUT_SECONDS", str(AgentProviderFactory.DEFAULT_TIMEOUT))
+            ),
             "proxy": os.getenv("HTTPS_PROXY", AgentProviderFactory.DEFAULT_PROXY),
             "deepseek_strict_tools": strict_raw in ("1", "true", "yes"),
             "deepseek_max_tool_rounds": int(
                 os.getenv("BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS", str(AgentProviderFactory.DEFAULT_MAX_TOOL_ROUNDS))
             ),
+            "deepseek_max_tool_calls": int(
+                os.getenv(
+                    "BRIDLE_DEEPSEEK_MAX_TOOL_CALLS",
+                    str(AgentProviderFactory.DEFAULT_MAX_TOOL_CALLS),
+                )
+            ),
+            "deepseek_max_wall_seconds": float(
+                os.getenv(
+                    "BRIDLE_DEEPSEEK_MAX_WALL_SECONDS",
+                    str(AgentProviderFactory.DEFAULT_MAX_WALL_SECONDS),
+                )
+            ),
+            "base_url": os.getenv("BRIDLE_AGENT_BASE_URL", ""),
+            "beta_base_url": os.getenv("BRIDLE_AGENT_BETA_BASE_URL", ""),
         }

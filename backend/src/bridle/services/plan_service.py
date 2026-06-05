@@ -60,10 +60,19 @@ class PlanService:
         """
         PlanService._validate_interface_contracts(data)
         PlanService._validate_test_commands(data)
+        complexity_validation = await PlanService._ensure_import_complexity(data)
+
+        current = await PlanService.get_current(db)
+        old_plan_id = current.id if current is not None else None
 
         await PlanService._archive_current_plan(db)
 
-        plan = PlanRecord(task_id=task_id, goal=data.goal, status="active")
+        plan = PlanRecord(
+            task_id=task_id,
+            goal=data.goal,
+            aggregate_files=[item.model_dump() for item in data.aggregate_files],
+            status="active",
+        )
         db.add(plan)
         await db.flush()
 
@@ -71,7 +80,12 @@ class PlanService:
         await db.commit()
         await db.refresh(plan)
 
-        PlanService._write_current_plan_file(data)
+        from bridle.services.complexity_negotiation_service import clear_runtime_negotiation_cache
+
+        clear_runtime_negotiation_cache(old_plan_id)
+        clear_runtime_negotiation_cache(plan.id)
+
+        await PlanService._refresh_current_plan_file(db, plan.id)
 
         return {
             "plan_id": plan.id,
@@ -80,6 +94,7 @@ class PlanService:
             "aggregate_files": [item.model_dump() for item in data.aggregate_files],
             "status": plan.status,
             "nodes": [n.model_dump() for n in nodes],
+            "complexity_validation": complexity_validation,
         }
 
     # -----------------------------------------------------------------------
@@ -101,10 +116,19 @@ class PlanService:
 
         PlanService._validate_interface_contracts(data)
         PlanService._validate_test_commands(data)
+        complexity_validation = await PlanService._ensure_import_complexity(data)
+
+        current = await PlanService.get_current(db)
+        old_plan_id = current.id if current is not None else None
 
         await PlanService._archive_current_plan(db)
 
-        plan = PlanRecord(task_id=task_id, goal=data.goal, status="active")
+        plan = PlanRecord(
+            task_id=task_id,
+            goal=data.goal,
+            aggregate_files=[item.model_dump() for item in data.aggregate_files],
+            status="active",
+        )
         db.add(plan)
         await db.flush()
 
@@ -112,7 +136,12 @@ class PlanService:
         await db.commit()
         await db.refresh(plan)
 
-        PlanService._write_current_plan_file(data)
+        from bridle.services.complexity_negotiation_service import clear_runtime_negotiation_cache
+
+        clear_runtime_negotiation_cache(old_plan_id)
+        clear_runtime_negotiation_cache(plan.id)
+
+        await PlanService._refresh_current_plan_file(db, plan.id)
 
         result = {
             "plan_id": plan.id,
@@ -124,6 +153,7 @@ class PlanService:
         }
         if summary is not None:
             result["replaced_summary"] = summary.model_dump()
+        result["complexity_validation"] = complexity_validation
         return result
 
     # -----------------------------------------------------------------------
@@ -218,22 +248,10 @@ class PlanService:
             next_order = (last_node.order + 1) if last_node else 0
 
             for i, node_data in enumerate(data.add_nodes):
-                node = NodeRecord(
-                    plan_id=current.id,
-                    plan_node_id=node_data.id,
-                    title=node_data.title,
-                    goal=node_data.goal,
-                    node_type=node_data.node_type,
-                    order=next_order + i,
-                    depends_on=node_data.depends_on,
-                    files=node_data.files,
-                    tests=node_data.tests,
-                    metrics=node_data.metrics,
-                    constraints=PlanService._pack_node_constraints(node_data),
-                    review_checks=node_data.review_checks,
-                    expected_outputs=node_data.expected_outputs,
-                    interfaces=node_data.interfaces.model_dump(),
-                    status="pending",
+                node = PlanService._node_record_from_import(
+                    current.id,
+                    next_order + i,
+                    node_data,
                 )
                 db.add(node)
 
@@ -256,6 +274,10 @@ class PlanService:
             await PlanService._validate_interfaces_for_plan(db, current.id)
 
             await db.commit()
+
+            from bridle.services.complexity_negotiation_service import clear_runtime_negotiation_cache
+
+            clear_runtime_negotiation_cache(current.id)
 
             await PlanService._refresh_current_plan_file(db, current.id)
 
@@ -349,7 +371,7 @@ class PlanService:
 
         content: dict = {
             "goal": plan.goal,
-            "aggregate_files": [],
+            "aggregate_files": plan.aggregate_files or [],
             "nodes": [
                 {
                     "id": n.plan_node_id,
@@ -400,7 +422,7 @@ class PlanService:
 
         expected = {
             "goal": plan.goal,
-            "aggregate_files": [],
+            "aggregate_files": plan.aggregate_files or [],
             "nodes": [
                 {
                     "id": n.plan_node_id,
@@ -486,6 +508,175 @@ class PlanService:
                 raise ValueError("Test command policy failed: " + "; ".join(errors))
 
     @staticmethod
+    def _validate_node_complexity(data: PlanImportSchema) -> list[dict]:
+        from bridle.engine.node_complexity_policy import validate_plan_nodes
+
+        return [item.to_dict() for item in validate_plan_nodes(data.nodes)]
+
+    @staticmethod
+    async def _ensure_import_complexity(data: PlanImportSchema) -> list[dict]:
+        from bridle.services.complexity_negotiation_service import run_import_complexity_negotiation
+
+        validations = await run_import_complexity_negotiation(data.nodes)
+        return [item.to_dict() for item in validations]
+
+    @staticmethod
+    async def renegotiate_complexity(db: AsyncSession, plan_id: str) -> dict:
+        """Run-time complexity negotiation (single round) and persist node changes."""
+        from bridle.engine.node_complexity_policy import validate_plan_nodes
+        from bridle.services.complexity_negotiation_service import (
+            ComplexityNegotiationService,
+            PlanComplexityFailedError,
+            apply_negotiation_decision,
+            get_runtime_negotiation_cache,
+            set_runtime_negotiation_cache,
+        )
+        from bridle.logging.jsonl import log_event
+
+        cached = get_runtime_negotiation_cache(plan_id)
+        if cached is not None:
+            log_event(
+                "plan_negotiation_cache_hit",
+                "completed",
+                detail={"plan_id": plan_id},
+            )
+            return cached
+
+        result = await db.execute(
+            select(NodeRecord).where(
+                NodeRecord.plan_id == plan_id,
+                NodeRecord.status != "archived",
+            )
+        )
+        records = list(result.scalars().all())
+        if not records:
+            raise ValueError("No nodes for plan")
+
+        import_nodes = [PlanService._record_to_import_schema(r) for r in records]
+        validations = validate_plan_nodes(import_nodes)
+        failing = [v for v in validations if not v.ok]
+        if not failing:
+            payload = {"plan_id": plan_id, "renegotiated": False}
+            set_runtime_negotiation_cache(plan_id, payload)
+            return payload
+
+        svc = ComplexityNegotiationService.default()
+        decision = await svc.negotiate(
+            plan_nodes=import_nodes,
+            validation_issues=failing,
+            round_index=0,
+            max_rounds=1,
+        )
+        apply_negotiation_decision(import_nodes, decision)
+        validations = validate_plan_nodes(import_nodes)
+        still_failing = [v for v in validations if not v.ok]
+        if still_failing:
+            raise PlanComplexityFailedError(
+                last_validations=still_failing,
+                rounds_used=1,
+            )
+
+        await PlanService._sync_nodes_from_import_schemas(db, plan_id, import_nodes)
+        await db.commit()
+        await PlanService._refresh_current_plan_file(db, plan_id)
+        log_event(
+            "plan_renegotiated",
+            "completed",
+            detail={"plan_id": plan_id, "action": decision.action},
+        )
+        payload = {"plan_id": plan_id, "renegotiated": True, "action": decision.action}
+        set_runtime_negotiation_cache(plan_id, payload)
+        return payload
+
+    @staticmethod
+    def _record_to_import_schema(record: NodeRecord) -> NodeImportSchema:
+        from bridle.schemas.node import NodeImportSchema, NodeInterfacesSchema
+
+        constraints, boundary = unpack_container_boundary(record.constraints)
+        policy_raw = boundary.get("container_policy") or {}
+        metrics_dict = record.metrics if isinstance(record.metrics, dict) else {}
+        estimate = (metrics_dict.get("complexity") or {}).get("estimate") or {}
+        est_min = estimate.get("estimated_minutes")
+        return NodeImportSchema(
+            id=record.plan_node_id,
+            title=record.title,
+            goal=record.goal,
+            node_type=record.node_type,  # type: ignore[arg-type]
+            depends_on=list(record.depends_on or []),
+            files=list(record.files or []),
+            tests=list(record.tests or []),
+            metrics=metrics_dict,
+            constraints=constraints,
+            review_checks=list(record.review_checks or []),
+            expected_outputs=record.expected_outputs if isinstance(record.expected_outputs, dict) else {},
+            interfaces=NodeInterfacesSchema.model_validate(record.interfaces or {}),
+            read_set=list(boundary.get("read_set") or []),
+            write_set=list(boundary.get("write_set") or []),
+            readonly_context=list(boundary.get("readonly_context") or []),
+            container_policy=ContainerPolicySchema.model_validate(policy_raw),
+            estimated_minutes=int(est_min) if est_min is not None else None,
+            acceptance_scope=estimate.get("acceptance_scope"),
+        )
+
+    @staticmethod
+    async def _sync_nodes_from_import_schemas(
+        db: AsyncSession,
+        plan_id: str,
+        import_nodes: list,
+    ) -> None:
+        """Persist negotiated nodes; skip running/completed records."""
+        protected = frozenset({"running", "completed"})
+        result = await db.execute(
+            select(NodeRecord).where(
+                NodeRecord.plan_id == plan_id,
+                NodeRecord.status != "archived",
+            )
+        )
+        existing = {n.plan_node_id: n for n in result.scalars().all()}
+        new_ids = {n.id for n in import_nodes}
+
+        for schema in import_nodes:
+            record = existing.get(schema.id)
+            if record is not None and record.status in protected:
+                continue
+            if record is None:
+                order = max((n.order for n in existing.values()), default=-1) + 1
+                db.add(PlanService._node_record_from_import(plan_id, order, schema))
+                continue
+            from bridle.engine.node_complexity_policy import validate_node_complexity
+
+            record.title = schema.title
+            record.goal = schema.goal
+            record.node_type = schema.node_type
+            record.depends_on = schema.depends_on
+            record.files = schema.files
+            record.tests = schema.tests
+            record.metrics = PlanService._merge_node_metrics(schema, validate_node_complexity(schema).to_dict())
+            record.constraints = PlanService._pack_node_constraints(schema)
+            record.review_checks = schema.review_checks
+            record.expected_outputs = schema.expected_outputs
+            record.interfaces = schema.interfaces.model_dump()
+            complexity = validate_node_complexity(schema).to_dict()
+            record.status = "pending" if complexity.get("ok") else "blocked"
+
+        for plan_node_id, record in existing.items():
+            if plan_node_id in new_ids:
+                continue
+            if record.status in protected:
+                continue
+            if record.status in ("blocked", "pending"):
+                record.status = "archived"
+
+    @staticmethod
+    def _merge_node_metrics(node_data, complexity: dict) -> dict | list:
+        if isinstance(node_data.metrics, dict):
+            metrics = dict(node_data.metrics)
+        else:
+            metrics = {}
+        metrics["complexity"] = complexity
+        return metrics
+
+    @staticmethod
     def _validate_interface_contracts(data: PlanImportSchema) -> None:
         """Validate interface contracts across all nodes in an import/replace payload.
 
@@ -543,27 +734,35 @@ class PlanService:
         """
         nodes: list[NodeReadSchema] = []
         for i, node_data in enumerate(data.nodes):
-            node = NodeRecord(
-                plan_id=plan_id,
-                plan_node_id=node_data.id,
-                title=node_data.title,
-                goal=node_data.goal,
-                node_type=node_data.node_type,
-                order=i,
-                depends_on=node_data.depends_on,
-                files=node_data.files,
-                tests=node_data.tests,
-                metrics=node_data.metrics,
-                constraints=PlanService._pack_node_constraints(node_data),
-                review_checks=node_data.review_checks,
-                expected_outputs=node_data.expected_outputs,
-                interfaces=node_data.interfaces.model_dump(),
-                status="pending",
-            )
+            node = PlanService._node_record_from_import(plan_id, i, node_data)
             db.add(node)
             await db.flush()
             nodes.append(NodeReadSchema.model_validate(node))
         return nodes
+
+    @staticmethod
+    def _node_record_from_import(plan_id: str, order: int, node_data) -> NodeRecord:
+        from bridle.engine.node_complexity_policy import validate_node_complexity
+
+        complexity = validate_node_complexity(node_data).to_dict()
+        node_status = "pending" if complexity.get("ok") else "blocked"
+        return NodeRecord(
+            plan_id=plan_id,
+            plan_node_id=node_data.id,
+            title=node_data.title,
+            goal=node_data.goal,
+            node_type=node_data.node_type,
+            order=order,
+            depends_on=node_data.depends_on,
+            files=node_data.files,
+            tests=node_data.tests,
+            metrics=PlanService._merge_node_metrics(node_data, complexity),
+            constraints=PlanService._pack_node_constraints(node_data),
+            review_checks=node_data.review_checks,
+            expected_outputs=node_data.expected_outputs,
+            interfaces=node_data.interfaces.model_dump(),
+            status=node_status,
+        )
 
     @staticmethod
     def _check_node_validity(node: NodeRecord) -> str | None:
@@ -571,6 +770,8 @@ class PlanService:
 
         Returns a blocking reason string if invalid, None if valid.
         """
+        if node.node_type == "micro":
+            return None
         if not node.tests:
             return "Missing test definitions after type change"
         if not node.constraints:
@@ -720,7 +921,7 @@ class PlanService:
             "plan_id": plan.id,
             "task_id": plan.task_id,
             "goal": plan.goal,
-            "aggregate_files": [],
+            "aggregate_files": plan.aggregate_files or [],
             "status": plan.status,
             "nodes": [n.model_dump() for n in nodes],
         }

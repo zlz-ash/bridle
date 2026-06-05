@@ -21,8 +21,15 @@ class AgentCodingSessionRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    chat_messages: Mapped[list["ChatMessageRecord"]] = relationship(
+        "ChatMessageRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
 
 
 from bridle.models.node_agent_run import NodeAgentRunRecord  # noqa: E402
+from bridle.models.chat_message import ChatMessageRecord  # noqa: E402
 
 NodeAgentRunRecord
+ChatMessageRecord

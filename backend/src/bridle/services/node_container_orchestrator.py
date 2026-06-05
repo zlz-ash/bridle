@@ -8,6 +8,7 @@ from typing import Any
 from bridle.engine.container_orchestrator import ContainerOrchestrator, _OrchestrationError
 from bridle.engine.container_runner import ContainerMount, ContainerRequest, ContainerRunner
 from bridle.engine.container_runner_factory import resolve_container_runner
+from bridle.services.container_agent_env import build_agent_container_env
 
 logger = logging.getLogger("bridle")
 
@@ -40,10 +41,11 @@ class NodeContainerOrchestrator:
         mount_root = workspace_root.resolve()
         diag_dir = mount_root / "diagnostics"
 
+        env = build_agent_container_env(run_id=run_id, node_id=node_id)
         request = ContainerRequest(
             name=f"node-agent-{run_id}",
             image="bridle-node-agent:local",
-            network_mode="none",
+            network_mode="bridge",
             mounts=[
                 ContainerMount(
                     source=mount_root,
@@ -51,13 +53,11 @@ class NodeContainerOrchestrator:
                     readonly=False,
                 )
             ],
-            environment={
-                "BRIDLE_RUN_ID": run_id,
-                "BRIDLE_NODE_ID": node_id,
-            },
+            environment=env,
             command=["bridle-node-agent"],
             role="node",
             allowed_mount_roots=[str(mount_root)],
+            extra_hosts=["host.docker.internal:host-gateway"],
         )
 
         try:

@@ -8,7 +8,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Node types as Literal for strict JSON validation
-NodeTypeLiteral = Literal["code_change", "test_validation", "metric_validation", "review_gate"]
+NodeTypeLiteral = Literal[
+    "code_change",
+    "test_validation",
+    "metric_validation",
+    "review_gate",
+    "micro",
+]
 
 NodeStatusLiteral = Literal[
     "pending",
@@ -27,6 +33,38 @@ NodeStatusLiteral = Literal[
 ContainerNetworkModeLiteral = Literal["bridge", "none"]
 CONTAINER_BOUNDARY_KEY = "__container_boundary__"
 ORIGINAL_CONSTRAINTS_KEY = "__original_constraints__"
+
+# LLM-generated plans often emit ``null`` for optional fields instead of omitting
+# them; treat ``null`` as "not present" so default_factory kicks in.
+_NULLABLE_OPTIONAL_FIELDS = frozenset(
+    [
+        "depends_on",
+        "files",
+        "tests",
+        "metrics",
+        "constraints",
+        "review_checks",
+        "expected_outputs",
+        "interfaces",
+        "read_set",
+        "write_set",
+        "readonly_context",
+        "conflict_contributions",
+        "container_policy",
+    ]
+)
+
+# Fields whose schema type is ``dict | list`` but LLMs sometimes emit a free-form
+# string description; wrap such strings into ``{"description": value}``.
+_DICT_OR_LIST_FIELDS = frozenset(
+    ["metrics", "constraints", "expected_outputs"]
+)
+
+# Fields whose schema type is ``list[str]`` but LLMs sometimes emit a single
+# string; wrap into a singleton list.
+_LIST_OF_STR_FIELDS = frozenset(
+    ["depends_on", "files", "tests", "review_checks", "read_set", "write_set", "readonly_context"]
+)
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 
@@ -231,6 +269,26 @@ class NodeImportSchema(BaseModel):
     readonly_context: list[str] = Field(default_factory=list)
     conflict_contributions: list[AggregateContributionSchema] = Field(default_factory=list)
     container_policy: ContainerPolicySchema = Field(default_factory=ContainerPolicySchema)
+    estimated_minutes: int | None = Field(default=None, ge=1, le=600)
+    acceptance_scope: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_llm_optional_fields(cls, data):
+        if not isinstance(data, dict):
+            return data
+        cleaned: dict = {}
+        for key, value in data.items():
+            if key in _NULLABLE_OPTIONAL_FIELDS and value is None:
+                continue  # let default_factory provide the empty container
+            if key in _DICT_OR_LIST_FIELDS and isinstance(value, str):
+                cleaned[key] = {"description": value}
+                continue
+            if key in _LIST_OF_STR_FIELDS and isinstance(value, str):
+                cleaned[key] = [value]
+                continue
+            cleaned[key] = value
+        return cleaned
 
     @model_validator(mode="after")
     def _validate_container_paths(self) -> NodeImportSchema:

@@ -225,6 +225,12 @@ class GitCheckpointService:
         return new_revision
 
     def _git_available(self) -> bool:
+        git_path = self.workspace_root / ".git"
+        if git_path.is_dir() and (
+            not (git_path / "objects").is_dir()
+            or not (git_path / "config").is_file()
+        ):
+            return False
         try:
             result = subprocess.run(
                 ["git", "-C", str(self.workspace_root), "rev-parse", "--is-inside-work-tree"],
@@ -237,9 +243,17 @@ class GitCheckpointService:
             return False
 
     def _write_fake_head(self, revision: str) -> None:
-        git_dir = self.workspace_root / ".git" / "refs" / "heads"
-        git_dir.mkdir(parents=True, exist_ok=True)
-        (git_dir / "main").write_text(revision + "\n", encoding="utf-8")
+        git_path = self.workspace_root / ".git"
+        head_path = git_path / "HEAD"
+        if head_path.is_file():
+            head = head_path.read_text(encoding="utf-8").strip()
+            if head.startswith("ref: "):
+                ref_path = git_path / head.split("ref: ", 1)[1]
+                ref_path.parent.mkdir(parents=True, exist_ok=True)
+                ref_path.write_text(revision + "\n", encoding="utf-8")
+                return
+        git_path.mkdir(parents=True, exist_ok=True)
+        head_path.write_text(revision + "\n", encoding="utf-8")
 
     def _state_path(self, session_id: str) -> Path:
         self._state_root.mkdir(parents=True, exist_ok=True)

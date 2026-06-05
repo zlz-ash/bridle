@@ -1,0 +1,33 @@
+{
+  "id": "testing",
+  "name": "Testing diagnostics",
+  "description": "Classify test failures and guide fixes for implementation, tests, or environment.",
+  "when_to_use": "When the node runs tests, fixes failing tests, or configures test layout.",
+  "evidence_requirements": ["test stdout/stderr summary", "failure classification"],
+  "submodules": {
+    "testing.python": {
+      "description": "Python pytest layout, imports, fixtures, and isolation.",
+      "prompt_fragments": [
+        "Prefer pytest with tests/ and src/ layout; add conftest.py for sys.path when needed.",
+        "Use tmp_path/fixtures for state isolation; do not leak module-level globals between tests.",
+        "For import/collection errors, fix PYTHONPATH/conftest before changing business logic."
+      ]
+    },
+    "testing.java": {
+      "description": "JUnit, Maven/Gradle, Spring test profiles.",
+      "prompt_fragments": [
+        "Use JUnit 5; configure Maven Surefire or Gradle test task.",
+        "For Spring, prefer @SpringBootTest with test profile and application-test.properties.",
+        "Use @Transactional or test containers for DB isolation when applicable."
+      ]
+    },
+    "testing.general": {
+      "description": "Oracle design, assertions, command policy, and failure taxonomy.",
+      "prompt_fragments": [
+        "Classify failures: import/collection, assertion, state leakage, command policy rejected.",
+        "Do not weaken assertions or delete test bodies to force green builds.",
+        "Run only allowlisted test commands; request access before new commands."
+      ]
+    }
+  }
+}

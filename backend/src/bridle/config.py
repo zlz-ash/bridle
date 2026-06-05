@@ -94,9 +94,17 @@ def set_workspace(workspace: str | Path) -> WorkspaceConfig:
 def get_config() -> WorkspaceConfig:
     """Get the global workspace configuration.
 
-    Raises RuntimeError if set_workspace() has not been called.
+    Falls back to BRIDLE_WORKSPACE env var so uvicorn reload-forked workers
+    can recover the workspace set by the parent CLI process.
+    Raises RuntimeError if neither is available.
     """
+    global _global_config
     if _global_config is None:
+        import os
+        env_workspace = os.environ.get("BRIDLE_WORKSPACE")
+        if env_workspace:
+            _global_config = WorkspaceConfig(env_workspace)
+            return _global_config
         raise RuntimeError(
             "Workspace not configured. Call set_workspace() or use --workspace."
         )

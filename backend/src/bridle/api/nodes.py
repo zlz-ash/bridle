@@ -121,6 +121,26 @@ async def run_node(node_id: str, db: AsyncSession = Depends(get_db)) -> dict:
     return {"run_id": run.id, "node_id": node_id, "status": node_record.status}
 
 
+@router.get("/nodes/{node_id}/runs/latest")
+async def get_node_latest_run(node_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    from bridle.api.errors import BridleError, NotFoundError
+    from bridle.services.node_agent_run_service import NodeAgentRunService
+
+    latest = await NodeAgentRunService.get_latest_for_node(db, node_id)
+    if latest is None:
+        node = await NodeService.get_by_id(db, node_id)
+        if node is None:
+            raise NotFoundError(resource="node", message="Node not found")
+        raise BridleError(
+            code="no_run_for_node",
+            message="No agent run found for node",
+            status_code=404,
+            resource="node_agent_run",
+            details={"node_id": node_id},
+        )
+    return latest.model_dump()
+
+
 @router.get("/nodes/{node_id}/runs")
 async def get_node_runs(node_id: str, db: AsyncSession = Depends(get_db)) -> list[dict]:
     from bridle.services.node_agent_run_service import NodeAgentRunService

@@ -13,6 +13,52 @@ from bridle.logging.jsonl import log_event
 from bridle.schemas.proposal import AgentContext
 
 
+def classify_tool_error(error_code: str, raw: dict[str, Any] | None = None) -> tuple[str, bool]:
+    _ARGUMENT_ERRORS = frozenset({
+        "invalid_tool_arguments",
+        "unknown_tool",
+        "InvalidChangeType",
+        "InvalidDiff",
+    })
+    _POLICY_ERRORS = frozenset({
+        "PathBoundaryError",
+        "CommandPolicyError",
+        "NetworkDisabled",
+        "FileNotFound",
+        "PatchApplyError",
+        "AccessRequestRequired",
+    })
+    _TIMEOUT_ERRORS = frozenset({
+        "TestCommandTimeout",
+        "WebSearchTimeout",
+    })
+    _TEST_FAILURE_ERRORS = frozenset({
+        "TestCommandFailed",
+    })
+    _EXTERNAL_ERRORS = frozenset({
+        "WebSearchError",
+    })
+    if error_code in _ARGUMENT_ERRORS:
+        return "argument", False
+    if error_code in _POLICY_ERRORS:
+        return "policy", False
+    if error_code in _TIMEOUT_ERRORS:
+        return "runtime_timeout", True
+    if error_code in _TEST_FAILURE_ERRORS:
+        return "test_failure", True
+    if error_code in _EXTERNAL_ERRORS:
+        return "external", True
+    if raw and raw.get("timed_out"):
+        return "runtime_timeout", True
+    if raw and raw.get("results"):
+        for r in raw.get("results", []):
+            if r.get("policy_rejected"):
+                return "policy", False
+            if r.get("timed_out"):
+                return "runtime_timeout", True
+    return "runtime", True
+
+
 class AgentToolRegistry:
     """Execute registered tools through sandbox policy."""
 
@@ -29,27 +75,42 @@ class AgentToolRegistry:
         ),
         ToolDescriptor(
             name="propose_file_patch",
-            purpose="Propose a patch for an allowed file without writing to disk.",
+            purpose=(
+                "Propose a patch for an allowed file and apply it to the controlled sandbox workspace."
+            ),
             when_to_use=(
-                "When you have decided what changes to make to a file and want to record them as a diff."
+                "When you have decided what changes to make and need them in the sandbox "
+                "before calling run_allowed_tests to verify the patch."
             ),
             input_summary="path: string, change_type: string (modify|add|remove), diff: string — unified diff.",
-            output_summary="Confirmation of the proposed patch with status, or an error if the path is not allowed.",
+            output_summary=(
+                "On success: patch staged and applied in the sandbox (patch_applied, applied_path, "
+                "sandbox_inputs). On failure: validation or PatchApplyError details."
+            ),
             constraints=(
                 "Can only patch files listed in allowed_files. "
-                "Does not write to disk. Diff must be valid unified format."
+                "After path, permission, and diff validation, writes the patch into the sandbox "
+                "workspace so allowed tests can run against the updated files. "
+                "Does not write to production or final output directories; the runner persists "
+                "approved output separately. Diff must be valid unified format."
             ),
         ),
         ToolDescriptor(
             name="run_allowed_tests",
-            purpose="Run test commands from the node allowlist via sandbox policy.",
-            when_to_use=(
-                "When you have proposed patches and want to verify them by running the allowed test commands."
+            purpose=(
+                "Run exact allowlisted test commands in the sandbox workspace root (no cd required)."
             ),
-            input_summary="commands: array of strings — test commands to execute.",
-            output_summary="Test execution results including pass/fail status for each command.",
+            when_to_use=(
+                "After proposing patches, rerun the same test commands from context.tests to verify fixes. "
+                "Do not wrap commands with cd, &&, or absolute paths."
+            ),
+            input_summary="commands: array of strings — must match node.tests allowlist verbatim.",
+            output_summary="Per-command exit_code, stdout/stderr previews, timeout, or policy rejection details.",
             constraints=(
-                "Can only run commands listed in the node's tests allowlist. Commands run in sandbox with timeout."
+                "Commands execute automatically at the sandbox workspace root. "
+                "Only pass commands exactly as listed in the node's tests allowlist—no extra arguments, "
+                "no cd/chdir, no && or shell chaining, and no absolute paths. "
+                "If tests fail, read files or patch code, then rerun the same allowlisted command verbatim."
             ),
         ),
         ToolDescriptor(
@@ -76,6 +137,50 @@ class AgentToolRegistry:
             ),
             reserved=True,
         ),
+        ToolDescriptor(
+            name="grep_code",
+            purpose="Search for text patterns in allowed source files within the node boundary.",
+            when_to_use=(
+                "When you need to locate code, functions, or text patterns "
+                "but don't know which file contains them."
+            ),
+            input_summary=(
+                "query: string — search pattern. path_glob: string — optional file filter. "
+                "case_sensitive: boolean. max_results: integer."
+            ),
+            output_summary=(
+                "List of matches with file path, line number, and preview. "
+                "Does not return full file content."
+            ),
+            constraints=(
+                "Can only search files in allowed_files. Does not bypass node boundary. "
+                "Results do not auto-authorize patches."
+            ),
+        ),
+        ToolDescriptor(
+            name="web_search",
+            purpose=(
+                "Search the web for documentation, error explanations, "
+                "or reference material when local files are insufficient."
+            ),
+            when_to_use=(
+                "When you need official docs, error explanations, "
+                "or reference material not available in allowed files."
+            ),
+            input_summary=(
+                "query: string — search query. "
+                "allowed_domains: array of strings — restrict to these domains. "
+                "max_results: integer — max results (default 5, max 10)."
+            ),
+            output_summary=(
+                "List of search results with title, URL, snippet, and source domain. "
+                "Requires network_allowed policy."
+            ),
+            constraints=(
+                "Only available when network_allowed is enabled in sandbox policy. "
+                "Returns NetworkDisabled otherwise. Does not bypass sandbox boundaries."
+            ),
+        ),
     ]
 
     def __init__(self, executor: SandboxedToolExecutor) -> None:
@@ -93,6 +198,7 @@ class AgentToolRegistry:
             allowed_files=list(snap.get("allowed_files") or context.allowed_files),
             node_tests=allowed_tests,
             command_timeout_seconds=int(snap.get("command_timeout_seconds", 60)),
+            network_allowed=bool(snap.get("network_allowed", False)),
         )
         return cls(SandboxedToolExecutor(policy))
 
@@ -116,11 +222,12 @@ class AgentToolRegistry:
         )
 
         if tool_name not in V1_TOOL_NAMES:
-            result = {
+            raw = {
                 "status": "failed",
                 "error_code": "unknown_tool",
                 "message": f"Tool '{tool_name}' is not registered",
             }
+            result = self._normalize_tool_result(raw)
             self._log_tool_done(tool_name, tool_call_id, result)
             return result
 
@@ -159,6 +266,30 @@ class AgentToolRegistry:
                 if evidence is not None and not isinstance(evidence, dict):
                     raise ValueError("evidence must be an object")
                 raw = await self._executor.report_blocked(reason.strip(), evidence)
+            elif tool_name == "grep_code":
+                query = arguments.get("query")
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError("query is required")
+                path_glob = arguments.get("path_glob")
+                case_sensitive = arguments.get("case_sensitive", False)
+                max_results = arguments.get("max_results", 20)
+                raw = await self._executor.grep_code(
+                    query.strip(),
+                    path_glob=path_glob,
+                    case_sensitive=bool(case_sensitive),
+                    max_results=int(max_results),
+                )
+            elif tool_name == "web_search":
+                query = arguments.get("query")
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError("query is required")
+                allowed_domains = arguments.get("allowed_domains")
+                max_results = arguments.get("max_results", 5)
+                raw = await self._executor.web_search(
+                    query.strip(),
+                    allowed_domains=allowed_domains,
+                    max_results=int(max_results),
+                )
             else:
                 raw = {"status": "failed", "error_code": "unknown_tool"}
         except (ValueError, TypeError) as exc:
@@ -191,6 +322,30 @@ class AgentToolRegistry:
             out["errors"] = raw["errors"]
         if raw.get("message"):
             out["message"] = raw["message"]
+        if raw.get("tool_name"):
+            out["tool_name"] = raw["tool_name"]
+        if raw.get("duration_ms") is not None:
+            out["duration_ms"] = raw["duration_ms"]
+        if status == "failed":
+            error_code = raw.get("error_code", "")
+            category, retryable = classify_tool_error(error_code, raw)
+            out["category"] = category
+            if "retryable" in raw:
+                out["retryable"] = raw["retryable"]
+            else:
+                out["retryable"] = retryable
+            if raw.get("next_action"):
+                out["next_action"] = raw["next_action"]
+            if raw.get("results"):
+                out["results"] = raw["results"]
+            if raw.get("timed_out") is not None:
+                out["timed_out"] = raw["timed_out"]
+            if raw.get("exit_code") is not None:
+                out["exit_code"] = raw["exit_code"]
+            if raw.get("policy_rejected") is not None:
+                out["policy_rejected"] = raw["policy_rejected"]
+            if "access_request" in raw:
+                out["access_request"] = raw["access_request"]
         if status == "completed":
             if "content" in raw:
                 out["content"] = raw["content"]
@@ -200,7 +355,33 @@ class AgentToolRegistry:
                 out["results"] = raw["results"]
             if "reason" in raw:
                 out["reason"] = raw["reason"]
+            if "matches" in raw:
+                out["matches"] = raw["matches"]
+            if "total_matches" in raw:
+                out["total_matches"] = raw["total_matches"]
+            if "truncated" in raw:
+                out["truncated"] = raw["truncated"]
+            if "search_results" in raw:
+                out["search_results"] = raw["search_results"]
+            if "dry_run" in raw:
+                out["dry_run"] = raw["dry_run"]
+            for key in (
+                "patch_staged",
+                "patch_applied",
+                "applied_path",
+                "sandbox_workspace",
+                "sandbox_inputs",
+            ):
+                if key in raw:
+                    out[key] = raw[key]
+            if "access_request" in raw:
+                out["access_request"] = raw["access_request"]
+            out["category"] = "success"
+            out["retryable"] = False
         return out
+
+    def drain_access_records(self) -> list[dict[str, Any]]:
+        return self._executor.consume_access_records()
 
     def _log_tool_done(self, tool_name: str, tool_call_id: str, result: dict[str, Any]) -> None:
         status = result.get("status", "failed")
@@ -214,5 +395,7 @@ class AgentToolRegistry:
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
                 "error_code": result.get("error_code"),
+                "category": result.get("category"),
+                "retryable": result.get("retryable"),
             },
         )
