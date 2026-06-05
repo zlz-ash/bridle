@@ -5,6 +5,8 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from tests.plan_helpers import ensure_plan_payload
+
 
 def _make_plan_payload(**overrides) -> dict:
     """Build a minimal plan import payload (without task_id/task_title)."""
@@ -77,6 +79,39 @@ class TestPlanImportAPI:
         assert "plan_id" in data
         assert len(data["nodes"]) == 1
         assert data["task_id"] == task_id
+        assert "complexity_validation" in data
+
+    async def test_import_plan_too_granular_triggers_negotiation_then_succeeds(
+        self, client: AsyncClient
+    ) -> None:
+        """estimated_minutes below min triggers stubbed negotiation; import ends pending."""
+        task_resp = await client.post("/api/v1/tasks", json={"title": "Granular Plan"})
+        task_id = task_resp.json()["id"]
+        plan = _make_plan_payload(
+            nodes=[
+                {
+                    "id": "n-small",
+                    "title": "Small step",
+                    "goal": "Implement with clear acceptance criteria for reviewers",
+                    "node_type": "code_change",
+                    "depends_on": [],
+                    "files": ["src/a.py"],
+                    "tests": ["pytest"],
+                    "metrics": {},
+                    "constraints": {"c": True},
+                    "review_checks": [],
+                    "expected_outputs": {},
+                    "estimated_minutes": 15,
+                }
+            ],
+        )
+        resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        assert resp.status_code == 200
+        data = resp.json()
+        validation = {item["node_id"]: item for item in data["complexity_validation"]}
+        assert validation["n-small"]["ok"] is True
+        node = next(n for n in data["nodes"] if n["plan_node_id"] == "n-small")
+        assert node["status"] == "pending"
 
     async def test_import_plan_invalid_dep(self, client: AsyncClient) -> None:
         task_resp = await client.post("/api/v1/tasks", json={"title": "Bad Plan"})
@@ -164,7 +199,7 @@ class TestPlanImportAPI:
                 },
             ],
         }
-        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
 
         resp = await client.get(f"/api/v1/tasks/{task_id}/graph")
         assert resp.status_code == 200

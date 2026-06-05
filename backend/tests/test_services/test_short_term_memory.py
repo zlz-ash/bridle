@@ -452,6 +452,53 @@ class TestToolSummaryFieldsPreservedUnderSmallBudget:
                 assert "error_code=" in content
 
 
+class TestToolResultSummarizerCategoryRetryable:
+    def test_failed_result_preserves_category_and_retryable(self) -> None:
+        raw = json.dumps({
+            "status": "failed",
+            "error_code": "PathBoundaryError",
+            "category": "policy",
+            "retryable": False,
+        })
+        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        assert summary["category"] == "policy"
+        assert summary["retryable"] is False
+
+    def test_completed_result_preserves_category(self) -> None:
+        raw = json.dumps({
+            "status": "completed",
+            "category": "success",
+            "retryable": False,
+            "content": "x" * 500,
+        })
+        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        assert summary["category"] == "success"
+        assert summary["retryable"] is False
+
+    def test_format_summary_includes_category_and_retryable(self) -> None:
+        raw = json.dumps({
+            "status": "failed",
+            "error_code": "PathBoundaryError",
+            "category": "policy",
+            "retryable": False,
+        })
+        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        formatted = ToolResultSummarizer.format_summary(summary)
+        assert "category=policy" in formatted
+        assert "retryable=False" in formatted
+
+    def test_timeout_category_preserved_in_summary(self) -> None:
+        raw = json.dumps({
+            "status": "failed",
+            "error_code": "TestCommandTimeout",
+            "category": "runtime_timeout",
+            "retryable": True,
+        })
+        summary = ToolResultSummarizer.summarize("run_allowed_tests", raw)
+        assert summary["category"] == "runtime_timeout"
+        assert summary["retryable"] is True
+
+
 class TestAtLeastOneToolSummaryRetained:
     def test_tiny_budget_still_retains_one_tool_summary(self) -> None:
         mem = ShortTermMemory(budget=80, recent_window=4)

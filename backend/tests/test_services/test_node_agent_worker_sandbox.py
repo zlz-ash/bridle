@@ -269,7 +269,7 @@ async def test_worker_fails_on_command_policy_error(
     monkeypatch.setattr(NodeAgentWorkerService, "build_context", build_with_empty_allowlist)
     monkeypatch.setattr(
         "bridle.services.node_agent_worker.AgentProviderFactory.create",
-        lambda context=None: BadTestsProvider(),
+        lambda context=None, *, budget_override=None: BadTestsProvider(),
     )
 
     task_resp = await client.post("/api/v1/tasks", json={"title": "Cmd Policy Fail"})

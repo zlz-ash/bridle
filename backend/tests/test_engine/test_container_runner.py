@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -143,6 +144,37 @@ class TestFakeContainerRunner:
 
         with pytest.raises(KeyError, match="missing"):
             runner.collect_logs("missing")
+
+    def test_inspect_without_in_memory_uses_docker(self, test_workspace: Path) -> None:
+        runner = LocalContainerRuntimeRunner(
+            workspace_root=test_workspace,
+            executable="docker",
+            use_docker=True,
+        )
+        mock_result = MagicMock(returncode=0, stdout="running|/main-agent-s1|bridge\n")
+        runner._run_command = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+
+        inspected = runner.inspect("orphan-container-id")
+
+        assert inspected.status == "running"
+        assert inspected.health == "healthy"
+        assert inspected.name == "main-agent-s1"
+        runner._run_command.assert_called_once()
+        assert "inspect" in runner._run_command.call_args[0][0]
+
+    def test_inspect_missing_container_returns_missing_health(self, test_workspace: Path) -> None:
+        runner = LocalContainerRuntimeRunner(
+            workspace_root=test_workspace,
+            executable="docker",
+            use_docker=True,
+        )
+        mock_result = MagicMock(returncode=1, stdout="", stderr="No such object")
+        runner._run_command = MagicMock(return_value=mock_result)  # type: ignore[method-assign]
+
+        inspected = runner.inspect("gone-container-id")
+
+        assert inspected.health == "missing"
+        assert inspected.status == "failed"
 
 
 class TestNodeMountAllowlist:

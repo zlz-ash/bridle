@@ -24,24 +24,29 @@ class TestTestCommandPolicy:
     def test_rejects_powershell(self) -> None:
         assert TestCommandPolicy.validate("powershell -Command echo hi") != []
 
-    def test_rejects_c_drive_path(self) -> None:
-        errors = TestCommandPolicy.validate("pytest C:\\Windows\\temp")
-        assert any("C:" in e for e in errors)
+    def test_allows_c_drive_path(self) -> None:
+        assert TestCommandPolicy.validate("pytest C:\\Windows\\temp") == []
 
-    def test_rejects_c_drive_even_with_workspace_path(self) -> None:
-        errors = TestCommandPolicy.validate("pytest C:\\Temp D:\\Bridle\\backend\\tests")
-        assert any("C:" in e for e in errors)
+    def test_allows_e_drive_path(self) -> None:
+        assert TestCommandPolicy.validate("pytest E:\\tmp") == []
+
+    def test_allows_path_outside_workspace(self) -> None:
+        assert TestCommandPolicy.validate("pytest D:\\Other\\tests") == []
 
     def test_allows_bridle_subpath(self) -> None:
         assert TestCommandPolicy.validate(r"pytest D:\Bridle\backend\tests") == []
 
-    def test_rejects_path_outside_workspace_on_d_drive(self) -> None:
-        errors = TestCommandPolicy.validate("pytest D:\\Other\\tests")
-        assert errors
+    def test_still_rejects_rm(self) -> None:
+        assert TestCommandPolicy.validate("rm -rf /") != []
 
-    def test_rejects_e_drive_path(self) -> None:
-        errors = TestCommandPolicy.validate("pytest E:\\tmp")
-        assert errors
+    def test_still_rejects_powershell(self) -> None:
+        assert TestCommandPolicy.validate("powershell -Command echo hi") != []
+
+    def test_still_rejects_npm_install(self) -> None:
+        assert TestCommandPolicy.validate("npm install lodash") != []
+
+    def test_still_rejects_curl(self) -> None:
+        assert TestCommandPolicy.validate("curl http://example.com") != []
 
     def test_rejects_npm_install(self) -> None:
         assert TestCommandPolicy.validate("npm install lodash") != []
