@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bridle.config import get_config
 from bridle.engine.agent_provider import AgentProviderFactory
 from bridle.engine.container_workspace import ContainerWorkspaceBuilder
+from bridle.engine.budget_replan import build_replan_decision, redact_budget_payload
 from bridle.engine.deepseek_agent_provider import DeepSeekProviderError
 from bridle.engine.sandbox_policy import SandboxPolicy
 from bridle.engine.proposal_path_validator import ProposalPathValidator
@@ -32,6 +33,7 @@ from bridle.services.container_output_simulator import ContainerOutputSimulator
 from bridle.services.node_container_orchestrator import NodeContainerError, NodeContainerOrchestrator
 from bridle.engine.aggregate_plan import load_aggregate_strategies
 from bridle.services.node_output_integration_service import NodeOutputIntegrationService
+from bridle.services.worker_context_dumper import WorkerContextDumper
 from bridle.services.node_service import NodeService
 from bridle.utils.datetime_util import utc_now_naive
 
@@ -75,6 +77,7 @@ class NodeAgentWorkerService:
         run.status = "running"
         run.phase = "planning"
         run.last_heartbeat_at = utc_now_naive()
+        await NodeAgentRunService._set_node_status(db, run.node_id, "running")
         await db.commit()
 
         try:
@@ -104,14 +107,27 @@ class NodeAgentWorkerService:
             await NodeAgentWorkerService._fail_run(db, run, "timed_out", "timeout")
             log_event("node_agent_worker_provider_failed", "failed", run_id=run_id, detail={"error_code": "timeout"})
         except DeepSeekProviderError as exc:
-            status = NodeAgentWorkerService._status_for_deepseek_error(exc.error_code)
-            await NodeAgentWorkerService._fail_run(db, run, status, exc.error_code)
-            log_event(
-                "node_agent_worker_provider_failed",
-                "failed",
-                run_id=run_id,
-                detail={"error_code": exc.error_code, "provider": "deepseek"},
-            )
+            if exc.error_code == "tool_budget_exhausted":
+                await NodeAgentWorkerService._fail_run_budget_exhausted(db, run, exc)
+                log_event(
+                    "node_agent_worker_budget_exhausted",
+                    "failed",
+                    run_id=run_id,
+                    detail={
+                        "error_code": exc.error_code,
+                        "budget_type": (exc.response_debug.get("budget") or {}).get("type"),
+                        "needs_replan": exc.response_debug.get("needs_replan"),
+                    },
+                )
+            else:
+                status = NodeAgentWorkerService._status_for_deepseek_error(exc.error_code)
+                await NodeAgentWorkerService._fail_run(db, run, status, exc.error_code)
+                log_event(
+                    "node_agent_worker_provider_failed",
+                    "failed",
+                    run_id=run_id,
+                    detail={"error_code": exc.error_code, "provider": "deepseek"},
+                )
         except _ProposalValidationError as exc:
             await NodeAgentWorkerService._fail_run(db, run, "failed", exc.error_code)
             log_event("node_agent_worker_failed", "failed", run_id=run_id, detail={"error_code": exc.error_code})
@@ -133,9 +149,15 @@ class NodeAgentWorkerService:
         boundary = NodeAgentWorkerService._node_boundary(node)
         allowed_files = boundary["write_set"]
 
-        accessible_context = await NodeService.get_accessible_context(db, node.id)
-        child_agent_results = await NodeAgentWorkerService._build_child_agent_results(db, node)
         node_tests = node.tests if isinstance(node.tests, list) else []
+        accessible_context = await NodeService.get_accessible_context(db, node.id)
+        accessible_context = NodeAgentWorkerService._enrich_accessible_context(
+            accessible_context,
+            run_id=run_id,
+            node=node,
+            node_tests=node_tests,
+        )
+        child_agent_results = await NodeAgentWorkerService._build_child_agent_results(db, node)
         sandbox_policy = SandboxPolicy.for_run(
             run_id=run_id,
             node_id=node.id,
@@ -212,8 +234,32 @@ class NodeAgentWorkerService:
         return record.id
 
     @staticmethod
-    async def _call_provider(ctx: AgentContext, run: NodeAgentRunRecord) -> AgentProposalSchema:
-        provider = AgentProviderFactory.create(context=ctx)
+    async def _call_provider(
+        ctx: AgentContext,
+        run: NodeAgentRunRecord,
+        node: NodeRecord | None = None,
+    ) -> AgentProposalSchema:
+        from bridle.engine.tool_budget import budget_for_node_minutes
+
+        estimated_minutes: int | None = None
+        if node is not None:
+            metrics = node.metrics if isinstance(node.metrics, dict) else {}
+            estimate = (metrics.get("complexity") or {}).get("estimate") or {}
+            raw = estimate.get("estimated_minutes")
+            if raw is not None:
+                try:
+                    estimated_minutes = int(raw)
+                except (TypeError, ValueError):
+                    estimated_minutes = None
+        budget = budget_for_node_minutes(estimated_minutes)
+        log_event(
+            "node_agent_worker_budget_resolved",
+            "started",
+            run_id=run.id,
+            node_id=run.node_id,
+            detail={"estimated_minutes": estimated_minutes, "budget": budget},
+        )
+        provider = AgentProviderFactory.create(context=ctx, budget_override=budget)
         cfg = AgentProviderFactory.get_config()
         timeout = float(cfg["timeout_seconds"])
         log_event(
@@ -264,12 +310,12 @@ class NodeAgentWorkerService:
         node: NodeRecord,
         proposal: AgentProposalSchema,
     ) -> dict | None:
-        commands = [str(c).strip() for c in proposal.tests_to_run if str(c).strip()]
+        node_tests = node.tests if isinstance(node.tests, list) else []
+        commands = [str(c).strip() for c in node_tests if str(c).strip()]
         if not commands:
             return None
 
         allowed_files = NodeAgentWorkerService._node_boundary(node)["write_set"]
-        node_tests = node.tests if isinstance(node.tests, list) else []
         policy = SandboxPolicy.for_run(
             run_id=run_id,
             node_id=node_id,
@@ -304,6 +350,57 @@ class NodeAgentWorkerService:
             "conflict_contributions": list(boundary.get("conflict_contributions") or []),
             "container_policy": dict(boundary.get("container_policy") or {}),
         }
+
+    @staticmethod
+    def _enrich_accessible_context(
+        accessible_context: dict,
+        *,
+        run_id: str,
+        node: NodeRecord,
+        node_tests: list,
+    ) -> dict:
+        from bridle.engine.constraint_metadata_cache import ConstraintMetadataCache
+        from bridle.engine.skill_registry import build_skill_guidance_for_task, detect_env_layout
+        from bridle.services.master_skill_assignment import load_assignment
+
+        ctx = dict(accessible_context or {})
+        master_assignment = load_assignment(run_id)
+        if master_assignment is not None:
+            ctx["skill_guidance"] = master_assignment
+            ctx["skill_assignment_source"] = "master"
+        else:
+            files = list(node.files) if isinstance(node.files, list) else []
+            env_layout = detect_env_layout(
+                node_type=node.node_type,
+                files=files,
+                description=node.goal or "",
+            )
+            stack = None
+            if env_layout.startswith("python"):
+                stack = "python"
+            elif env_layout == "java_spring":
+                stack = "java"
+            ctx["skill_guidance"] = build_skill_guidance_for_task(
+                requires_testing=bool(node_tests),
+                stack=stack,
+                env_layout=env_layout,
+                assigned_by="worker_fallback",
+            )
+            ctx["skill_assignment_source"] = "worker_fallback"
+        workspace = get_config().workspace
+        cache = ConstraintMetadataCache(workspace)
+        constraint_files: list[dict] = []
+        for rel in (".cursor/rules", "AGENTS.md", "CLAUDE.md", "plan.md"):
+            target = workspace / rel
+            if target.is_file():
+                constraint_files.append(cache.get_or_scan(target))
+            elif target.is_dir():
+                for child in sorted(target.glob("*.mdc"))[:20]:
+                    if child.is_file():
+                        constraint_files.append(cache.get_or_scan(child))
+        if constraint_files:
+            ctx["constraint_file_metadata"] = constraint_files
+        return ctx
 
     @staticmethod
     async def _build_child_agent_results(db: AsyncSession, node: NodeRecord) -> list[dict]:
@@ -370,10 +467,14 @@ class NodeAgentWorkerService:
         *,
         run_id: str,
     ) -> None:
-        proposal = await NodeAgentWorkerService._call_provider(ctx, run)
+        proposal = await NodeAgentWorkerService._call_provider(ctx, run, node)
         test_results = await NodeAgentWorkerService._run_sandbox_tests(
             run_id, run.node_id, node, proposal,
         )
+        if test_results is not None and test_results.get("status") == "failed":
+            summary = NodeAgentWorkerService._summarize_failed_tests(test_results)
+            await NodeAgentWorkerService._fail_run_tests(db, run, summary, test_results)
+            return
         proposal_id = await NodeAgentWorkerService.submit_provider_result(
             db, run_id, node, instruction, proposal, ctx.accessible_context,
         )
@@ -458,6 +559,21 @@ class NodeAgentWorkerService:
         if not container_workspace:
             raise NodeContainerError("container_workspace_missing")
         workspace_root = Path(container_workspace["root"])
+        node_row = (
+            await db.execute(select(NodeRecord).where(NodeRecord.id == run.node_id))
+        ).scalar_one()
+        boundary = NodeAgentWorkerService._node_boundary(node_row)
+        main_meta = MainAgentContainerService(get_config().workspace).read_for_session(run.session_id)
+        baseline = (main_meta or {}).get("git_baseline_revision", "")
+        WorkerContextDumper.dump(
+            ctx=ctx,
+            node=node_row,
+            run=run,
+            workspace_root=get_config().workspace,
+            target_dir=workspace_root,
+            baseline_revision=baseline,
+            read_set=boundary["read_set"],
+        )
         orch = orchestrator or NodeContainerOrchestrator(get_config().workspace)
         meta = orch.run_node_container(
             run_id=run.id,
@@ -616,7 +732,45 @@ class NodeAgentWorkerService:
             run.duration_ms = int((now - run.started_at).total_seconds() * 1000)
         run.result_summary = summary[:500]
         await NodeAgentRunService.release_lock(db, run.node_id)
+        await NodeAgentRunService._set_node_needs_review(db, run.node_id)
         await db.commit()
+
+    @staticmethod
+    async def _get_node_title(db: AsyncSession, node_id: str) -> str:
+        result = await db.execute(select(NodeRecord).where(NodeRecord.id == node_id))
+        node = result.scalar_one_or_none()
+        if node is None or not node.title:
+            return node_id
+        return node.title
+
+    @staticmethod
+    async def _post_failure_chat_message(
+        db: AsyncSession,
+        run: NodeAgentRunRecord,
+        node_title: str,
+        summary: str,
+    ) -> None:
+        from bridle.models.chat_message import ChatMessageRecord
+
+        content = f"⚠️ 节点「{node_title}」执行失败：{summary[:400]}"
+        db.add(
+            ChatMessageRecord(
+                session_id=run.session_id,
+                role="assistant",
+                content=content,
+                tool_calls=None,
+                tool_result=None,
+            )
+        )
+
+    @staticmethod
+    async def _notify_run_failure(
+        db: AsyncSession,
+        run: NodeAgentRunRecord,
+        summary: str,
+    ) -> None:
+        node_title = await NodeAgentWorkerService._get_node_title(db, run.node_id)
+        await NodeAgentWorkerService._post_failure_chat_message(db, run, node_title, summary)
 
     @staticmethod
     async def _fail_run(db: AsyncSession, run: NodeAgentRunRecord, status: str, error_code: str) -> None:
@@ -625,6 +779,98 @@ class NodeAgentWorkerService:
         run.blocked_reason = error_code
         run.finished_at = now
         await NodeAgentRunService.release_lock(db, run.node_id)
+        await NodeAgentRunService._set_node_failed_retryable(db, run.node_id)
+        await NodeAgentWorkerService._notify_run_failure(db, run, error_code)
+        await db.commit()
+
+    @staticmethod
+    def _summarize_failed_tests(test_results: dict) -> str:
+        results = test_results.get("results") or []
+        failed = next(
+            (
+                r
+                for r in results
+                if r.get("exit_code") not in (0, None) or r.get("timed_out")
+            ),
+            None,
+        )
+        if failed is None:
+            return f"Tests failed: {test_results.get('error_code', 'unknown')}"
+        cmd = failed.get("command", "?")
+        exit_code = failed.get("exit_code", "?")
+        stderr = (failed.get("stderr_preview") or "").strip()
+        stdout = (failed.get("stdout_preview") or "").strip()
+        tail = stderr or stdout or "(no output)"
+        return f"Tests failed (exit={exit_code}): {cmd}\n{tail[:300]}"
+
+    @staticmethod
+    async def _fail_run_tests(
+        db: AsyncSession,
+        run: NodeAgentRunRecord,
+        summary: str,
+        test_results: dict,
+    ) -> None:
+        now = utc_now_naive()
+        result_rec = NodeAgentResultRecord(
+            run_id=run.id,
+            node_id=run.node_id,
+            status="failed",
+            result_type="tests_failed",
+            summary=summary[:500],
+            recommended_next_action="needs_test_files_or_fix",
+            payload={
+                "error_code": "tests_failed",
+                "sandbox_test_results": test_results,
+            },
+        )
+        db.add(result_rec)
+        run.status = "failed"
+        run.blocked_reason = "tests_failed"
+        run.result_summary = summary[:500]
+        run.finished_at = now
+        if run.started_at:
+            run.duration_ms = int((now - run.started_at).total_seconds() * 1000)
+        await NodeAgentRunService.release_lock(db, run.node_id)
+        await NodeAgentRunService._set_node_failed_retryable(db, run.node_id)
+        await NodeAgentWorkerService._notify_run_failure(db, run, summary)
+        await db.commit()
+
+    @staticmethod
+    async def _fail_run_budget_exhausted(
+        db: AsyncSession,
+        run: NodeAgentRunRecord,
+        exc: DeepSeekProviderError,
+    ) -> None:
+        now = utc_now_naive()
+        raw_report = dict(exc.response_debug or {})
+        raw_report.setdefault("error_code", "tool_budget_exhausted")
+        budget_report = redact_budget_payload(raw_report)
+        replan_decision = build_replan_decision(budget_report)
+        budget_type = str((budget_report.get("budget") or {}).get("type", "unknown"))
+        summary = f"Tool budget exhausted ({budget_type})"
+        result_rec = NodeAgentResultRecord(
+            run_id=run.id,
+            node_id=run.node_id,
+            status="failed",
+            result_type="budget_exhausted",
+            summary=summary[:500],
+            recommended_next_action="replan_required",
+            payload={
+                "error_code": "tool_budget_exhausted",
+                "budget_report": budget_report,
+                "replan_decision": replan_decision,
+            },
+        )
+        db.add(result_rec)
+        run.status = "failed"
+        run.blocked_reason = "tool_budget_exhausted"
+        run.result_summary = summary[:500]
+        run.finished_at = now
+        if run.started_at:
+            run.duration_ms = int((now - run.started_at).total_seconds() * 1000)
+        await NodeAgentRunService.release_lock(db, run.node_id)
+        await NodeAgentRunService._set_node_failed_retryable(db, run.node_id)
+        await NodeAgentWorkerService._notify_run_failure(db, run, summary)
         await db.commit()
 
 

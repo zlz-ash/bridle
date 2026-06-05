@@ -48,6 +48,10 @@ class TestContextTemplateBuilder:
         assert "implement" in content.lower()
         assert "metric" in content.lower() or "indicator" in content.lower()
         assert "test" in content.lower()
+        assert "completion confirmation" in content.lower()
+        assert "run the allowed tests" in content.lower() or "allowed tests" in content.lower()
+        assert "inspect completion evidence" in content.lower()
+        assert "report_blocked" in content
 
     def test_user_payload_contains_context_layers(self) -> None:
         ctx = _minimal_ctx()
@@ -98,19 +102,21 @@ class TestContextTemplateBuilder:
         builder = ContextTemplateBuilder(ctx)
         messages = builder.build_messages()
         payload = json.loads(messages[1]["content"])
-        assert len(payload["tool_context"]) == 5
+        assert len(payload["tool_context"]) == 7
 
-    def test_tool_context_default_has_five_descriptors(self) -> None:
+    def test_tool_context_default_has_seven_descriptors(self) -> None:
         ctx = _minimal_ctx()
         builder = ContextTemplateBuilder(ctx)
         payload = builder.build_payload()
-        assert len(payload.tool_context) == 5
+        assert len(payload.tool_context) == 7
         names = [d["name"] for d in payload.tool_context]
         assert "read_allowed_file" in names
         assert "propose_file_patch" in names
         assert "run_allowed_tests" in names
         assert "report_blocked" in names
         assert "child_agent_result_summary" in names
+        assert "grep_code" in names
+        assert "web_search" in names
 
     def test_tool_context_default_each_descriptor_has_required_fields(self) -> None:
         ctx = _minimal_ctx()
@@ -261,7 +267,7 @@ class TestContextTemplateBuilderLogEvents:
         ]
         assert len(events) == 1
         detail = getattr(events[0], "detail", {})
-        assert detail.get("tool_count") == 5
+        assert detail.get("tool_count") == 7
         assert "stdout" not in json.dumps(detail)
         assert "stderr" not in json.dumps(detail)
 
@@ -289,10 +295,10 @@ class TestContextTemplateBuilderLogEvents:
 
 
 class TestToolContextDisclosure:
-    def test_default_tool_context_has_five_entries(self) -> None:
+    def test_default_tool_context_has_seven_entries(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
-        assert len(descriptors) <= 5
-        assert len(descriptors) == 5
+        assert len(descriptors) <= 7
+        assert len(descriptors) == 7
 
     def test_each_descriptor_has_standard_fields(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
@@ -336,9 +342,36 @@ class TestToolContextDisclosure:
         builder = ContextTemplateBuilder(ctx, tool_context=tool_dicts)
         messages = builder.build_messages()
         payload = json.loads(messages[1]["content"])
-        assert len(payload["tool_context"]) == 5
+        assert len(payload["tool_context"]) == 7
         assert payload["tool_context"][0]["name"] == "read_allowed_file"
 
-    def test_tool_context_capped_at_five(self) -> None:
+    def test_tool_context_capped_at_seven(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
-        assert len(descriptors) <= 5
+        assert len(descriptors) <= 7
+
+    def test_system_message_contains_circuit_breaker_guidance(self) -> None:
+        ctx = _minimal_ctx()
+        builder = ContextTemplateBuilder(ctx)
+        messages = builder.build_messages()
+        content = messages[0]["content"].lower()
+        assert "fail" in content or "repeat" in content or "change" in content
+
+    def test_system_message_uses_generalized_tool_boundary(self) -> None:
+        ctx = _minimal_ctx()
+        builder = ContextTemplateBuilder(ctx)
+        messages = builder.build_messages()
+        content = messages[0]["content"].lower()
+        assert "provided tools" in content
+        assert "descriptor" in content
+        assert "sandbox policy" in content
+
+    def test_system_message_no_longer_lists_only_four_tools(self) -> None:
+        ctx = _minimal_ctx()
+        builder = ContextTemplateBuilder(ctx)
+        messages = builder.build_messages()
+        content = messages[0]["content"]
+        old_four_tool_phrase = (
+            "read allowed files, propose patches, "
+            "run allowlisted tests, or report blocked status"
+        )
+        assert old_four_tool_phrase not in content

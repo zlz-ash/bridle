@@ -5,7 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.api.deps import get_db
-from bridle.api.errors import NotFoundError, ValidationError
+from bridle.api.errors import NotFoundError, PlanNotExecutableError, ValidationError
+from bridle.services.complexity_negotiation_service import (
+    PlanComplexityFailedError,
+    ReplanRequestedError,
+)
 from bridle.schemas.task import TaskCreateSchema, TaskReadSchema
 from bridle.services.plan_service import PlanService
 from bridle.services.task_service import TaskService
@@ -46,6 +50,18 @@ async def import_plan(task_id: str, data: dict, db: AsyncSession = Depends(get_d
         raise ValidationError(resource="plan", message=str(e))
     try:
         return await PlanService.import_plan(db, task_id, plan_schema)
+    except ReplanRequestedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[],
+            rounds_used=0,
+            failure_reason=f"replan_requested:{exc.reason}",
+        ) from exc
+    except PlanComplexityFailedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[item.to_dict() for item in exc.last_validations],
+            rounds_used=exc.rounds_used,
+            failure_reason=exc.failure_reason,
+        ) from exc
     except ValueError as e:
         raise ValidationError(resource="plan", message=str(e))
 

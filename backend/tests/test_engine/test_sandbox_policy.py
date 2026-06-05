@@ -57,6 +57,31 @@ class TestSandboxPolicyDefaults:
     def test_default_timeout_60(self, policy: SandboxPolicy) -> None:
         assert policy.command_timeout_seconds == 60
 
+    def test_network_allowed_default_false(self, policy: SandboxPolicy) -> None:
+        assert policy.network_allowed is False
+
+    def test_network_allowed_can_be_enabled(self, test_workspace: Path) -> None:
+        p = SandboxPolicy.for_run(
+            run_id="r",
+            node_id="n",
+            workspace_root=test_workspace,
+            allowed_files=[],
+            node_tests=[],
+            network_allowed=True,
+        )
+        assert p.network_allowed is True
+
+    def test_network_allowed_in_snapshot(self, test_workspace: Path) -> None:
+        p = SandboxPolicy.for_run(
+            run_id="r",
+            node_id="n",
+            workspace_root=test_workspace,
+            allowed_files=[],
+            node_tests=[],
+            network_allowed=True,
+        )
+        assert p.snapshot()["network_allowed"] is True
+
     def test_timeout_over_global_cap_rejected(self, test_workspace: Path) -> None:
         with pytest.raises(ValueError):
             SandboxPolicy.for_run(

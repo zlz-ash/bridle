@@ -5,7 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.api.deps import get_db
-from bridle.api.errors import NotFoundError, ValidationError
+from bridle.api.errors import NotFoundError, PlanNotExecutableError, ValidationError
+from bridle.services.complexity_negotiation_service import (
+    PlanComplexityFailedError,
+    ReplanRequestedError,
+)
 from bridle.schemas.plan import PlanImportSchema, PlanPatchSchema
 from bridle.services.node_service import NodeService
 from bridle.services.plan_service import PlanService
@@ -38,6 +42,18 @@ async def replace_current_plan(data: PlanImportSchema, db: AsyncSession = Depend
         raise NotFoundError(resource="plan", message="No active plan to replace")
     try:
         return await PlanService.replace_plan(db, plan.task_id, data)
+    except ReplanRequestedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[],
+            rounds_used=0,
+            failure_reason=f"replan_requested:{exc.reason}",
+        ) from exc
+    except PlanComplexityFailedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[item.to_dict() for item in exc.last_validations],
+            rounds_used=exc.rounds_used,
+            failure_reason=exc.failure_reason,
+        ) from exc
     except ValueError as e:
         raise ValidationError(resource="plan", message=str(e))
 
@@ -55,6 +71,33 @@ async def patch_current_plan(data: PlanPatchSchema, db: AsyncSession = Depends(g
         raise NotFoundError(resource="plan", message="No active plan to patch")
     try:
         return await PlanService.patch_current(db, data)
+    except ValueError as e:
+        raise ValidationError(resource="plan", message=str(e))
+
+
+@router.post("/plans/{plan_id}/negotiate-complexity")
+async def negotiate_plan_complexity(plan_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    from bridle.models.plan import PlanRecord
+    from sqlalchemy import select
+
+    result = await db.execute(select(PlanRecord).where(PlanRecord.id == plan_id))
+    plan = result.scalar_one_or_none()
+    if plan is None:
+        raise NotFoundError(resource="plan", message="Plan not found")
+    try:
+        return await PlanService.renegotiate_complexity(db, plan_id)
+    except ReplanRequestedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[],
+            rounds_used=0,
+            failure_reason=f"replan_requested:{exc.reason}",
+        ) from exc
+    except PlanComplexityFailedError as exc:
+        raise PlanNotExecutableError(
+            last_issues=[item.to_dict() for item in exc.last_validations],
+            rounds_used=exc.rounds_used,
+            failure_reason=exc.failure_reason,
+        ) from exc
     except ValueError as e:
         raise ValidationError(resource="plan", message=str(e))
 

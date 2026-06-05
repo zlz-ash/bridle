@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.coding_config import ACTIVE_RUN_STATUSES, CODING_CONFIG
+from bridle.events.bus import publish_event_safe
 from bridle.utils.datetime_util import to_naive_utc, utc_now_naive
 from bridle.logging.jsonl import log_event
 from bridle.models.node import NodeRecord
@@ -94,7 +95,18 @@ class NodeAgentWatchdog:
         node_result = await db.execute(select(NodeRecord).where(NodeRecord.id == run.node_id))
         node = node_result.scalar_one_or_none()
         if node is not None:
+            old_status = node.status
             node.status = "needs_review"
+            if old_status != node.status:
+                publish_event_safe(
+                    "node_status_changed",
+                    {
+                        "node_id": node.id,
+                        "plan_node_id": node.plan_node_id,
+                        "old_status": old_status,
+                        "new_status": node.status,
+                    },
+                )
         await NodeAgentRunService.release_lock(db, run.node_id)
         log_event(
             "node_agent_run_blocked",
@@ -102,4 +114,13 @@ class NodeAgentWatchdog:
             node_id=run.node_id,
             run_id=run.id,
             detail={"reason": "blocked_timeout"},
+        )
+        publish_event_safe(
+            "node_agent_run_updated",
+            {
+                "run_id": run.id,
+                "node_id": run.node_id,
+                "status": run.status,
+                "phase": run.phase,
+            },
         )

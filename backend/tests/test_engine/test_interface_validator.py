@@ -203,6 +203,7 @@ class TestAccessibleContext:
             goal="Test",
             nodes=[
                 {"id": "n1", "title": "N1", "goal": "G1", "node_type": "code_change",
+                 "tests": ["pytest tests/ -q"],
                  "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
                 {"id": "n2", "title": "N2", "goal": "G2", "node_type": "test_validation",
                  "depends_on": ["n1"],
@@ -230,6 +231,7 @@ class TestAccessibleContext:
             goal="Test",
             nodes=[
                 {"id": "n1", "title": "N1", "goal": "G1", "node_type": "code_change",
+                 "tests": ["pytest tests/ -q"],
                  "interfaces": {"exposes": [], "consumes": [self._consume_dict("n2", "review_api")]}},
                 {"id": "n2", "title": "N2", "goal": "G2", "node_type": "test_validation",
                  "depends_on": ["n1"],
@@ -259,9 +261,11 @@ class TestAccessibleContext:
             goal="Test",
             nodes=[
                 {"id": "n1", "title": "N1", "goal": "G1", "node_type": "code_change",
+                 "tests": ["pytest tests/ -q"],
                  "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
                 {"id": "n2", "title": "N2", "goal": "G2", "node_type": "code_change",
                  "depends_on": ["n1"],
+                 "tests": ["pytest tests/ -q"],
                  "interfaces": {"exposes": [], "consumes": [self._consume_dict("n1")]}},
                 {"id": "n3", "title": "N3", "goal": "G3", "node_type": "test_validation",
                  "depends_on": ["n2"],
@@ -296,8 +300,10 @@ class TestAccessibleContext:
             goal="Test",
             nodes=[
                 {"id": "n1", "title": "N1", "goal": "G1", "node_type": "code_change",
+                 "tests": ["pytest tests/ -q"],
                  "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
-                {"id": "n2", "title": "N2", "goal": "G2", "node_type": "code_change"},
+                {"id": "n2", "title": "N2", "goal": "G2", "node_type": "code_change",
+                 "tests": ["pytest tests/ -q"]},
             ],
         )
         result = await PlanService.import_plan(db, "task-4", data)

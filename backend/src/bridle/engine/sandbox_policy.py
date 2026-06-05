@@ -39,6 +39,7 @@ class SandboxPolicy:
         allowed_files: list[str],
         node_tests: list[str],
         command_timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        network_allowed: bool = False,
     ) -> SandboxPolicy:
         root = Path(workspace_root).resolve()
         norm_allowed: set[str] = set()
@@ -64,6 +65,7 @@ class SandboxPolicy:
             allowed_files=frozenset(norm_allowed),
             allowed_test_commands=frozenset(allowed_cmds),
             command_timeout_seconds=timeout,
+            network_allowed=network_allowed,
         )
 
     def validate_timeout_config(self) -> list[str]:
@@ -101,6 +103,24 @@ class SandboxPolicy:
         norm = ProposalPathValidator.normalize_workspace_relative(path)
         parts = norm.split("/")
         return self.workspace_root.joinpath(*parts)
+
+    def with_granted_files(self, extra: frozenset[str] | set[str]) -> SandboxPolicy:
+        merged: set[str] = set(self.allowed_files)
+        for raw in extra:
+            norm = ProposalPathValidator.normalize_workspace_relative(str(raw))
+            if norm:
+                merged.add(norm)
+        return SandboxPolicy(
+            run_id=self.run_id,
+            node_id=self.node_id,
+            workspace_root=self.workspace_root,
+            allowed_files=frozenset(merged),
+            allowed_test_commands=self.allowed_test_commands,
+            network_allowed=self.network_allowed,
+            dependency_install_allowed=self.dependency_install_allowed,
+            env_visible=self.env_visible,
+            command_timeout_seconds=self.command_timeout_seconds,
+        )
 
     def snapshot(self) -> dict:
         return {

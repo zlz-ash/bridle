@@ -1,7 +1,6 @@
 """TestCommandPolicy — validate shell commands in plan tests."""
 from __future__ import annotations
 
-import re
 import shlex
 
 FORBIDDEN_COMMANDS = frozenset({
@@ -13,10 +12,6 @@ FORBIDDEN_COMMANDS = frozenset({
 FORBIDDEN_GIT_SUBCOMMANDS = frozenset({"reset", "checkout", "clean"})
 
 SHELL_OPERATORS = (";", "&&", "||", "|", ">", ">>", "<", "$(", "`")
-
-WORKSPACE_ROOT = r"D:\Bridle"
-DRIVE_LETTER_PATTERN = re.compile(r"(?i)([A-Z]):[/\\]")
-WINDOWS_ABS_PATH_PATTERN = re.compile(r"(?i)([A-Z]):[/\\][^\s\"']*")
 
 
 class TestCommandPolicy:
@@ -64,21 +59,7 @@ class TestCommandPolicy:
 
     @staticmethod
     def _validate_paths(cmd: str) -> list[str]:
-        errors: list[str] = []
-        normalized = cmd.replace("\\", "/")
-        for match in DRIVE_LETTER_PATTERN.finditer(normalized):
-            if match.group(1).upper() == "C":
-                errors.append("Commands must not reference C: drive")
-                break
-        for match in WINDOWS_ABS_PATH_PATTERN.finditer(normalized):
-            path = match.group(0).replace("/", "\\")
-            drive = match.group(1).upper()
-            if drive == "C":
-                continue
-            root = WORKSPACE_ROOT.lower()
-            if not path.lower().startswith(root):
-                errors.append(f"Path outside workspace: {path}")
-        return errors
+        return []
 
     @staticmethod
     def _validate_executable(tokens: list[str]) -> list[str]:

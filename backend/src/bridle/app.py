@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,13 +12,18 @@ from fastapi.responses import JSONResponse
 
 from bridle.api.errors import BridleError
 from bridle.api.coding_sessions import router as coding_sessions_router
+from bridle.api.events import router as events_router
+from bridle.api.health import router as health_router
 from bridle.api.node_agent_runs import router as node_agent_runs_router
+from bridle.api.plan_mode import router as plan_mode_router
 from bridle.api.nodes import router as nodes_router
 from bridle.api.plan_change_proposals import router as plan_change_proposals_router
 from bridle.api.plans import router as plans_router
 from bridle.api.proposals import router as proposals_router
 from bridle.api.reports import router as reports_router
 from bridle.api.tasks import router as tasks_router
+from bridle.api.workspace_files import router as workspace_files_router
+from bridle.events.bus import EventBus
 
 logger = logging.getLogger("bridle")
 
@@ -27,8 +35,6 @@ def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
         test_db: If provided, overrides the DB dependency for testing.
         test_workspace: If provided, sets workspace for testing.
     """
-    app = FastAPI(title="Bridle", version="0.2.0")
-
     if test_workspace is not None:
         from bridle.config import set_workspace
         set_workspace(test_workspace)
@@ -36,6 +42,23 @@ def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
     if test_db is not None:
         from bridle.api.deps import set_test_db
         set_test_db(test_db)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if test_db is None and os.getenv("BRIDLE_DISABLE_MAIN_AGENT_CONTAINER", "").strip() != "1":
+            try:
+                from bridle.database import async_session
+                from bridle.services.session_reconciler import SessionReconciler
+
+                async with async_session() as db:
+                    await SessionReconciler.reconcile_on_startup(db)
+            except Exception:
+                logger.exception("session_reconcile_startup_failed")
+        yield
+
+    app = FastAPI(title="Bridle", version="0.2.0", lifespan=lifespan)
+    app.state.started_at = time.time()
+    EventBus._reset_instance()
 
     @app.exception_handler(BridleError)
     async def bridle_error_handler(request: Request, exc: BridleError) -> JSONResponse:
@@ -84,7 +107,11 @@ def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
     app.include_router(proposals_router, prefix="/api/v1")
     app.include_router(reports_router, prefix="/api/v1")
     app.include_router(coding_sessions_router, prefix="/api/v1")
+    app.include_router(plan_mode_router, prefix="/api/v1")
     app.include_router(node_agent_runs_router, prefix="/api/v1")
     app.include_router(plan_change_proposals_router, prefix="/api/v1")
+    app.include_router(health_router, prefix="/api/v1")
+    app.include_router(workspace_files_router, prefix="/api/v1")
+    app.include_router(events_router, prefix="/api/v1")
 
     return app

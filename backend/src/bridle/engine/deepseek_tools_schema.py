@@ -6,6 +6,8 @@ V1_TOOL_NAMES = (
     "propose_file_patch",
     "run_allowed_tests",
     "report_blocked",
+    "grep_code",
+    "web_search",
 )
 
 
@@ -73,6 +75,29 @@ def build_deepseek_tools(*, strict: bool = False) -> list[dict]:
                 "evidence": {"type": "object"},
             },
             ["reason", "evidence"],
+            strict=strict,
+        ),
+        _function_tool(
+            "grep_code",
+            "Search for text patterns in allowed source files.",
+            {
+                "query": {"type": "string"},
+                "path_glob": {"type": "string"},
+                "case_sensitive": {"type": "boolean"},
+                "max_results": {"type": "integer"},
+            },
+            ["query"],
+            strict=strict,
+        ),
+        _function_tool(
+            "web_search",
+            "Search the web for documentation, error explanations, or reference material.",
+            {
+                "query": {"type": "string"},
+                "allowed_domains": {"type": "array", "items": {"type": "string"}},
+                "max_results": {"type": "integer"},
+            },
+            ["query"],
             strict=strict,
         ),
     ]

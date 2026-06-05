@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 HeartbeatStatusLiteral = Literal["running", "waiting_tool", "retrying", "blocked"]
 
@@ -26,6 +26,39 @@ class CodingSessionReadSchema(BaseModel):
     main_agent_container: dict | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CodingSessionListResponseSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sessions: list[CodingSessionReadSchema]
+    total: int
+    limit: int
+    offset: int
+
+
+ChatMessageRole = Literal["system", "user", "assistant", "tool"]
+
+
+class ChatMessageCreateSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: ChatMessageRole
+    content: str
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_result: dict[str, Any] | None = None
+
+
+class ChatMessageReadSchema(BaseModel):
+    id: str
+    session_id: str
+    role: ChatMessageRole
+    content: str
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_result: dict[str, Any] | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EligibleNodeSchema(BaseModel):
@@ -82,6 +115,8 @@ class NodeAgentRunReadSchema(BaseModel):
     test_summary: str | None = None
     metrics_summary: str | None = None
     integration_result: dict | None = None
+    budget_report: dict | None = None
+    replan_decision: dict | None = None
 
     model_config = {"from_attributes": True}
 

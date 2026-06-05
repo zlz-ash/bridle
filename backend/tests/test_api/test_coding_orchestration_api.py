@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.models.node import NodeRecord
+from bridle.models.node_agent_result import NodeAgentResultRecord
 from bridle.models.node_agent_run import NodeAgentRunRecord
 from bridle.services.node_agent_watchdog import NodeAgentWatchdog
 from tests.helpers.plan_factory import code_change_node, two_node_plan
@@ -158,6 +159,78 @@ class TestEligibleNodesAPI:
         assert "n1" not in eligible_ids
 
 
+@pytest.mark.asyncio
+async def test_recent_failed_runs_endpoint(
+    client: AsyncClient,
+    db: AsyncSession,
+    test_workspace: Path,
+) -> None:
+    """F17: return recent failed/timed_out runs only, newest first."""
+    _setup_git(test_workspace)
+    _task_id, plan_id, nodes = await _create_task_with_plan(client)
+    session = await client.post("/api/v1/agent/coding-sessions", json={"plan_id": plan_id})
+    session_id = session.json()["session_id"]
+    node_id = nodes[0]["id"]
+    node_row = (await db.execute(select(NodeRecord).where(NodeRecord.id == node_id))).scalar_one()
+
+    failed_old = NodeAgentRunRecord(
+        session_id=session_id,
+        node_id=node_id,
+        plan_node_id="n1",
+        status="failed",
+        phase="finalizing",
+        attempt=1,
+        blocked_reason="tests_failed",
+        result_summary="Tests failed (exit=1): pytest old.py",
+        finished_at=datetime(2026, 1, 1, 10, 0, 0),
+    )
+    failed_new = NodeAgentRunRecord(
+        session_id=session_id,
+        node_id=node_id,
+        plan_node_id="n1",
+        status="failed",
+        phase="finalizing",
+        attempt=2,
+        blocked_reason="tests_failed",
+        result_summary="Tests failed (exit=4): pytest new.py",
+        finished_at=datetime(2026, 1, 2, 10, 0, 0),
+    )
+    completed = NodeAgentRunRecord(
+        session_id=session_id,
+        node_id=node_id,
+        plan_node_id="n1",
+        status="completed",
+        phase="finalizing",
+        attempt=1,
+        finished_at=datetime(2026, 1, 3, 10, 0, 0),
+    )
+    db.add_all([failed_old, failed_new, completed])
+    await db.flush()
+    db.add(
+        NodeAgentResultRecord(
+            run_id=failed_new.id,
+            node_id=node_id,
+            status="failed",
+            result_type="tests_failed",
+            summary=failed_new.result_summary or "",
+            recommended_next_action="needs_test_files_or_fix",
+        )
+    )
+    await db.commit()
+
+    resp = await client.get(
+        f"/api/v1/agent/coding-sessions/{session_id}/recent-failed-runs",
+        params={"limit": "3"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert body[0]["result_summary"].startswith("Tests failed (exit=4)")
+    assert body[0]["title"] == node_row.title
+    assert body[0]["result_type"] == "tests_failed"
+    assert body[1]["result_summary"].startswith("Tests failed (exit=1)")
+
+
 class TestSelectNodeAPI:
     async def test_select_eligible_node_creates_run(
         self, client: AsyncClient, test_workspace: Path
@@ -181,6 +254,42 @@ class TestSelectNodeAPI:
         assert run["status"] == "queued"
         assert run["node_id"] == node_id
         assert run["session_id"] == session_id
+
+    async def test_select_node_rejects_3rd_attempt(
+        self, client: AsyncClient, db: AsyncSession, test_workspace: Path
+    ) -> None:
+        """F16: two prior runs exhaust node attempts; third select returns 409."""
+        _setup_git(test_workspace)
+        _task_id, plan_id, nodes = await _create_task_with_plan(client)
+        session = await client.post("/api/v1/agent/coding-sessions", json={"plan_id": plan_id})
+        session_id = session.json()["session_id"]
+        node_id = nodes[0]["id"]
+
+        for _ in range(2):
+            db.add(
+                NodeAgentRunRecord(
+                    session_id=session_id,
+                    node_id=node_id,
+                    plan_node_id="n1",
+                    status="failed",
+                    phase="finalizing",
+                    attempt=1,
+                    blocked_reason="tests_failed",
+                )
+            )
+        await db.commit()
+
+        resp = await client.post(
+            f"/api/v1/agent/coding-sessions/{session_id}/select-node",
+            json={
+                "intent": "select_node",
+                "node_id": node_id,
+                "reason": "third try",
+                "expected_action": "create_proposal",
+            },
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "node_attempts_exhausted"
 
     async def test_select_non_eligible_node_returns_structured_error(
         self, client: AsyncClient, test_workspace: Path
@@ -328,6 +437,40 @@ class TestNodeAgentWatchdog:
         run = result.scalar_one()
         assert run.status == "timed_out"
         assert run.blocked_reason == "heartbeat_stale"
+
+    async def test_blocked_timeout_publishes_sse_events(
+        self, client: AsyncClient, db: AsyncSession, test_workspace: Path
+    ) -> None:
+        from bridle.events.bus import EventBus
+
+        EventBus._reset_instance()
+        _setup_git(test_workspace)
+        _task_id, plan_id, nodes = await _create_task_with_plan(client)
+        session = await client.post("/api/v1/agent/coding-sessions", json={"plan_id": plan_id})
+        session_id = session.json()["session_id"]
+        sel = await client.post(
+            f"/api/v1/agent/coding-sessions/{session_id}/select-node",
+            json={
+                "intent": "select_node",
+                "node_id": nodes[0]["id"],
+                "reason": "go",
+                "expected_action": "create_proposal",
+            },
+        )
+        run_id = sel.json()["run_id"]
+        result = await db.execute(select(NodeAgentRunRecord).where(NodeAgentRunRecord.id == run_id))
+        run = result.scalar_one()
+        stale = (datetime.now(timezone.utc) - timedelta(seconds=400)).replace(tzinfo=None)
+        run.status = "blocked"
+        run.last_heartbeat_at = stale
+        await db.commit()
+
+        closed = await NodeAgentWatchdog.scan_and_close_stale(db)
+        assert closed >= 1
+
+        event_types = {event.type for event in EventBus.instance()._ring}
+        assert "node_agent_run_updated" in event_types
+        assert "node_status_changed" in event_types
 
 
 class TestPlanChangeProposalAPI:

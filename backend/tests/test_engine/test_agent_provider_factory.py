@@ -131,6 +131,8 @@ class TestAgentProviderFactory:
         cfg = AgentProviderFactory.get_config()
         assert cfg["deepseek_strict_tools"] is False
         assert cfg["deepseek_max_tool_rounds"] == 8
+        assert cfg["deepseek_max_tool_calls"] == 32
+        assert cfg["deepseek_max_wall_seconds"] == 300.0
 
     def test_no_api_key_in_logs_on_fallback(self, monkeypatch, caplog) -> None:
         import logging

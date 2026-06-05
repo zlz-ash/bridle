@@ -1,9 +1,14 @@
 """Tests for agent proposal API endpoints."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+
+from bridle.engine.blocker import BlockResult
+from tests.plan_helpers import ensure_plan_payload
 
 
 class TestProposalCreateAPI:
@@ -29,7 +34,7 @@ class TestProposalCreateAPI:
                  "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         resp = await client.post(f"/api/v1/nodes/{node_id}/agent/proposals", json={
@@ -64,7 +69,7 @@ class TestProposalCreateAPI:
                  "files": ["src/a.py"]},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan1)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan1))
         old_node_id = import_resp.json()["nodes"][0]["id"]
 
         # Archive by importing a new plan
@@ -75,7 +80,7 @@ class TestProposalCreateAPI:
                  "files": ["src/b.py"]},
             ],
         }
-        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan2)
+        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan2))
 
         resp = await client.post(f"/api/v1/nodes/{old_node_id}/agent/proposals", json={
             "instruction": "Do something",
@@ -94,7 +99,7 @@ class TestProposalCreateAPI:
                  "files": ["src/main.py"]},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         resp = await client.post(f"/api/v1/nodes/{node_id}/agent/proposals", json={
@@ -107,21 +112,26 @@ class TestProposalCreateAPI:
         task_resp = await client.post("/api/v1/tasks", json={"title": "Blocked Proposal"})
         task_id = task_resp.json()["id"]
 
-        # Node without tests or constraints → will be blocked
         plan = {
             "goal": "Test",
             "nodes": [
-                {"id": "n1", "title": "N1", "goal": "G1", "node_type": "code_change",
-                 "files": ["src/main.py"], "tests": [], "constraints": [],
+                {"id": "n1", "title": "N1", "goal": "G1 with clear acceptance criteria for reviewers",
+                 "node_type": "code_change",
+                 "files": ["src/main.py"], "tests": ["pytest tests/test_main.py -q"],
+                 "constraints": {"c": True},
                  "metrics": {}, "review_checks": [], "expected_outputs": {}},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
-        resp = await client.post(f"/api/v1/nodes/{node_id}/agent/proposals", json={
-            "instruction": "Do something",
-        })
+        with patch(
+            "bridle.services.agent_gateway.Blocker.check",
+            return_value=BlockResult(blocked=True, reason="Missing test definitions"),
+        ):
+            resp = await client.post(f"/api/v1/nodes/{node_id}/agent/proposals", json={
+                "instruction": "Do something",
+            })
         assert resp.status_code == 409
 
     async def test_create_proposal_allowed_files_only_node_files(self, client: AsyncClient) -> None:
@@ -137,7 +147,7 @@ class TestProposalCreateAPI:
                  "metrics": {}, "constraints": {"c": True}, "review_checks": [], "expected_outputs": {}},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         resp = await client.post(f"/api/v1/nodes/{node_id}/agent/proposals", json={
@@ -160,7 +170,7 @@ class TestProposalCreateAPI:
                  "metrics": {}, "constraints": {"c": True}, "review_checks": [], "expected_outputs": {}},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         # Snapshot node state before proposal
@@ -193,7 +203,7 @@ class TestProposalListAPI:
                  "files": ["src/main.py"]},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         resp = await client.get(f"/api/v1/nodes/{node_id}/agent/proposals")
@@ -213,7 +223,7 @@ class TestProposalListAPI:
                  "metrics": {}, "constraints": {"c": True}, "review_checks": [], "expected_outputs": {}},
             ],
         }
-        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=plan)
+        import_resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json=ensure_plan_payload(plan))
         node_id = import_resp.json()["nodes"][0]["id"]
 
         # Create a proposal

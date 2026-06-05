@@ -223,6 +223,8 @@ class TestAgentProposalHttpErrorCodes:
         assert "errors" in body["details"]
 
     async def test_blocked_node_does_not_invoke_provider(self, client: AsyncClient, monkeypatch):
+        from bridle.engine.blocker import BlockResult
+
         task_resp = await client.post("/api/v1/tasks", json={"title": "Blocked provider"})
         task_id = task_resp.json()["id"]
         plan = {
@@ -231,11 +233,11 @@ class TestAgentProposalHttpErrorCodes:
                 {
                     "id": "n1",
                     "title": "N1",
-                    "goal": "G1",
+                    "goal": "G1 with clear acceptance criteria for reviewers",
                     "node_type": "code_change",
                     "files": ["src/main.py"],
-                    "tests": [],
-                    "constraints": [],
+                    "tests": ["pytest tests/test_main.py -q"],
+                    "constraints": {"c": True},
                     "metrics": {},
                     "review_checks": [],
                     "expected_outputs": {},
@@ -251,7 +253,10 @@ class TestAgentProposalHttpErrorCodes:
             async def generate(self, ctx):
                 raise AssertionError("provider must not run for blocked nodes")
 
-        with patch("bridle.services.agent_gateway.AgentProviderFactory.create", return_value=MustNotRun()):
+        with patch(
+            "bridle.services.agent_gateway.Blocker.check",
+            return_value=BlockResult(blocked=True, reason="Missing test definitions"),
+        ), patch("bridle.services.agent_gateway.AgentProviderFactory.create", return_value=MustNotRun()):
             resp = await client.post(
                 f"/api/v1/nodes/{node_id}/agent/proposals",
                 json={"instruction": "Try"},

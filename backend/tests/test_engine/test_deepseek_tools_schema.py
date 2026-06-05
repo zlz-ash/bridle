@@ -5,7 +5,7 @@ from bridle.engine.deepseek_tools_schema import build_deepseek_tools, tool_names
 
 
 class TestDeepSeekToolsSchema:
-    def test_contains_four_v1_tools(self) -> None:
+    def test_contains_six_v1_tools(self) -> None:
         tools = build_deepseek_tools(strict=False)
         names = tool_names(tools)
         assert names == {
@@ -13,6 +13,8 @@ class TestDeepSeekToolsSchema:
             "propose_file_patch",
             "run_allowed_tests",
             "report_blocked",
+            "grep_code",
+            "web_search",
         }
 
     def test_additional_properties_false(self) -> None:

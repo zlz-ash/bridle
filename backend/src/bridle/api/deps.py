@@ -14,6 +14,12 @@ def set_test_db(session: AsyncSession) -> None:
     _test_db = session
 
 
+def clear_test_db() -> None:
+    """Clear the test database session after a test."""
+    global _test_db
+    _test_db = None
+
+
 def is_test_mode() -> bool:
     """True when API runs against the in-memory test session."""
     return _test_db is not None
@@ -24,7 +30,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     if _test_db is not None:
         yield _test_db
     else:
-        from bridle.database import async_session
+        from bridle import database
 
-        async with async_session() as session:
+        database._ensure_engine()
+        async with database.async_session() as session:
             yield session

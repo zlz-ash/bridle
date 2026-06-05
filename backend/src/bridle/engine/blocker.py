@@ -30,20 +30,23 @@ class Blocker:
             if dep_id not in completed_node_ids:
                 return BlockResult(blocked=True, reason=f"Dependency {dep_id} not satisfied")
 
-        # 2. Check tests defined
-        if not node.tests:
-            return BlockResult(blocked=True, reason="Missing test definitions")
+        # 2. tests: only code_change (aligned with plan-mode prompt)
+        if node.node_type == "code_change" and not node.tests:
+            return BlockResult(blocked=True, reason="code_change node missing tests")
 
-        # 3. Check metrics for metric_validation
+        if node.node_type == "micro":
+            return BlockResult(blocked=False)
+
+        # 3. metric_validation still requires metrics
         if node.node_type == "metric_validation" and not node.metrics:
-            return BlockResult(blocked=True, reason="Missing metric definitions for metric_validation node")
+            return BlockResult(blocked=True, reason="metric_validation node missing metrics")
 
-        # 4. Check constraints
-        if not node.constraints:
-            return BlockResult(blocked=True, reason="Missing constraint rules")
+        # 4. constraints: only code_change
+        if node.node_type == "code_change" and not node.constraints:
+            return BlockResult(blocked=True, reason="code_change node missing constraints")
 
-        # 5. Check review_checks for review_gate
+        # 5. review_gate still requires review_checks
         if node.node_type == "review_gate" and not node.review_checks:
-            return BlockResult(blocked=True, reason="Missing review checks for review_gate node")
+            return BlockResult(blocked=True, reason="review_gate node missing review_checks")
 
         return BlockResult(blocked=False)

@@ -5,6 +5,8 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from tests.plan_helpers import ensure_code_change_tests, ensure_plan_payload
+
 
 def _make_plan_payload(**overrides) -> dict:
     base = dict(
@@ -427,7 +429,10 @@ class TestInterfaceValidationAPI:
     async def _create_task_and_import(self, client, nodes):
         task_resp = await client.post("/api/v1/tasks", json={"title": "Interface Test"})
         task_id = task_resp.json()["id"]
-        resp = await client.post(f"/api/v1/tasks/{task_id}/plan/import", json={"goal": "Test", "nodes": nodes})
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/plan/import",
+            json=ensure_plan_payload({"goal": "Test", "nodes": nodes}),
+        )
         return task_id, resp
 
     def _expose_dict(self, name="auth_context"):
@@ -496,7 +501,7 @@ class TestInterfaceValidationAPI:
              "depends_on": ["n1"],
              "interfaces": {"exposes": [], "consumes": [self._consume_dict()]}},
         ]
-        resp = await client.put("/api/v1/plan/current", json={"goal": "New", "nodes": nodes2})
+        resp = await client.put("/api/v1/plan/current", json=ensure_plan_payload({"goal": "New", "nodes": nodes2}))
         assert resp.status_code == 200
 
     async def test_replace_invalid_interfaces_fails(self, client: AsyncClient) -> None:
@@ -511,7 +516,7 @@ class TestInterfaceValidationAPI:
              "depends_on": ["n2"],
              "interfaces": {"exposes": [], "consumes": [self._consume_dict(node_id="n1")]}},
         ]
-        resp = await client.put("/api/v1/plan/current", json={"goal": "New", "nodes": nodes2})
+        resp = await client.put("/api/v1/plan/current", json=ensure_plan_payload({"goal": "New", "nodes": nodes2}))
         assert resp.status_code == 422
 
     # --- Patch validation ---
@@ -522,14 +527,14 @@ class TestInterfaceValidationAPI:
 
         # Add n2 with valid interfaces
         resp = await client.patch("/api/v1/plan/current", json={
-            "add_nodes": [
+            "add_nodes": ensure_code_change_tests([
                 {"id": "n2", "title": "N2", "goal": "G2", "node_type": "test_validation",
                  "depends_on": ["n1"],
                  "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
                 {"id": "n3", "title": "N3", "goal": "G3", "node_type": "code_change",
                  "depends_on": ["n2"],
                  "interfaces": {"exposes": [], "consumes": [self._consume_dict(node_id="n2")]}},
-            ],
+            ]),
         })
         assert resp.status_code == 200
 
@@ -539,12 +544,12 @@ class TestInterfaceValidationAPI:
 
         # Try to add n2 with invalid consume from non-adjacent n1
         resp = await client.patch("/api/v1/plan/current", json={
-            "add_nodes": [
+            "add_nodes": ensure_code_change_tests([
                 {"id": "n2", "title": "N2", "goal": "G2", "node_type": "code_change"},
                 {"id": "n3", "title": "N3", "goal": "G3", "node_type": "test_validation",
                  "depends_on": ["n2"],
                  "interfaces": {"exposes": [], "consumes": [self._consume_dict(node_id="n1")]}},
-            ],
+            ]),
         })
         assert resp.status_code == 422
 
@@ -587,7 +592,10 @@ class TestPatchRollback:
              "depends_on": ["n1"],
              "interfaces": {"exposes": [], "consumes": [self._consume_dict()]}},
         ]
-        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json={"goal": "Test", "nodes": nodes})
+        await client.post(
+            f"/api/v1/tasks/{task_id}/plan/import",
+            json=ensure_plan_payload({"goal": "Test", "nodes": nodes}),
+        )
 
         before = await client.get("/api/v1/plan/current")
         assert before.status_code == 200
@@ -624,7 +632,10 @@ class TestPatchRollback:
              "depends_on": ["n1"],
              "interfaces": {"exposes": [], "consumes": [self._consume_dict()]}},
         ]
-        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json={"goal": "Test", "nodes": nodes})
+        await client.post(
+            f"/api/v1/tasks/{task_id}/plan/import",
+            json=ensure_plan_payload({"goal": "Test", "nodes": nodes}),
+        )
 
         config = get_config()
         mirror_before = config.current_plan_path.read_text(encoding="utf-8")
@@ -656,7 +667,10 @@ class TestPatchRollback:
              "interfaces": {"exposes": [self._expose_dict()], "consumes": []}},
             {"id": "n2", "title": "N2", "goal": "G2", "node_type": "code_change"},
         ]
-        await client.post(f"/api/v1/tasks/{task_id}/plan/import", json={"goal": "Test", "nodes": nodes})
+        await client.post(
+            f"/api/v1/tasks/{task_id}/plan/import",
+            json=ensure_plan_payload({"goal": "Test", "nodes": nodes}),
+        )
 
         before = await client.get("/api/v1/plan/current")
         before_nodes = {n["plan_node_id"]: n for n in before.json()["nodes"]}

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.models.node import NodeRecord
 from bridle.models.plan import PlanRecord
+from bridle.events.bus import publish_event_safe
 from bridle.schemas.node import NodeReadSchema
 
 ALLOWED_NODE_STATUSES = frozenset({
@@ -148,9 +149,20 @@ class NodeService:
         record = result.scalar_one_or_none()
         if record is None:
             return None
+        old_status = record.status
         record.status = status
         await db.commit()
         await db.refresh(record)
+        if old_status != status:
+            publish_event_safe(
+                "node_status_changed",
+                {
+                    "node_id": record.id,
+                    "plan_node_id": record.plan_node_id,
+                    "old_status": old_status,
+                    "new_status": status,
+                },
+            )
         return NodeReadSchema.model_validate(record)
 
     @staticmethod
