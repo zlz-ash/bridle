@@ -1,16 +1,21 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+/// <reference types="vitest" />
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [react()],
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8900',
-        changeOrigin: true,
+        target: 'http://127.0.0.1:8900',
+        changeOrigin: false,
       },
     },
   },
-})
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
+});
