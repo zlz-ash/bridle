@@ -16,10 +16,15 @@ dependencies = [
     "pydantic>=2.10",
     "typer>=0.15",
     "rich>=13.0",
+    "sse-starlette>=2.1",
+    "python-dotenv>=1.0",
+    "httpx>=0.28",
 ]
 
 [project.scripts]
 bridle = "bridle.cli:app"
+bridle-main-agent = "bridle.container_entrypoints.main_agent:main"
+bridle-node-agent = "bridle.container_entrypoints.node_agent:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

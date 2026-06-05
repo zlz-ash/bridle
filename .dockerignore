@@ -1,0 +1,13 @@
+.venv
+node_modules
+frontend/dist
+backend/tests/.test-workspaces
+.aicoding
+.git
+e2e-runs
+e2e-generated
+.pytest-tmp
+**/__pycache__
+**/*.pyc
+.cursor
+.codegraph

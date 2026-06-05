@@ -67,3 +67,8 @@ Desktop.ini
 # Test workspaces and generated scratch data
 .test-workspaces/
 .test-tmp/
+.pytest-tmp/
+.pytest-tmp-manual/
+
+# Local runtime artifacts from launcher scripts
+scripts/.app-logs/
