@@ -177,6 +177,8 @@ def _spawn_docker_worker(
     network_args = ["--network", "none"] if probe else []
     if isolated is not None and not probe:
         network_args = ["--network", isolated.network]
+    run_uid = os.getuid() if hasattr(os, "getuid") else 1000
+    run_gid = os.getgid() if hasattr(os, "getgid") else 1000
     cmd = [
         "docker",
         "run",
@@ -185,7 +187,7 @@ def _spawn_docker_worker(
         container_name,
         *network_args,
         "-u",
-        "1000:1000",
+        f"{run_uid}:{run_gid}",
         "-i",
         *volume_args,
         *env_args,
