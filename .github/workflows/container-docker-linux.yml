@@ -142,7 +142,7 @@ jobs:
             --ipc-transcript "$IPC_PROBE" \
             "$GITHUB_WORKSPACE/candidate" \
             "$GITHUB_WORKSPACE/trusted-harness" \
-            -- -q -rs
+            -- -q -rs 2>&1 | tee "$RUNNER_TEMP/probe.log"
           echo "ipc_probe_transcript=$IPC_PROBE" >> "$GITHUB_OUTPUT"
 
       - name: Run Docker integration tests and gate

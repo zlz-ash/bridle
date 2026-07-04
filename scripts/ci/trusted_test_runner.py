@@ -358,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.probe_isolation:
         if observation.worker_state != "exited" or observation.exit_code is None:
+            if worker_stderr.strip():
+                LOGGER.error("probe_worker_stderr=%s", worker_stderr[-4000:])
             return 1
         return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
 
