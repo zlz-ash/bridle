@@ -8,6 +8,7 @@ import importlib.util
 import json
 import logging
 import os
+import shutil
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -162,6 +163,22 @@ def setup_probe_layout(candidate_root: Path, trusted_harness_root: Path, evidenc
             harness_link.symlink_to(trusted_harness_root.resolve(), target_is_directory=True)
         except OSError:
             pass
+
+
+def cleanup_probe_layout(candidate_root: Path, evidence_dir: Path | None) -> None:
+    probe_root = candidate_root / ".bridle-isolation-probe"
+    if probe_root.exists():
+        shutil.rmtree(probe_root)
+    evidence_link = candidate_root.parent / "evidence"
+    if evidence_link.is_symlink():
+        evidence_link.unlink()
+    harness_link = candidate_root.parent / "trusted-harness"
+    if harness_link.is_symlink():
+        harness_link.unlink()
+    if evidence_dir is not None:
+        forged = evidence_dir / "malicious-evidence.json"
+        if forged.is_file():
+            forged.unlink()
 
 
 def run_worker(
@@ -404,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
                 if worker_stderr.strip():
                     LOGGER.error("probe_worker_stderr=%s", worker_stderr[-4000:])
                 return 1
+            cleanup_probe_layout(candidate_root, evidence_path)
             return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
 
         if args.verify_overlay_after is not None:
