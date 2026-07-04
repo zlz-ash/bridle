@@ -15,6 +15,7 @@ from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.worker_sandbox")
 SCRIPT_DIR = Path(__file__).resolve().parent
+INNER_CANDIDATE_ROOT = Path("/bridle-candidate")
 
 
 @dataclass(frozen=True)
@@ -65,17 +66,38 @@ def worker_image_ref() -> str:
     return os.environ.get("BRIDLE_WORKER_IMAGE", "").strip() or "python:3.12-slim-bookworm"
 
 
-def map_paths_for_sandbox(paths: SandboxPaths, *, public_env: Mapping[str, str] | None = None) -> SandboxPaths:
+def map_paths_for_sandbox(
+    paths: SandboxPaths,
+    *,
+    public_env: Mapping[str, str] | None = None,
+    isolated: IsolatedDockerContext | None = None,
+) -> SandboxPaths:
     if not use_docker_sandbox(public_env=public_env):
         return paths
     controller_ipc = Path("/controller-ipc") if paths.controller_ipc is not None else None
     host_candidate = paths.candidate_root.resolve()
+    probe = (public_env or {}).get("BRIDLE_ISOLATION_PROBE") == "1"
+    if isolated is not None and not probe:
+        candidate_root = INNER_CANDIDATE_ROOT
+    else:
+        candidate_root = host_candidate
     return SandboxPaths(
-        candidate_root=host_candidate,
+        candidate_root=candidate_root,
         trusted_config=Path("/trusted-config") / paths.trusted_config.name,
         trusted_scripts=Path("/trusted-scripts"),
         controller_ipc=controller_ipc,
     )
+
+
+def _effective_candidate_root(
+    paths: SandboxPaths,
+    *,
+    public_env: dict[str, str],
+    isolated: IsolatedDockerContext | None,
+) -> Path:
+    if isolated is not None and public_env.get("BRIDLE_ISOLATION_PROBE") != "1":
+        return INNER_CANDIDATE_ROOT
+    return paths.candidate_root.resolve()
 
 
 def build_request(
@@ -83,9 +105,10 @@ def build_request(
     paths: SandboxPaths,
     pytest_args: tuple[str, ...],
     public_env: dict[str, str],
+    isolated: IsolatedDockerContext | None = None,
 ):
     ipc = _load_ipc()
-    mapped = map_paths_for_sandbox(paths, public_env=public_env)
+    mapped = map_paths_for_sandbox(paths, public_env=public_env, isolated=isolated)
     return ipc.WorkerRequest(
         candidate_root=str(mapped.candidate_root),
         trusted_config=str(mapped.trusted_config),
@@ -167,11 +190,12 @@ def _spawn_docker_worker(
     for key, value in merged_env.items():
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
-    host_candidate = str(paths.candidate_root.resolve())
+    candidate_root = _effective_candidate_root(paths, public_env=public_env, isolated=isolated)
+    candidate_root_text = str(candidate_root)
     env_args.extend(
         [
             "-e",
-            f"PYTHONPATH={host_candidate}/backend/src",
+            f"PYTHONPATH={candidate_root_text}/backend/src",
             "-e",
             "HOME=/tmp",
             "-e",
@@ -191,9 +215,10 @@ def _spawn_docker_worker(
             *volume_args,
         ]
     else:
+        host_candidate = str(paths.candidate_root.resolve())
         volume_args = [
             "--mount",
-            f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=shared",
+            f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=rshared",
             *volume_args,
         ]
     if paths.controller_ipc is not None:
@@ -279,10 +304,15 @@ def spawn_worker(
     isolated: IsolatedDockerContext | None = None,
 ):
     ipc = _load_ipc()
-    request = build_request(paths=paths, pytest_args=pytest_args, public_env=public_env)
+    request = build_request(
+        paths=paths,
+        pytest_args=pytest_args,
+        public_env=public_env,
+        isolated=isolated,
+    )
     payload = ipc.encode_request(request)
     sandbox_mode = "docker" if use_docker_sandbox(public_env=public_env) else "subprocess"
-    mapped_paths = map_paths_for_sandbox(paths, public_env=public_env)
+    mapped_paths = map_paths_for_sandbox(paths, public_env=public_env, isolated=isolated)
     worker_public_env = (
         map_public_env_for_docker_worker(public_env, mapped_paths.candidate_root)
         if sandbox_mode == "docker"
@@ -291,7 +321,12 @@ def spawn_worker(
     if sandbox_mode == "docker" and isolated is not None:
         worker_public_env["DOCKER_HOST"] = isolated.docker_host
     if sandbox_mode == "docker":
-        request = build_request(paths=paths, pytest_args=pytest_args, public_env=worker_public_env)
+        request = build_request(
+            paths=paths,
+            pytest_args=pytest_args,
+            public_env=worker_public_env,
+            isolated=isolated,
+        )
         payload = ipc.encode_request(request)
     LOGGER.info("worker_sandbox_mode mode=%s probe=%s", sandbox_mode, public_env.get("BRIDLE_ISOLATION_PROBE") == "1")
     if sandbox_mode == "docker":

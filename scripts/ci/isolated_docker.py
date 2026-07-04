@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
+INNER_CANDIDATE_ROOT = "/bridle-candidate"
 
 
 class IsolatedDockerError(RuntimeError):
@@ -26,11 +27,23 @@ def _run(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[s
 
 
 def _candidate_bind_mounts(host_candidate: str) -> list[str]:
-    """Expose the host checkout inside DinD at the same absolute path (nested bind-safe)."""
+    """Expose the host checkout inside DinD at a fixed inner root (nested bind-safe)."""
     return [
         "--mount",
-        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=shared",
+        f"type=bind,source={host_candidate},target={INNER_CANDIDATE_ROOT},bind-propagation=rshared",
     ]
+
+
+def _ensure_candidate_rshared(*, dind_name: str) -> None:
+    result = _run(
+        ["docker", "exec", dind_name, "mount", "--make-rshared", INNER_CANDIDATE_ROOT],
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_candidate_rshared_failed",
+            detail=(result.stderr or result.stdout or "mount --make-rshared failed").strip(),
+        )
 
 
 def _staging_tar_path(suffix: str) -> Path:
@@ -92,6 +105,8 @@ def start_isolated_daemon(
     if not ready:
         stop_isolated_daemon(network=network, dind_name=dind_name)
         raise IsolatedDockerError("isolated_docker_dind_not_ready", detail=dind_name)
+    if candidate_host_root is not None:
+        _ensure_candidate_rshared(dind_name=dind_name)
     docker_host = f"tcp://{dind_name}:2375"
     LOGGER.info("isolated_docker_started network=%s dind=%s host=%s", network, dind_name, docker_host)
     return docker_host, network, dind_name
@@ -245,12 +260,11 @@ def verify_worker_docker_access(
             detail=(inspect.stderr or inspect.stdout or f"missing image {image_ref}").strip(),
         )
     if candidate_host_root is not None:
-        host_root = str(candidate_host_root.resolve())
         probe_root = candidate_host_root / ".bridle-dind-bind-probe"
         for subdir in ("project", "baseline", "mocks", "output", "diagnostics"):
             (probe_root / subdir).mkdir(parents=True, exist_ok=True)
         (probe_root / "project" / "marker.txt").write_text("ok\n", encoding="utf-8")
-        probe_base = f"{host_root}/.bridle-dind-bind-probe"
+        probe_base = f"{INNER_CANDIDATE_ROOT}/.bridle-dind-bind-probe"
         try:
             bind_probe = _run(
                 [

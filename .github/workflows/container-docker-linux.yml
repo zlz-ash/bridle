@@ -266,6 +266,8 @@ jobs:
           set -euo pipefail
           echo "=== docker-tests.log (tail) ===" >&2
           tail -n 200 "$RUNNER_TEMP/docker-tests.log" >&2 || true
+          echo "=== docker-tests.log (isolated/worker errors) ===" >&2
+          grep -E "isolated_docker|worker_failed|worker_container|bind_mount|FAILED|ERROR" "$RUNNER_TEMP/docker-tests.log" >&2 || true
           echo "=== controller-failure.json ===" >&2
           if [ -f "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" ]; then
             cat "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" >&2

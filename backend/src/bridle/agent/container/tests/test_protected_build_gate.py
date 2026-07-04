@@ -172,6 +172,36 @@ def test_map_public_env_for_docker_worker_uses_host_candidate_root() -> None:
     assert mapped["BRIDLE_RUN_DOCKER_TESTS"] == "1"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="docker sandbox path mapping is linux-specific")
+def test_map_paths_for_isolated_worker_uses_inner_candidate_root() -> None:
+    worker_sandbox = _load("bridle_worker_sandbox_inner", "worker_sandbox.py")
+    host = Path("/home/runner/work/bridle/bridle/candidate")
+    isolated = worker_sandbox.IsolatedDockerContext(
+        docker_host="tcp://bridle-dind-test:2375",
+        network="bridle-net-test",
+        dind_name="bridle-dind-test",
+    )
+    mapped = worker_sandbox.map_paths_for_sandbox(
+        worker_sandbox.SandboxPaths(
+            candidate_root=host,
+            trusted_config=host / "backend/pyproject.toml",
+            trusted_scripts=Path("/trusted-scripts"),
+        ),
+        public_env={"BRIDLE_ISOLATION_PROBE": "0"},
+        isolated=isolated,
+    )
+    assert mapped.candidate_root == worker_sandbox.INNER_CANDIDATE_ROOT
+
+
+def test_isolated_docker_candidate_mount_uses_inner_root() -> None:
+    isolated_docker = _load("bridle_isolated_docker_mount", "isolated_docker.py")
+    host = "/home/runner/work/bridle/bridle/candidate"
+    mounts = isolated_docker._candidate_bind_mounts(host)
+    assert len(mounts) == 2
+    assert f"target={isolated_docker.INNER_CANDIDATE_ROOT}" in mounts[1]
+    assert "bind-propagation=rshared" in mounts[1]
+
+
 def test_stage_candidate_uses_explicit_run_scoped_subdirectory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     allowed = tmp_path / "staging-root"
     allowed.mkdir()
