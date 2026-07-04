@@ -188,13 +188,33 @@ def make_stream_handler(*, ctx: Any, trusted_root: Path):
     controller = _load_module("bridle_trusted_evidence_controller", script_dir / "trusted_evidence_controller.py")
 
     def handle_line(line: str) -> None:
-        controller.handle_controller_line(
-            line,
+        try:
+            controller.handle_controller_line(
+                line,
+                ctx=ctx,
+                trusted_scripts=script_dir,
+            )
+        except Exception:
+            LOGGER.exception("controller_line_failed line=%r", line[:240])
+            raise
+
+    return handle_line
+
+
+def make_ipc_poll(*, ctx: Any, trusted_root: Path):
+    if ctx.controller_ipc_dir is None:
+        return None
+    script_dir = trusted_scripts_path(trusted_root)
+    controller = _load_module("bridle_trusted_evidence_controller_poll", script_dir / "trusted_evidence_controller.py")
+
+    def poll() -> None:
+        controller.poll_sentinel_request_files(
+            ipc_dir=ctx.controller_ipc_dir,
             ctx=ctx,
             trusted_scripts=script_dir,
         )
 
-    return handle_line
+    return poll
 
 
 def setup_probe_layout(candidate_root: Path, trusted_harness_root: Path, evidence_dir: Path | None) -> None:
@@ -311,13 +331,16 @@ def run_worker(
     if ctx is not None and ctx.issued_it_run_id:
         public_env["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
     stream_handler = None
+    ipc_poll = None
     if ctx is not None:
         stream_handler = make_stream_handler(ctx=ctx, trusted_root=trusted_root)
+        ipc_poll = make_ipc_poll(ctx=ctx, trusted_root=trusted_root)
     return worker_sandbox.spawn_worker(
         paths=paths,
         pytest_args=tuple(pytest_args),
         public_env=public_env,
         on_stdout_line=stream_handler,
+        on_poll=ipc_poll,
         isolated=isolated,
     )
 
@@ -396,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     ipc_dir = controller_ipc_dir(source_env)
     if ipc_dir is not None:
         (ipc_dir / "sentinel-acks").mkdir(parents=True, exist_ok=True)
+        (ipc_dir / "sentinel-requests").mkdir(parents=True, exist_ok=True)
 
     if args.probe_isolation:
         harness_root = trusted_root

@@ -61,6 +61,68 @@ def resolve_candidate_relative_path(candidate_root: Path, candidate_relative: st
     return host_path
 
 
+def register_sentinel_request(
+    payload: dict[str, Any],
+    *,
+    ctx: Any,
+    trusted_scripts: Path,
+) -> str:
+    registry = _load_sentinel_registry(trusted_scripts)
+    request_id = str(payload.get("request_id") or "").strip()
+    if not request_id:
+        raise RuntimeError("sentinel_request_missing_id")
+    if request_id in ctx.handled_request_ids:
+        raise RuntimeError(f"sentinel_request_replayed request_id={request_id}")
+    candidate_relative = str(payload.get("candidate_relative") or payload.get("path") or "").strip()
+    if not candidate_relative:
+        raise RuntimeError("sentinel_request_missing_candidate_relative")
+    host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
+    record = registry.register_external_sentinel(host_path)
+    handle = f"sent-{uuid.uuid4().hex[:16]}"
+    ctx.sentinel_by_handle[handle] = record
+    ctx.handled_request_ids.add(request_id)
+    if ctx.controller_ipc_dir is not None:
+        ack_dir = ctx.controller_ipc_dir / "sentinel-acks"
+        ack_dir.mkdir(parents=True, exist_ok=True)
+        ack_path = ack_dir / f"{request_id}.json"
+        ack_path.write_text(
+            json.dumps(
+                {
+                    "status": "registered",
+                    "handle": handle,
+                    "record_digest": _record_digest(record),
+                    "request_id": request_id,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    LOGGER.info(
+        "sentinel_preregistered host_path=%s handle=%s request_id=%s",
+        host_path,
+        handle,
+        request_id,
+    )
+    return handle
+
+
+def poll_sentinel_request_files(
+    *,
+    ipc_dir: Path,
+    ctx: Any,
+    trusted_scripts: Path,
+) -> None:
+    requests_dir = ipc_dir / "sentinel-requests"
+    if not requests_dir.is_dir():
+        return
+    for path in sorted(requests_dir.glob("*.json")):
+        request_id = path.stem
+        if request_id in ctx.handled_request_ids:
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        register_sentinel_request(payload, ctx=ctx, trusted_scripts=trusted_scripts)
+
+
 def handle_controller_line(
     line: str,
     *,
@@ -70,48 +132,13 @@ def handle_controller_line(
     if _control_payload(line, RUN_REGISTER_PREFIX) is not None:
         raise RuntimeError("run_register_from_candidate_rejected")
 
-    registry = _load_sentinel_registry(trusted_scripts)
     sentinel_request = _control_payload(line, SENTINEL_REQUEST_PREFIX)
     if sentinel_request is not None:
-        payload = json.loads(sentinel_request)
-        request_id = str(payload.get("request_id") or "").strip()
-        if not request_id:
-            raise RuntimeError("sentinel_request_missing_id")
-        if request_id in ctx.handled_request_ids:
-            raise RuntimeError(f"sentinel_request_replayed request_id={request_id}")
-        candidate_relative = str(payload.get("candidate_relative") or payload.get("path") or "").strip()
-        if not candidate_relative:
-            raise RuntimeError("sentinel_request_missing_candidate_relative")
-        host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
-        record = registry.register_external_sentinel(host_path)
-        handle = f"sent-{uuid.uuid4().hex[:16]}"
-        ctx.sentinel_by_handle[handle] = record
-        ctx.handled_request_ids.add(request_id)
-        if ctx.controller_ipc_dir is not None:
-            ack_dir = ctx.controller_ipc_dir / "sentinel-acks"
-            ack_dir.mkdir(parents=True, exist_ok=True)
-            ack_path = ack_dir / f"{request_id}.json"
-            ack_path.write_text(
-                json.dumps(
-                    {
-                        "status": "registered",
-                        "handle": handle,
-                        "record_digest": _record_digest(record),
-                        "request_id": request_id,
-                    },
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
-        LOGGER.info(
-            "sentinel_preregistered host_path=%s handle=%s request_id=%s",
-            host_path,
-            handle,
-            request_id,
-        )
+        register_sentinel_request(json.loads(sentinel_request), ctx=ctx, trusted_scripts=trusted_scripts)
         return
     sentinel_ready = _control_payload(line, SENTINEL_READY_PREFIX)
     if sentinel_ready is not None:
+        registry = _load_sentinel_registry(trusted_scripts)
         payload = json.loads(sentinel_ready)
         candidate_relative = str(payload.get("candidate_relative") or payload.get("path") or "").strip()
         host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)

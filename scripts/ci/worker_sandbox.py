@@ -138,6 +138,7 @@ def _capture_process(
     *,
     timeout: int,
     on_stdout_line: Callable[[str], None] | None,
+    on_poll: Callable[[], None] | None = None,
 ):
     stream = _load_module("bridle_subprocess_stream", SCRIPT_DIR / "subprocess_stream.py")
     ipc = _load_ipc()
@@ -146,6 +147,7 @@ def _capture_process(
         max_bytes=ipc.MAX_STREAM_BYTES,
         timeout=float(timeout),
         on_stdout_line=on_stdout_line,
+        on_poll=on_poll,
     )
 
 
@@ -155,6 +157,7 @@ def _spawn_subprocess_worker(
     worker_script: Path,
     timeout: int,
     on_stdout_line: Callable[[str], None] | None,
+    on_poll: Callable[[], None] | None = None,
 ):
     env = os.environ.copy()
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
@@ -168,7 +171,7 @@ def _spawn_subprocess_worker(
     assert proc.stdin is not None
     proc.stdin.write(request_payload.encode("utf-8"))
     proc.stdin.close()
-    return _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line)
+    return _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line, on_poll=on_poll)
 
 
 def _append_worker_diagnostic(message: str) -> None:
@@ -188,6 +191,7 @@ def _spawn_docker_worker(
     timeout: int,
     public_env: dict[str, str],
     on_stdout_line: Callable[[str], None] | None,
+    on_poll: Callable[[], None] | None = None,
     isolated: IsolatedDockerContext | None,
 ):
     run_id = uuid.uuid4().hex[:12]
@@ -233,7 +237,19 @@ def _spawn_docker_worker(
             *volume_args,
         ]
     if paths.controller_ipc is not None:
-        volume_args.extend(["-v", f"{paths.controller_ipc.resolve()}:/controller-ipc:ro"])
+        ipc_root = paths.controller_ipc.resolve()
+        requests_dir = ipc_root / "sentinel-requests"
+        acks_dir = ipc_root / "sentinel-acks"
+        requests_dir.mkdir(parents=True, exist_ok=True)
+        acks_dir.mkdir(parents=True, exist_ok=True)
+        volume_args.extend(
+            [
+                "-v",
+                f"{requests_dir}:/controller-ipc/sentinel-requests:rw",
+                "-v",
+                f"{acks_dir}:/controller-ipc/sentinel-acks:ro",
+            ]
+        )
     network_args = ["--network", "none"] if probe else []
     if isolated is not None and not probe:
         network_args = ["--network", isolated.network]
@@ -272,7 +288,7 @@ def _spawn_docker_worker(
     assert proc.stdin is not None
     proc.stdin.write(request_payload.encode("utf-8"))
     proc.stdin.close()
-    capture = _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line)
+    capture = _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line, on_poll=on_poll)
     if capture.returncode not in (0, None):
         stderr_text = capture.stderr.decode("utf-8", errors="replace")
         stdout_text = capture.stdout.decode("utf-8", errors="replace")
@@ -321,6 +337,7 @@ def spawn_worker(
     public_env: dict[str, str],
     timeout: int = 3600,
     on_stdout_line: Callable[[str], None] | None = None,
+    on_poll: Callable[[], None] | None = None,
     isolated: IsolatedDockerContext | None = None,
 ):
     ipc = _load_ipc()
@@ -356,6 +373,7 @@ def spawn_worker(
             timeout=timeout,
             public_env=worker_public_env,
             on_stdout_line=on_stdout_line,
+            on_poll=on_poll,
             isolated=isolated,
         )
         proc_returncode = capture.returncode
@@ -367,6 +385,7 @@ def spawn_worker(
             worker_script=paths.trusted_scripts / "candidate_worker.py",
             timeout=timeout,
             on_stdout_line=on_stdout_line,
+            on_poll=on_poll,
         )
         proc_returncode = capture.returncode
         raw_stdout = capture.stdout

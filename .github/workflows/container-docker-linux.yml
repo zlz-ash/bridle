@@ -171,6 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-requests"
           TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
           IPC_PROBE="$RUNNER_TEMP/trusted-ipc-probe.json"
           PROBE_LOG="$RUNNER_TEMP/probe.log"
@@ -253,6 +254,7 @@ jobs:
           IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
           DOCKER_TESTS_LOG="$RUNNER_TEMP/docker-tests.log"
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-requests"
           if ! python3 -I "$TRUSTED_TEST_RUNNER" \
             --ipc-transcript "$IPC_DOCKER" \
             --verify-overlay-after "$RUNNER_TEMP/trusted-harness-snapshot.json" \

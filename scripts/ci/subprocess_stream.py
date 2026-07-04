@@ -25,6 +25,7 @@ def capture_with_deadline(
     max_bytes: int,
     timeout: float,
     on_stdout_line: Callable[[str], None] | None = None,
+    on_poll: Callable[[], None] | None = None,
 ) -> StreamCaptureResult:
     deadline = time.monotonic() + timeout
     stdout_chunks: list[bytes] = []
@@ -102,6 +103,8 @@ def capture_with_deadline(
             timed_out = True
             proc.kill()
             break
+        if on_poll is not None:
+            on_poll()
         if proc.poll() is not None:
             break
         time.sleep(0.05)

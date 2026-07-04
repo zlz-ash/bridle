@@ -125,10 +125,13 @@ def run_worker_request(request_raw: str) -> str:
         extra_args=request.pytest_args,
     )
     LOGGER.info("candidate_worker_pytest_started candidate_root=%s", candidate_root)
+    pytest_env = dict(os.environ)
+    pytest_env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, *invocation],
+        [sys.executable, "-u", *invocation],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=pytest_env,
     )
     stdout_parts: list[bytes] = []
     assert proc.stdout is not None

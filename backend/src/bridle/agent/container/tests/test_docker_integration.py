@@ -353,13 +353,15 @@ def _await_controller_sentinel_ack(outside: Path) -> str:
     candidate_root = _candidate_root_for_relative_paths()
     candidate_relative = outside.resolve().relative_to(candidate_root).as_posix()
     request_id = uuid.uuid4().hex[:12]
-    print(
-        SENTINEL_REQUEST_PREFIX
-        + json.dumps(
+    request_dir = CONTROLLER_IPC_ROOT / "sentinel-requests"
+    request_dir.mkdir(parents=True, exist_ok=True)
+    request_path = request_dir / f"{request_id}.json"
+    request_path.write_text(
+        json.dumps(
             {"request_id": request_id, "candidate_relative": candidate_relative},
             sort_keys=True,
         ),
-        flush=True,
+        encoding="utf-8",
     )
     ack_path = CONTROLLER_IPC_ROOT / "sentinel-acks" / f"{request_id}.json"
     deadline = time.time() + 30.0

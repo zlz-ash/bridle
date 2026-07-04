@@ -273,6 +273,33 @@ def test_handle_controller_line_accepts_embedded_sentinel_request(tmp_path: Path
     assert isinstance(payload.get("handle"), str) and payload["handle"]
 
 
+def test_poll_sentinel_request_files_writes_ack(tmp_path: Path) -> None:
+    controller = _load("bridle_trusted_evidence_controller_poll", "trusted_evidence_controller.py")
+    ctx_module = _load("bridle_controller_context_poll", "controller_context.py")
+    candidate = tmp_path / "candidate"
+    target = candidate / "backend/.test-workspaces/ws/outside.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret\n", encoding="utf-8")
+    ipc_dir = tmp_path / "ipc"
+    requests_dir = ipc_dir / "sentinel-requests"
+    acks_dir = ipc_dir / "sentinel-acks"
+    requests_dir.mkdir(parents=True)
+    acks_dir.mkdir(parents=True)
+    ctx = ctx_module.ControllerExecutionContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
+    request_id = "e960bbcd5c16"
+    relative = "backend/.test-workspaces/ws/outside.txt"
+    (requests_dir / f"{request_id}.json").write_text(
+        json.dumps({"request_id": request_id, "candidate_relative": relative}, sort_keys=True),
+        encoding="utf-8",
+    )
+    controller.poll_sentinel_request_files(ipc_dir=ipc_dir, ctx=ctx, trusted_scripts=SCRIPT_DIR)
+    ack_path = acks_dir / f"{request_id}.json"
+    assert ack_path.is_file()
+    payload = json.loads(ack_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "registered"
+    assert payload["request_id"] == request_id
+
+
 def test_run_lease_rejects_foreign_it_run_id(tmp_path: Path) -> None:
     ipc_dir = tmp_path / "ipc"
     ipc_dir.mkdir()
