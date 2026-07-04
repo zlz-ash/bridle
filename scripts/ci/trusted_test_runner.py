@@ -441,13 +441,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
 
         if observation.worker_state != "exited" or observation.exit_code is None:
-            LOGGER.error(
-                "docker_worker_failed state=%s exit_code=%s stderr_tail=%s stdout_tail=%s",
-                observation.worker_state,
-                observation.exit_code,
-                worker_stderr[-4000:],
-                worker_stdout[-4000:],
-            )
+        LOGGER.error(
+            "docker_worker_failed state=%s exit_code=%s stderr_tail=%s stdout_tail=%s",
+            observation.worker_state,
+            observation.exit_code,
+            worker_stderr[-8000:],
+            worker_stdout[-8000:],
+        )
             return 1
 
         if args.verify_overlay_after is not None:

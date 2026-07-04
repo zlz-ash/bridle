@@ -38,7 +38,12 @@ def start_isolated_daemon(
     volume_args: list[str] = []
     if candidate_host_root is not None:
         host_candidate = str(candidate_host_root.resolve())
-        volume_args.extend(["-v", f"{host_candidate}:/candidate:rw"])
+        volume_args.extend(
+            [
+                "--mount",
+                f"type=bind,source={host_candidate},target=/candidate,bind-propagation=rshared",
+            ]
+        )
     create_dind = _run(
         [
             "docker",

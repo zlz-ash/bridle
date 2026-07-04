@@ -221,9 +221,9 @@ jobs:
             --verify-overlay-after "$RUNNER_TEMP/trusted-harness-snapshot.json" \
             "$GITHUB_WORKSPACE/candidate" \
             "$GITHUB_WORKSPACE/trusted-harness" \
-            -- -q -rs 2>&1 | tee "$DOCKER_TESTS_LOG"; then
+            -- -x --maxfail=1 --tb=short -vv -rs 2>&1 | tee "$DOCKER_TESTS_LOG"; then
             echo "docker_tests_failed see $DOCKER_TESTS_LOG and $IPC_DOCKER" >&2
-            tail -n 120 "$DOCKER_TESTS_LOG" >&2 || true
+            tail -n 200 "$DOCKER_TESTS_LOG" >&2 || true
             if [ -f "$IPC_DOCKER" ]; then
               python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8')), indent=2, sort_keys=True))" "$IPC_DOCKER" >&2
             fi
