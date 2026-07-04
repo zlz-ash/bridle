@@ -47,21 +47,13 @@ jobs:
       - name: Bootstrap trusted harness controller when base lacks scripts
         run: |
           set -euo pipefail
-          if [ ! -f trusted-harness/scripts/ci/trusted_test_runner.py ]; then
-            if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" != "refs/heads/${{ github.event.repository.default_branch }}" ]; then
-              echo "Bootstrapping trusted harness from candidate for feature-branch rollout"
-              mkdir -p trusted-harness/scripts trusted-harness/.github
-              cp -a candidate/scripts/ci trusted-harness/scripts/
-              cp -a candidate/.github/rulesets trusted-harness/.github/ 2>/dev/null || true
-              cp candidate/.github/trusted-docker-harness.txt trusted-harness/.github/ 2>/dev/null || true
-              cp -a candidate/backend trusted-harness/
-              touch trusted-harness/.bridle-bootstrapped
-            else
-              echo "trusted harness missing on base branch; merge scripts/ci to default branch first" >&2
-              exit 1
-            fi
+          rollout_from_candidate=0
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            rollout_from_candidate=1
           elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" != "refs/heads/${{ github.event.repository.default_branch }}" ]; then
-            echo "Refreshing trusted harness overlay + controller from candidate for feature-branch rollout"
+            rollout_from_candidate=1
+          fi
+          refresh_overlay_files() {
             cp -a candidate/scripts/ci trusted-harness/scripts/
             manifest="trusted-harness/.github/trusted-docker-harness.txt"
             if [ -f "$manifest" ]; then
@@ -78,6 +70,23 @@ jobs:
               done < "$manifest"
             fi
             touch trusted-harness/.bridle-bootstrapped
+          }
+          if [ ! -f trusted-harness/scripts/ci/trusted_test_runner.py ]; then
+            if [ "$rollout_from_candidate" = "1" ]; then
+              echo "Bootstrapping trusted harness from candidate for feature-branch rollout"
+              mkdir -p trusted-harness/scripts trusted-harness/.github
+              cp -a candidate/scripts/ci trusted-harness/scripts/
+              cp -a candidate/.github/rulesets trusted-harness/.github/ 2>/dev/null || true
+              cp candidate/.github/trusted-docker-harness.txt trusted-harness/.github/ 2>/dev/null || true
+              cp -a candidate/backend trusted-harness/
+              touch trusted-harness/.bridle-bootstrapped
+            else
+              echo "trusted harness missing on base branch; merge scripts/ci to default branch first" >&2
+              exit 1
+            fi
+          elif [ "$rollout_from_candidate" = "1" ]; then
+            echo "Refreshing trusted harness overlay + controller from candidate for feature-branch rollout"
+            refresh_overlay_files
           fi
 
       - name: Validate GitHub ruleset spec
@@ -91,6 +100,14 @@ jobs:
             candidate \
             trusted-harness \
             "$RUNNER_TEMP/trusted-harness-snapshot.json"
+          python3 - <<'PY'
+          from pathlib import Path
+          conftest = Path("candidate/backend/src/bridle/agent/container/tests/conftest.py")
+          text = conftest.read_text(encoding="utf-8")
+          if "def test_workspace" not in text:
+              raise SystemExit("overlay_missing_test_workspace_fixture")
+          print("overlay_conftest_ok path=", conftest)
+          PY
 
       - uses: actions/setup-python@v5
         with:
