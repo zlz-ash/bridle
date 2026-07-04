@@ -152,8 +152,14 @@ jobs:
           fi
           echo "ipc_probe_transcript=$IPC_PROBE" >> "$GITHUB_OUTPUT"
 
-      - name: Run Docker integration tests and gate
-        id: gate
+      - name: Verify candidate overlay before docker gate
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py" \
+            verify-overlay "$GITHUB_WORKSPACE/candidate" "$RUNNER_TEMP/trusted-harness-snapshot.json"
+
+      - name: Run Docker integration tests
+        id: docker-tests
         working-directory: candidate
         env:
           BRIDLE_RUN_DOCKER_TESTS: "1"
@@ -170,32 +176,37 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          TRUSTED_CONTROLLER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py"
           TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
-          TRUSTED_PYTHONPATH="$GITHUB_WORKSPACE/trusted-harness/backend/src"
-          SNAPSHOT="$RUNNER_TEMP/trusted-harness-snapshot.json"
           IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
-          GATE_LOG="$RUNNER_TEMP/gate.log"
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
-          if ! {
-            python3 -I "$TRUSTED_CONTROLLER" verify-overlay "$GITHUB_WORKSPACE/candidate" "$SNAPSHOT"
-            python3 -I "$TRUSTED_TEST_RUNNER" \
-              --ipc-transcript "$IPC_DOCKER" \
-              --verify-overlay-after "$SNAPSHOT" \
-              "$GITHUB_WORKSPACE/candidate" \
-              "$GITHUB_WORKSPACE/trusted-harness" \
-              -- -q -rs
-            PYTHONPATH="$TRUSTED_PYTHONPATH" python -m bridle.agent.container.tests.docker_gate \
-              "$BRIDLE_DOCKER_EVIDENCE_DIR" \
-              --source-digest "${{ steps.review-image.outputs.source_digest }}" \
-              --image-digest "${{ steps.review-image.outputs.image_digest }}" \
-              --github-sha "$GITHUB_SHA"
-          } 2>&1 | tee "$GATE_LOG"; then
-            echo "gate_failed see $GATE_LOG and $IPC_DOCKER" >&2
+          if ! python3 -I "$TRUSTED_TEST_RUNNER" \
+            --ipc-transcript "$IPC_DOCKER" \
+            --verify-overlay-after "$RUNNER_TEMP/trusted-harness-snapshot.json" \
+            "$GITHUB_WORKSPACE/candidate" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            -- -q -rs 2>&1 | tee "$RUNNER_TEMP/docker-tests.log"; then
+            echo "docker_tests_failed see $RUNNER_TEMP/docker-tests.log and $IPC_DOCKER" >&2
+            exit 1
+          fi
+          echo "ipc_docker_transcript=$IPC_DOCKER" >> "$GITHUB_OUTPUT"
+
+      - name: Validate docker integration evidence
+        id: gate
+        working-directory: candidate
+        env:
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+        run: |
+          set -euo pipefail
+          TRUSTED_PYTHONPATH="$GITHUB_WORKSPACE/trusted-harness/backend/src"
+          if ! PYTHONPATH="$TRUSTED_PYTHONPATH" python -m bridle.agent.container.tests.docker_gate \
+            "$BRIDLE_DOCKER_EVIDENCE_DIR" \
+            --source-digest "${{ steps.review-image.outputs.source_digest }}" \
+            --image-digest "${{ steps.review-image.outputs.image_digest }}" \
+            --github-sha "$GITHUB_SHA" 2>&1 | tee "$RUNNER_TEMP/gate.log"; then
+            echo "docker_gate_failed see $RUNNER_TEMP/gate.log" >&2
             exit 1
           fi
           echo "trusted_harness_ref=${{ steps.trusted-ref.outputs.ref }}" >> "$GITHUB_OUTPUT"
-          echo "ipc_docker_transcript=$IPC_DOCKER" >> "$GITHUB_OUTPUT"
 
       - name: Upload validated Docker integration evidence
         if: success()
@@ -205,7 +216,7 @@ jobs:
           path: |
             ${{ runner.temp }}/bridle-docker-evidence
             ${{ steps.probe.outputs.ipc_probe_transcript }}
-            ${{ steps.gate.outputs.ipc_docker_transcript }}
+            ${{ steps.docker-tests.outputs.ipc_docker_transcript }}
           if-no-files-found: error
 
       - name: Upload Docker integration evidence (diagnostics)
@@ -218,5 +229,6 @@ jobs:
             ${{ runner.temp }}/trusted-ipc-probe.json
             ${{ runner.temp }}/probe.log
             ${{ runner.temp }}/trusted-ipc-docker.json
+            ${{ runner.temp }}/docker-tests.log
             ${{ runner.temp }}/gate.log
           if-no-files-found: warn
