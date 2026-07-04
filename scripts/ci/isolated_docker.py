@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
 
@@ -23,13 +24,21 @@ def _run(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[s
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
 
 
-def start_isolated_daemon(*, run_id: str | None = None) -> tuple[str, str, str]:
+def start_isolated_daemon(
+    *,
+    run_id: str | None = None,
+    candidate_host_root: Path | None = None,
+) -> tuple[str, str, str]:
     owner = run_id or uuid.uuid4().hex[:12]
     network = f"bridle-net-{owner}"
     dind_name = f"bridle-dind-{owner}"
     create_net = _run(["docker", "network", "create", network])
     if create_net.returncode != 0:
         raise IsolatedDockerError("isolated_docker_network_create_failed", detail=create_net.stderr.strip())
+    volume_args: list[str] = []
+    if candidate_host_root is not None:
+        host_candidate = str(candidate_host_root.resolve())
+        volume_args.extend(["-v", f"{host_candidate}:/candidate:rw"])
     create_dind = _run(
         [
             "docker",
@@ -40,6 +49,7 @@ def start_isolated_daemon(*, run_id: str | None = None) -> tuple[str, str, str]:
             "--network",
             network,
             "--privileged",
+            *volume_args,
             "-e",
             "DOCKER_TLS_CERTDIR=",
             "docker:24-dind",
@@ -178,7 +188,13 @@ def import_host_image_to_dind(
     return loaded_digest
 
 
-def verify_worker_docker_access(*, dind_name: str, network: str, image_ref: str) -> None:
+def verify_worker_docker_access(
+    *,
+    dind_name: str,
+    network: str,
+    image_ref: str,
+    worker_image: str,
+) -> None:
     probe_name = f"bridle-dind-probe-{uuid.uuid4().hex[:12]}"
     run = _run(
         [
@@ -191,11 +207,11 @@ def verify_worker_docker_access(*, dind_name: str, network: str, image_ref: str)
             network,
             "-e",
             f"DOCKER_HOST=tcp://{dind_name}:2375",
-            "docker:24-cli",
+            worker_image,
             "docker",
             "info",
         ],
-        timeout=60,
+        timeout=120,
     )
     if run.returncode != 0:
         raise IsolatedDockerError(

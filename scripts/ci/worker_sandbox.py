@@ -93,9 +93,12 @@ def build_request(
     )
 
 
-def start_isolated_docker_for_worker(*, run_id: str | None = None) -> IsolatedDockerContext:
+def start_isolated_docker_for_worker(*, run_id: str | None = None, candidate_host_root: Path | None = None) -> IsolatedDockerContext:
     isolated = _load_module("bridle_isolated_docker", SCRIPT_DIR / "isolated_docker.py")
-    docker_host, network, dind_name = isolated.start_isolated_daemon(run_id=run_id)
+    docker_host, network, dind_name = isolated.start_isolated_daemon(
+        run_id=run_id,
+        candidate_host_root=candidate_host_root,
+    )
     return IsolatedDockerContext(docker_host=docker_host, network=network, dind_name=dind_name)
 
 
@@ -264,6 +267,8 @@ def spawn_worker(
         if sandbox_mode == "docker"
         else dict(public_env)
     )
+    if sandbox_mode == "docker" and isolated is not None:
+        worker_public_env["DOCKER_HOST"] = isolated.docker_host
     if sandbox_mode == "docker":
         request = build_request(paths=paths, pytest_args=pytest_args, public_env=worker_public_env)
         payload = ipc.encode_request(request)

@@ -332,7 +332,8 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
             if worker_sandbox.use_docker_sandbox(public_env=build_public_env(candidate_root=candidate_root, probe=False)):
                 isolated = worker_sandbox.start_isolated_docker_for_worker(
-                    run_id=os.environ.get("GITHUB_SHA", "")[:12] or None
+                    run_id=os.environ.get("GITHUB_SHA", "")[:12] or None,
+                    candidate_host_root=candidate_root,
                 )
                 ctx.isolated_docker_host = isolated.docker_host
                 ctx.isolated_dind_name = isolated.dind_name
@@ -354,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
                             dind_name=isolated.dind_name,
                             network=isolated.network,
                             image_ref=review_image,
+                            worker_image=os.environ.get("BRIDLE_WORKER_IMAGE", "").strip()
+                            or worker_sandbox.worker_image_ref(),
                         )
                     except Exception as exc:
                         LOGGER.error(
