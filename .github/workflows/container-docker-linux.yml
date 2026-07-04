@@ -169,6 +169,7 @@ jobs:
           SNAPSHOT="$RUNNER_TEMP/trusted-harness-snapshot.json"
           IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
+          python3 -I "$TRUSTED_CONTROLLER" verify-overlay "$GITHUB_WORKSPACE/candidate" "$SNAPSHOT"
           python3 -I "$TRUSTED_TEST_RUNNER" \
             --ipc-transcript "$IPC_DOCKER" \
             --verify-overlay-after "$SNAPSHOT" \
@@ -190,7 +191,7 @@ jobs:
           name: docker-integration-evidence-validated
           path: |
             ${{ runner.temp }}/bridle-docker-evidence
-            ${{ steps.gate.outputs.ipc_probe_transcript }}
+            ${{ steps.probe.outputs.ipc_probe_transcript }}
             ${{ steps.gate.outputs.ipc_docker_transcript }}
           if-no-files-found: error
 
