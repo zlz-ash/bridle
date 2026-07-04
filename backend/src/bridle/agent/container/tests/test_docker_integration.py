@@ -346,8 +346,6 @@ def test_container_creates_slot_escape_symlinks():
 
 
 def _candidate_root_for_relative_paths() -> Path:
-    if os.environ.get("BRIDLE_CANDIDATE_WORKER") == "1":
-        return Path("/candidate").resolve()
     return Path(os.environ["BRIDLE_TRUSTED_CHECKOUT_ROOT"]).resolve()
 
 

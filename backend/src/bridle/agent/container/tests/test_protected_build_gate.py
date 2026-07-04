@@ -157,16 +157,18 @@ def test_worker_sandbox_uses_docker_for_main_and_probe(monkeypatch: pytest.Monke
     assert worker_sandbox.use_docker_sandbox(public_env={"BRIDLE_ISOLATION_PROBE": "1"}) is True
 
 
-def test_map_public_env_for_docker_worker_uses_container_candidate_root() -> None:
+def test_map_public_env_for_docker_worker_uses_host_candidate_root() -> None:
     worker_sandbox = _load("bridle_worker_sandbox_env", "worker_sandbox.py")
+    host = "/home/runner/work/bridle/bridle/candidate"
+    host_path = Path(host)
     mapped = worker_sandbox.map_public_env_for_docker_worker(
         {
-            "BRIDLE_TRUSTED_CHECKOUT_ROOT": "/home/runner/work/bridle/bridle/candidate",
+            "BRIDLE_TRUSTED_CHECKOUT_ROOT": host,
             "BRIDLE_RUN_DOCKER_TESTS": "1",
         },
-        Path("/candidate"),
+        host_path,
     )
-    assert mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] == "/candidate"
+    assert mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] == host_path.resolve().as_posix()
     assert mapped["BRIDLE_RUN_DOCKER_TESTS"] == "1"
 
 

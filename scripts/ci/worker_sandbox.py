@@ -69,8 +69,9 @@ def map_paths_for_sandbox(paths: SandboxPaths, *, public_env: Mapping[str, str] 
     if not use_docker_sandbox(public_env=public_env):
         return paths
     controller_ipc = Path("/controller-ipc") if paths.controller_ipc is not None else None
+    host_candidate = paths.candidate_root.resolve()
     return SandboxPaths(
-        candidate_root=Path("/candidate"),
+        candidate_root=host_candidate,
         trusted_config=Path("/trusted-config") / paths.trusted_config.name,
         trusted_scripts=Path("/trusted-scripts"),
         controller_ipc=controller_ipc,
@@ -166,11 +167,20 @@ def _spawn_docker_worker(
     for key, value in merged_env.items():
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
-    env_args.extend(["-e", "PYTHONPATH=/candidate/backend/src", "-e", "HOME=/tmp", "-e", "TMPDIR=/tmp"])
     host_candidate = str(paths.candidate_root.resolve())
+    env_args.extend(
+        [
+            "-e",
+            f"PYTHONPATH={host_candidate}/backend/src",
+            "-e",
+            "HOME=/tmp",
+            "-e",
+            "TMPDIR=/tmp",
+        ]
+    )
     volume_args = [
         "--mount",
-        f"type=bind,source={host_candidate},target=/candidate,bind-propagation=rshared",
+        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=rshared",
         "-v",
         f"{paths.trusted_config.parent.resolve()}:/trusted-config:ro",
         "-v",
@@ -245,7 +255,7 @@ def _attach_controller_identity(observation, ipc):
 
 def map_public_env_for_docker_worker(public_env: Mapping[str, str], candidate_root: Path) -> dict[str, str]:
     mapped = dict(public_env)
-    mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] = candidate_root.as_posix()
+    mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] = candidate_root.resolve().as_posix()
     return mapped
 
 

@@ -135,6 +135,28 @@ def emit_worker_streams(worker_stdout: str, worker_stderr: str, *, limit: int = 
         print(worker_stdout[-limit:], file=sys.stderr)
 
 
+def write_controller_failure_transcript(
+    *,
+    error: str,
+    worker_stdout: str,
+    worker_stderr: str,
+    observation: Any | None = None,
+) -> None:
+    evidence_dir = os.environ.get("BRIDLE_DOCKER_EVIDENCE_DIR", "").strip()
+    if not evidence_dir:
+        return
+    payload = {
+        "error": error,
+        "worker_state": getattr(observation, "worker_state", None) if observation else None,
+        "exit_code": getattr(observation, "exit_code", None) if observation else None,
+        "worker_stdout_tail": worker_stdout[-8000:],
+        "worker_stderr_tail": worker_stderr[-8000:],
+    }
+    path = Path(evidence_dir) / "controller-failure.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def controller_ipc_dir(source_env: Mapping[str, str]) -> Path | None:
     raw = source_env.get("BRIDLE_CONTROLLER_IPC_DIR", "").strip()
     return Path(raw) if raw else None
@@ -425,6 +447,12 @@ def main(argv: list[str] | None = None) -> int:
                 probe_report,
             )
             emit_worker_streams(worker_stdout, worker_stderr)
+            write_controller_failure_transcript(
+                error=str(exc),
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                observation=observation,
+            )
             raise
 
         if args.probe_isolation and observation.worker_uid is not None and observation.controller_uid is not None:
@@ -462,14 +490,26 @@ def main(argv: list[str] | None = None) -> int:
                 worker_stdout[-8000:],
             )
             emit_worker_streams(worker_stdout, worker_stderr)
+            write_controller_failure_transcript(
+                error="docker_worker_not_exited",
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                observation=observation,
+            )
             return 1
 
         try:
             if args.verify_overlay_after is not None:
                 harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
                 harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
-        except Exception:
+        except Exception as overlay_exc:
             emit_worker_streams(worker_stdout, worker_stderr)
+            write_controller_failure_transcript(
+                error=str(overlay_exc),
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                observation=observation,
+            )
             raise
 
         exit_code = finalize_controller_evidence(
@@ -480,10 +520,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         if exit_code != 0:
             emit_worker_streams(worker_stdout, worker_stderr)
+            write_controller_failure_transcript(
+                error=f"pytest_exit_code={exit_code}",
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                observation=observation,
+            )
         return exit_code
     except Exception as exc:
         if worker_stdout or worker_stderr:
             emit_worker_streams(worker_stdout, worker_stderr)
+        write_controller_failure_transcript(
+            error=str(exc),
+            worker_stdout=worker_stdout,
+            worker_stderr=worker_stderr,
+        )
         LOGGER.error("trusted_controller_failed error=%s", exc)
         raise
     finally:

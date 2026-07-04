@@ -26,16 +26,11 @@ def _run(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[s
 
 
 def _candidate_bind_mounts(host_candidate: str) -> list[str]:
-    """Expose the host checkout to DinD at both the host path and /candidate."""
-    args: list[str] = []
-    for target in (host_candidate, "/candidate"):
-        args.extend(
-            [
-                "--mount",
-                f"type=bind,source={host_candidate},target={target},bind-propagation=rshared",
-            ]
-        )
-    return args
+    """Expose the host checkout inside DinD at the same absolute path (nested bind-safe)."""
+    return [
+        "--mount",
+        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=rshared",
+    ]
 
 
 def _staging_tar_path(suffix: str) -> Path:
@@ -266,10 +261,12 @@ def verify_worker_docker_access(
             detail=(inspect.stderr or inspect.stdout or f"missing image {image_ref}").strip(),
         )
     if candidate_host_root is not None:
+        host_root = str(candidate_host_root.resolve())
         probe_root = candidate_host_root / ".bridle-dind-bind-probe"
         for subdir in ("project", "baseline", "mocks", "output", "diagnostics"):
             (probe_root / subdir).mkdir(parents=True, exist_ok=True)
         (probe_root / "project" / "marker.txt").write_text("ok\n", encoding="utf-8")
+        probe_base = f"{host_root}/.bridle-dind-bind-probe"
         try:
             bind_probe = _run(
                 [
@@ -295,15 +292,15 @@ def verify_worker_docker_access(
                     "--user",
                     "1000",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/project,dst=/workspace/project",
+                    f"type=bind,src={probe_base}/project,dst=/workspace/project",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/baseline,dst=/workspace/baseline,readonly",
+                    f"type=bind,src={probe_base}/baseline,dst=/workspace/baseline,readonly",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/mocks,dst=/workspace/mocks,readonly",
+                    f"type=bind,src={probe_base}/mocks,dst=/workspace/mocks,readonly",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/output,dst=/workspace/output",
+                    f"type=bind,src={probe_base}/output,dst=/workspace/output",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/diagnostics,dst=/workspace/diagnostics",
+                    f"type=bind,src={probe_base}/diagnostics,dst=/workspace/diagnostics",
                     image_ref,
                     "python",
                     "-m",
