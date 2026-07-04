@@ -202,6 +202,15 @@ def test_isolated_docker_candidate_mount_uses_inner_root() -> None:
     assert "bind-propagation=rshared" in mounts[1]
 
 
+def test_docker_worker_run_identity_matches_agent_uid() -> None:
+    worker_sandbox = _load("bridle_worker_sandbox_identity", "worker_sandbox.py")
+    assert worker_sandbox.docker_worker_run_identity({"BRIDLE_RUN_DOCKER_TESTS": "1"}) == (1000, 1000)
+    host_identity = worker_sandbox.docker_worker_run_identity({"BRIDLE_ISOLATION_PROBE": "1"})
+    assert worker_sandbox.docker_worker_run_identity(
+        {"BRIDLE_RUN_DOCKER_TESTS": "1", "BRIDLE_ISOLATION_PROBE": "1"}
+    ) == host_identity
+
+
 def test_parse_docker_load_id_ignores_tag_only_output() -> None:
     isolated_docker = _load("bridle_isolated_docker_load_parse", "isolated_docker.py")
     host_digest = "sha256:b7443443752b45b130caec7fb259802fad77f34e396dfca0545aad1ad3c11ab3"

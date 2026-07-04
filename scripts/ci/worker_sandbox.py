@@ -184,6 +184,14 @@ def _append_worker_diagnostic(message: str) -> None:
         handle.write(message + "\n")
 
 
+def docker_worker_run_identity(public_env: Mapping[str, str]) -> tuple[int, int]:
+    if public_env.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and public_env.get("BRIDLE_ISOLATION_PROBE") != "1":
+        return 1000, 1000
+    run_uid = os.getuid() if hasattr(os, "getuid") else 1000
+    run_gid = os.getgid() if hasattr(os, "getgid") else 1000
+    return run_uid, run_gid
+
+
 def _spawn_docker_worker(
     *,
     request_payload: str,
@@ -253,8 +261,7 @@ def _spawn_docker_worker(
     network_args = ["--network", "none"] if probe else []
     if isolated is not None and not probe:
         network_args = ["--network", isolated.network]
-    run_uid = os.getuid() if hasattr(os, "getuid") else 1000
-    run_gid = os.getgid() if hasattr(os, "getgid") else 1000
+    run_uid, run_gid = docker_worker_run_identity(merged_env)
     cmd = [
         "docker",
         "run",
