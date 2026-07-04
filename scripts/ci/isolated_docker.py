@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -24,6 +25,30 @@ def _run(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[s
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
 
 
+def _candidate_bind_mounts(host_candidate: str) -> list[str]:
+    """Expose the host checkout to DinD at both the host path and /candidate."""
+    args: list[str] = []
+    for target in (host_candidate, "/candidate"):
+        args.extend(
+            [
+                "--mount",
+                f"type=bind,source={host_candidate},target={target},bind-propagation=rshared",
+            ]
+        )
+    return args
+
+
+def _staging_tar_path(suffix: str) -> Path:
+    for key in ("BRIDLE_STAGING_ROOT", "BRIDLE_RUNNER_TEMP", "RUNNER_TEMP", "TMPDIR"):
+        root = os.environ.get(key, "").strip()
+        if root:
+            staging = Path(root)
+            staging.mkdir(parents=True, exist_ok=True)
+            return staging / f"bridle-review-{uuid.uuid4().hex[:12]}{suffix}"
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    return Path(handle.name)
+
+
 def start_isolated_daemon(
     *,
     run_id: str | None = None,
@@ -38,12 +63,7 @@ def start_isolated_daemon(
     volume_args: list[str] = []
     if candidate_host_root is not None:
         host_candidate = str(candidate_host_root.resolve())
-        volume_args.extend(
-            [
-                "--mount",
-                f"type=bind,source={host_candidate},target=/candidate,bind-propagation=rshared",
-            ]
-        )
+        volume_args.extend(_candidate_bind_mounts(host_candidate))
     create_dind = _run(
         [
             "docker",
@@ -122,18 +142,16 @@ def import_host_image_to_dind(
             detail=f"expected={expected_digest} host={host_digest}",
         )
 
-    tar_path = ""
+    tar_path = _staging_tar_path(".tar")
     inner_tar = f"/tmp/bridle-review-{uuid.uuid4().hex[:12]}.tar"
     try:
-        with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as handle:
-            tar_path = handle.name
-        save = _run(["docker", "save", "-o", tar_path, image_ref], timeout=600)
+        save = _run(["docker", "save", "-o", str(tar_path), image_ref], timeout=600)
         if save.returncode != 0:
             raise IsolatedDockerError(
                 "isolated_docker_image_save_failed",
                 detail=(save.stderr or save.stdout or "docker save failed").strip(),
             )
-        copied = _run(["docker", "cp", tar_path, f"{dind_name}:{inner_tar}"], timeout=120)
+        copied = _run(["docker", "cp", str(tar_path), f"{dind_name}:{inner_tar}"], timeout=120)
         if copied.returncode != 0:
             raise IsolatedDockerError(
                 "isolated_docker_image_copy_failed",
@@ -146,11 +164,10 @@ def import_host_image_to_dind(
                 detail=(load.stderr or load.stdout or "docker load failed").strip(),
             )
     finally:
-        if tar_path:
-            try:
-                os.unlink(tar_path)
-            except OSError:
-                pass
+        try:
+            tar_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         _run(["docker", "exec", dind_name, "rm", "-f", inner_tar], timeout=30)
 
     inspect = _run(
@@ -178,11 +195,9 @@ def import_host_image_to_dind(
             )
     loaded_digest = _normalize_image_id((inspect.stdout or "").strip())
     if loaded_digest != host_digest:
-        LOGGER.warning(
-            "isolated_docker_loaded_digest_differs host=%s inner=%s image=%s",
-            host_digest,
-            loaded_digest,
-            image_ref,
+        raise IsolatedDockerError(
+            "isolated_docker_loaded_digest_mismatch",
+            detail=f"host={host_digest} inner={loaded_digest} image={image_ref}",
         )
     LOGGER.info(
         "isolated_docker_image_imported dind=%s image=%s digest=%s",
@@ -234,8 +249,10 @@ def verify_worker_docker_access(
             detail=(inspect.stderr or inspect.stdout or f"missing image {image_ref}").strip(),
         )
     if candidate_host_root is not None:
-        marker = candidate_host_root / ".bridle-dind-bind-probe"
-        marker.write_text("ok\n", encoding="utf-8")
+        probe_root = candidate_host_root / ".bridle-dind-bind-probe"
+        for subdir in ("project", "baseline", "mocks", "output", "diagnostics"):
+            (probe_root / subdir).mkdir(parents=True, exist_ok=True)
+        (probe_root / "project" / "marker.txt").write_text("ok\n", encoding="utf-8")
         try:
             bind_probe = _run(
                 [
@@ -249,12 +266,28 @@ def verify_worker_docker_access(
                     worker_image,
                     "docker",
                     "create",
+                    "--network",
+                    "none",
+                    "--cap-drop",
+                    "ALL",
+                    "--security-opt",
+                    "no-new-privileges",
+                    "--read-only",
+                    "--tmpfs",
+                    "/tmp:rw,noexec,nosuid,size=64m",
+                    "--user",
+                    "1000",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe,dst=/probe,readonly",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/project,dst=/container/project",
+                    "--mount",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/baseline,dst=/container/baseline,readonly",
+                    "--mount",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/diagnostics,dst=/container/diagnostics",
                     image_ref,
                     "python",
-                    "-c",
-                    "pass",
+                    "-m",
+                    "bridle.agent.container.entrypoint",
+                    "--keep-alive",
                 ],
                 timeout=120,
             )
@@ -282,10 +315,7 @@ def verify_worker_docker_access(
                     timeout=60,
                 )
         finally:
-            try:
-                marker.unlink()
-            except OSError:
-                pass
+            shutil.rmtree(probe_root, ignore_errors=True)
     LOGGER.info(
         "isolated_docker_worker_access_verified network=%s dind=%s image=%s digest=%s",
         network,

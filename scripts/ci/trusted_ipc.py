@@ -21,6 +21,7 @@ PUBLIC_ENV_ALLOWLIST = frozenset(
         "BRIDLE_CANDIDATE_WORKER",
         "BRIDLE_ISOLATION_PROBE",
         "BRIDLE_RUN_LEASE_ID",
+        "BRIDLE_IT_RUN_ID",
         "DOCKER_HOST",
     }
 )

@@ -126,6 +126,15 @@ def verify_worker_observation(observation: Any, *, probe: bool) -> None:
         raise RuntimeError(f"worker_state_not_successful state={observation.worker_state}")
 
 
+def emit_worker_streams(worker_stdout: str, worker_stderr: str, *, limit: int = 12000) -> None:
+    if worker_stderr.strip():
+        print("--- worker stderr ---", file=sys.stderr)
+        print(worker_stderr[-limit:], file=sys.stderr)
+    if worker_stdout.strip():
+        print("--- worker stdout ---", file=sys.stderr)
+        print(worker_stdout[-limit:], file=sys.stderr)
+
+
 def controller_ipc_dir(source_env: Mapping[str, str]) -> Path | None:
     raw = source_env.get("BRIDLE_CONTROLLER_IPC_DIR", "").strip()
     return Path(raw) if raw else None
@@ -316,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         controller_ipc_dir=ipc_dir,
     )
     isolated = None
+    worker_stdout = ""
+    worker_stderr = ""
     try:
         if not args.probe_isolation and os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and os.name != "nt":
             evidence_controller.mark_evidence_run_started(trusted_pythonpath=trusted_root / "backend/src")
@@ -361,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     except Exception as exc:
                         LOGGER.error(
-                            "isolated_docker_image_import_failed image=%s error=%s",
+                            "isolated_docker_setup_failed image=%s error=%s",
                             review_image,
                             exc,
                         )
@@ -413,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
                 worker_stderr[-4000:],
                 probe_report,
             )
+            emit_worker_streams(worker_stdout, worker_stderr)
             raise
 
         if args.probe_isolation and observation.worker_uid is not None and observation.controller_uid is not None:
@@ -449,11 +461,16 @@ def main(argv: list[str] | None = None) -> int:
                 worker_stderr[-8000:],
                 worker_stdout[-8000:],
             )
+            emit_worker_streams(worker_stdout, worker_stderr)
             return 1
 
-        if args.verify_overlay_after is not None:
-            harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
-            harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
+        try:
+            if args.verify_overlay_after is not None:
+                harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
+                harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
+        except Exception:
+            emit_worker_streams(worker_stdout, worker_stderr)
+            raise
 
         exit_code = finalize_controller_evidence(
             observation=observation,
@@ -462,13 +479,12 @@ def main(argv: list[str] | None = None) -> int:
             ctx=ctx,
         )
         if exit_code != 0:
-            if worker_stderr.strip():
-                print("--- worker stderr ---", file=sys.stderr)
-                print(worker_stderr[-12000:], file=sys.stderr)
-            if worker_stdout.strip():
-                print("--- worker stdout ---", file=sys.stderr)
-                print(worker_stdout[-12000:], file=sys.stderr)
+            emit_worker_streams(worker_stdout, worker_stderr)
         return exit_code
+    except Exception:
+        if worker_stdout or worker_stderr:
+            emit_worker_streams(worker_stdout, worker_stderr)
+        raise
     finally:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
         worker_sandbox.stop_isolated_docker(isolated)

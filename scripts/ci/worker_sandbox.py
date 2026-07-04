@@ -167,9 +167,10 @@ def _spawn_docker_worker(
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
     env_args.extend(["-e", "PYTHONPATH=/candidate/backend/src", "-e", "HOME=/tmp", "-e", "TMPDIR=/tmp"])
+    host_candidate = str(paths.candidate_root.resolve())
     volume_args = [
-        "-v",
-        f"{paths.candidate_root.resolve()}:/candidate:rw",
+        "--mount",
+        f"type=bind,source={host_candidate},target=/candidate,bind-propagation=rshared",
         "-v",
         f"{paths.trusted_config.parent.resolve()}:/trusted-config:ro",
         "-v",
