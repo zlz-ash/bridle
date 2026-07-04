@@ -92,11 +92,10 @@ def test_worker_isolation_probe_preserves_trusted_controller(
 
     before = sys.modules.get("pytest")
     trusted_runner.setup_probe_layout(candidate_root, trusted_harness, evidence_dir)
-    probe_dir = str(candidate_root / ".bridle-isolation-probe")
     observation, worker_stdout, _ = trusted_runner.run_worker(
         candidate_root=candidate_root,
         trusted_root=trusted_root,
-        pytest_args=[probe_dir, "-q"],
+        pytest_args=["-q"],
         probe=True,
     )
     probe_report = worker_sandbox.parse_probe_report(worker_stdout)

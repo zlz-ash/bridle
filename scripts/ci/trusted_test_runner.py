@@ -281,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe_isolation:
         harness_root = trusted_root
         setup_probe_layout(candidate_root, harness_root, evidence_path)
-        pytest_args = [str(candidate_root / ".bridle-isolation-probe"), "-q", "-rs", *pytest_args]
+        pytest_args = [arg for arg in pytest_args if arg.startswith("-")]
 
     script_dir = trusted_scripts_path(trusted_root)
     worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
