@@ -40,6 +40,13 @@ def _record_digest(record: Any) -> str:
     return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
+def _control_payload(line: str, prefix: str) -> str | None:
+    index = line.find(prefix)
+    if index < 0:
+        return None
+    return line[index + len(prefix) :]
+
+
 def resolve_candidate_relative_path(candidate_root: Path, candidate_relative: str) -> Path:
     relative = candidate_relative.strip().replace("\\", "/")
     if not relative or relative.startswith("/") or ".." in relative.split("/"):
@@ -60,12 +67,13 @@ def handle_controller_line(
     ctx: Any,
     trusted_scripts: Path,
 ) -> None:
-    if line.startswith(RUN_REGISTER_PREFIX):
+    if _control_payload(line, RUN_REGISTER_PREFIX) is not None:
         raise RuntimeError("run_register_from_candidate_rejected")
 
     registry = _load_sentinel_registry(trusted_scripts)
-    if line.startswith(SENTINEL_REQUEST_PREFIX):
-        payload = json.loads(line[len(SENTINEL_REQUEST_PREFIX) :])
+    sentinel_request = _control_payload(line, SENTINEL_REQUEST_PREFIX)
+    if sentinel_request is not None:
+        payload = json.loads(sentinel_request)
         request_id = str(payload.get("request_id") or "").strip()
         if not request_id:
             raise RuntimeError("sentinel_request_missing_id")
@@ -102,8 +110,9 @@ def handle_controller_line(
             request_id,
         )
         return
-    if line.startswith(SENTINEL_READY_PREFIX):
-        payload = json.loads(line[len(SENTINEL_READY_PREFIX) :])
+    sentinel_ready = _control_payload(line, SENTINEL_READY_PREFIX)
+    if sentinel_ready is not None:
+        payload = json.loads(sentinel_ready)
         candidate_relative = str(payload.get("candidate_relative") or payload.get("path") or "").strip()
         host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
         record = registry.register_external_sentinel(host_path)
@@ -165,9 +174,10 @@ def publish_from_worker_stdout(
 
     registry = _load_sentinel_registry(trusted_scripts)
     for line in stdout.splitlines():
-        if not line.startswith(CRITICAL_EVIDENCE_PREFIX):
+        critical = _control_payload(line, CRITICAL_EVIDENCE_PREFIX)
+        if critical is None:
             continue
-        payload = json.loads(line[len(CRITICAL_EVIDENCE_PREFIX) :])
+        payload = json.loads(critical)
         test_key = str(payload["test_key"])
         primary = dict(payload["primary"])
         sentinel_handle = primary.pop("sentinel_handle", None)

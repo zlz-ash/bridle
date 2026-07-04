@@ -247,6 +247,32 @@ def test_run_register_from_candidate_is_rejected(tmp_path: Path) -> None:
         )
 
 
+def test_handle_controller_line_accepts_embedded_sentinel_request(tmp_path: Path) -> None:
+    controller = _load("bridle_trusted_evidence_controller_embedded", "trusted_evidence_controller.py")
+    ctx_module = _load("bridle_controller_context_embedded", "controller_context.py")
+    candidate = tmp_path / "candidate"
+    target = candidate / "backend/.test-workspaces/ws/outside.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret\n", encoding="utf-8")
+    ipc_dir = tmp_path / "ipc"
+    ipc_dir.mkdir()
+    ctx = ctx_module.ControllerExecutionContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
+    request_id = "a3238f9e5ace"
+    relative = "backend/.test-workspaces/ws/outside.txt"
+    line = (
+        "src/bridle/agent/container/tests/test_docker_integration.py::"
+        "TestDockerCandidateIntegration::test_real_docker_recovers_after_link_attack_in_slot "
+        f'{controller.SENTINEL_REQUEST_PREFIX}{{"candidate_relative": "{relative}", "request_id": "{request_id}"}}'
+    )
+    controller.handle_controller_line(line, ctx=ctx, trusted_scripts=SCRIPT_DIR)
+    ack_path = ipc_dir / "sentinel-acks" / f"{request_id}.json"
+    assert ack_path.is_file()
+    payload = json.loads(ack_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "registered"
+    assert payload["request_id"] == request_id
+    assert isinstance(payload.get("handle"), str) and payload["handle"]
+
+
 def test_run_lease_rejects_foreign_it_run_id(tmp_path: Path) -> None:
     ipc_dir = tmp_path / "ipc"
     ipc_dir.mkdir()
