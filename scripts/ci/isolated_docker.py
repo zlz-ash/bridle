@@ -167,10 +167,14 @@ def _normalize_image_id(raw: str) -> str:
 def _parse_docker_load_id(output: str) -> str | None:
     for line in output.splitlines():
         line = line.strip()
-        for prefix in ("Loaded image ID:", "Loaded image:"):
-            if line.startswith(prefix):
-                return _normalize_image_id(line.split(":", 1)[1].strip())
+        if line.startswith("Loaded image ID:"):
+            return _normalize_image_id(line.removeprefix("Loaded image ID:").strip())
     return None
+
+
+def _is_image_digest(value: str) -> bool:
+    normalized = _normalize_image_id(value)
+    return normalized.startswith("sha256:") and len(normalized) == 71
 
 
 def import_host_image_to_dind(
@@ -225,7 +229,11 @@ def import_host_image_to_dind(
             f"{(load.stdout or b'').decode('utf-8', errors='replace')}\n"
             f"{(load.stderr or b'').decode('utf-8', errors='replace')}"
         )
-        if loaded_from_output and loaded_from_output != host_digest:
+        if (
+            loaded_from_output
+            and _is_image_digest(loaded_from_output)
+            and loaded_from_output != host_digest
+        ):
             raise IsolatedDockerError(
                 "isolated_docker_loaded_digest_mismatch",
                 detail=f"host={host_digest} loaded={loaded_from_output} image={image_ref}",

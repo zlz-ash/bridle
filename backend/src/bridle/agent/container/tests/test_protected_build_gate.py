@@ -202,6 +202,15 @@ def test_isolated_docker_candidate_mount_uses_inner_root() -> None:
     assert "bind-propagation=rshared" in mounts[1]
 
 
+def test_parse_docker_load_id_ignores_tag_only_output() -> None:
+    isolated_docker = _load("bridle_isolated_docker_load_parse", "isolated_docker.py")
+    host_digest = "sha256:b7443443752b45b130caec7fb259802fad77f34e396dfca0545aad1ad3c11ab3"
+    tag_only = "Loaded image: bridle-agent:review-2eb2a1d0ee39\n"
+    assert isolated_docker._parse_docker_load_id(tag_only) is None
+    id_line = f"Loaded image ID: {host_digest}\n"
+    assert isolated_docker._parse_docker_load_id(id_line) == host_digest
+
+
 def test_stage_candidate_uses_explicit_run_scoped_subdirectory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     allowed = tmp_path / "staging-root"
     allowed.mkdir()
