@@ -344,11 +344,19 @@ def main(argv: list[str] | None = None) -> int:
                         "bridle_isolated_docker_import",
                         script_dir / "isolated_docker.py",
                     )
-                    isolated_module.import_host_image_to_dind(
-                        dind_name=isolated.dind_name,
-                        image_ref=review_image,
-                        expected_digest=review_digest or None,
-                    )
+                    try:
+                        isolated_module.import_host_image_to_dind(
+                            dind_name=isolated.dind_name,
+                            image_ref=review_image,
+                            expected_digest=review_digest or None,
+                        )
+                    except Exception as exc:
+                        LOGGER.error(
+                            "isolated_docker_image_import_failed image=%s error=%s",
+                            review_image,
+                            exc,
+                        )
+                        raise
 
         observation, worker_stdout, worker_stderr = run_worker(
             candidate_root=candidate_root,

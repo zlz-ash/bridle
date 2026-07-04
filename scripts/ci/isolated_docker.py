@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -86,44 +88,84 @@ def _normalize_image_id(raw: str) -> str:
     return text
 
 
-def _run_bytes(args: list[str], *, timeout: int = 600) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(args, capture_output=True, timeout=timeout, check=False)
-
-
 def import_host_image_to_dind(
     *,
     dind_name: str,
     image_ref: str,
     expected_digest: str | None = None,
 ) -> str:
-    save = _run_bytes(["docker", "save", image_ref], timeout=600)
-    if save.returncode != 0:
-        detail = save.stderr.decode("utf-8", errors="replace").strip()
-        raise IsolatedDockerError("isolated_docker_image_save_failed", detail=detail)
-    load = subprocess.run(
-        ["docker", "exec", "-i", dind_name, "docker", "load"],
-        input=save.stdout,
-        capture_output=True,
-        check=False,
-        timeout=600,
-    )
-    if load.returncode != 0:
-        detail = (load.stderr or load.stdout or b"").decode("utf-8", errors="replace").strip()
-        raise IsolatedDockerError("isolated_docker_image_load_failed", detail=detail)
+    host_inspect = _run(["docker", "image", "inspect", "-f", "{{.Id}}", image_ref], timeout=60)
+    if host_inspect.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_image_save_failed",
+            detail=(host_inspect.stderr or host_inspect.stdout or "host inspect failed").strip(),
+        )
+    host_digest = _normalize_image_id((host_inspect.stdout or "").strip())
+    if expected_digest and _normalize_image_id(expected_digest) != host_digest:
+        raise IsolatedDockerError(
+            "isolated_docker_image_digest_mismatch",
+            detail=f"expected={expected_digest} host={host_digest}",
+        )
+
+    tar_path = ""
+    inner_tar = f"/tmp/bridle-review-{uuid.uuid4().hex[:12]}.tar"
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as handle:
+            tar_path = handle.name
+        save = _run(["docker", "save", "-o", tar_path, image_ref], timeout=600)
+        if save.returncode != 0:
+            raise IsolatedDockerError(
+                "isolated_docker_image_save_failed",
+                detail=(save.stderr or save.stdout or "docker save failed").strip(),
+            )
+        copied = _run(["docker", "cp", tar_path, f"{dind_name}:{inner_tar}"], timeout=120)
+        if copied.returncode != 0:
+            raise IsolatedDockerError(
+                "isolated_docker_image_copy_failed",
+                detail=(copied.stderr or copied.stdout or "docker cp failed").strip(),
+            )
+        load = _run(["docker", "exec", dind_name, "docker", "load", "-i", inner_tar], timeout=600)
+        if load.returncode != 0:
+            raise IsolatedDockerError(
+                "isolated_docker_image_load_failed",
+                detail=(load.stderr or load.stdout or "docker load failed").strip(),
+            )
+    finally:
+        if tar_path:
+            try:
+                os.unlink(tar_path)
+            except OSError:
+                pass
+        _run(["docker", "exec", dind_name, "rm", "-f", inner_tar], timeout=30)
+
     inspect = _run(
         ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
         timeout=60,
     )
     if inspect.returncode != 0:
-        raise IsolatedDockerError(
-            "isolated_docker_image_inspect_failed",
-            detail=(inspect.stderr or inspect.stdout).strip(),
+        tag = _run(
+            ["docker", "exec", dind_name, "docker", "tag", host_digest, image_ref],
+            timeout=30,
         )
+        if tag.returncode != 0:
+            raise IsolatedDockerError(
+                "isolated_docker_image_inspect_failed",
+                detail=(inspect.stderr or inspect.stdout or tag.stderr or "tag failed").strip(),
+            )
+        inspect = _run(
+            ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
+            timeout=60,
+        )
+        if inspect.returncode != 0:
+            raise IsolatedDockerError(
+                "isolated_docker_image_inspect_failed",
+                detail=(inspect.stderr or inspect.stdout or "inspect after retag failed").strip(),
+            )
     loaded_digest = _normalize_image_id((inspect.stdout or "").strip())
-    if expected_digest and _normalize_image_id(expected_digest) != loaded_digest:
+    if loaded_digest != host_digest:
         raise IsolatedDockerError(
             "isolated_docker_image_digest_mismatch",
-            detail=f"expected={expected_digest} loaded={loaded_digest}",
+            detail=f"host={host_digest} inner={loaded_digest}",
         )
     LOGGER.info(
         "isolated_docker_image_imported dind=%s image=%s digest=%s",

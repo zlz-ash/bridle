@@ -175,19 +175,25 @@ jobs:
           TRUSTED_PYTHONPATH="$GITHUB_WORKSPACE/trusted-harness/backend/src"
           SNAPSHOT="$RUNNER_TEMP/trusted-harness-snapshot.json"
           IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
+          GATE_LOG="$RUNNER_TEMP/gate.log"
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
-          python3 -I "$TRUSTED_CONTROLLER" verify-overlay "$GITHUB_WORKSPACE/candidate" "$SNAPSHOT"
-          python3 -I "$TRUSTED_TEST_RUNNER" \
-            --ipc-transcript "$IPC_DOCKER" \
-            --verify-overlay-after "$SNAPSHOT" \
-            "$GITHUB_WORKSPACE/candidate" \
-            "$GITHUB_WORKSPACE/trusted-harness" \
-            -- -q -rs
-          PYTHONPATH="$TRUSTED_PYTHONPATH" python -m bridle.agent.container.tests.docker_gate \
-            "$BRIDLE_DOCKER_EVIDENCE_DIR" \
-            --source-digest "${{ steps.review-image.outputs.source_digest }}" \
-            --image-digest "${{ steps.review-image.outputs.image_digest }}" \
-            --github-sha "$GITHUB_SHA"
+          if ! {
+            python3 -I "$TRUSTED_CONTROLLER" verify-overlay "$GITHUB_WORKSPACE/candidate" "$SNAPSHOT"
+            python3 -I "$TRUSTED_TEST_RUNNER" \
+              --ipc-transcript "$IPC_DOCKER" \
+              --verify-overlay-after "$SNAPSHOT" \
+              "$GITHUB_WORKSPACE/candidate" \
+              "$GITHUB_WORKSPACE/trusted-harness" \
+              -- -q -rs
+            PYTHONPATH="$TRUSTED_PYTHONPATH" python -m bridle.agent.container.tests.docker_gate \
+              "$BRIDLE_DOCKER_EVIDENCE_DIR" \
+              --source-digest "${{ steps.review-image.outputs.source_digest }}" \
+              --image-digest "${{ steps.review-image.outputs.image_digest }}" \
+              --github-sha "$GITHUB_SHA"
+          } 2>&1 | tee "$GATE_LOG"; then
+            echo "gate_failed see $GATE_LOG and $IPC_DOCKER" >&2
+            exit 1
+          fi
           echo "trusted_harness_ref=${{ steps.trusted-ref.outputs.ref }}" >> "$GITHUB_OUTPUT"
           echo "ipc_docker_transcript=$IPC_DOCKER" >> "$GITHUB_OUTPUT"
 
@@ -212,4 +218,5 @@ jobs:
             ${{ runner.temp }}/trusted-ipc-probe.json
             ${{ runner.temp }}/probe.log
             ${{ runner.temp }}/trusted-ipc-docker.json
+            ${{ runner.temp }}/gate.log
           if-no-files-found: warn
