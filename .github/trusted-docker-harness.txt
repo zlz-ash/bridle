@@ -1,0 +1,8 @@
+# Trusted Docker POSIX harness files overlaid from base/default ref in CI.
+backend/src/bridle/agent/container/tests/conftest.py
+backend/src/bridle/agent/container/tests/__init__.py
+backend/src/bridle/agent/container/tests/docker_evidence.py
+backend/src/bridle/agent/container/tests/docker_gate.py
+backend/src/bridle/agent/container/tests/docker_gate_paths.py
+backend/src/bridle/agent/container/tests/docker_test_resources.py
+backend/src/bridle/agent/container/tests/test_docker_integration.py

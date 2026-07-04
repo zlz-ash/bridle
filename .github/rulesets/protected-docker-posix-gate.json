@@ -1,0 +1,48 @@
+{
+  "name": "Protected Docker POSIX Gate",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "workflows",
+      "parameters": {
+        "workflows": [
+          {
+            "path": ".github/workflows/container-docker-linux.yml",
+            "repository_id": 1249907123,
+            "ref": "refs/heads/master"
+          }
+        ]
+      }
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false
+      }
+    }
+  ],
+  "bypass_actors": [],
+    "metadata": {
+        "required_workflow_file": "container-docker-linux.yml",
+        "required_workflow_path": ".github/workflows/container-docker-linux.yml",
+        "required_workflow_ref": "refs/heads/master",
+        "trusted_harness_source": "base_or_default_branch_checkout",
+    "malicious_pr_scenarios": [
+      "validator_always_passes",
+      "critical_tests_assert_true",
+      "skip_docker_write_json",
+      "forge_digest_outputs"
+    ],
+    "notes": "Primary enforcement uses GitHub required workflows (type: workflows). Apply with gh api and set repository_id to the numeric repo id for your org."
+  }
+}
