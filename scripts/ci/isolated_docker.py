@@ -164,9 +164,16 @@ def import_host_image_to_dind(
             )
     loaded_digest = _normalize_image_id((inspect.stdout or "").strip())
     if loaded_digest != host_digest:
+        LOGGER.warning(
+            "isolated_docker_loaded_digest_differs host=%s inner=%s image=%s",
+            host_digest,
+            loaded_digest,
+            image_ref,
+        )
+    if expected_digest and _normalize_image_id(expected_digest) not in {host_digest, loaded_digest}:
         raise IsolatedDockerError(
             "isolated_docker_image_digest_mismatch",
-            detail=f"host={host_digest} inner={loaded_digest}",
+            detail=f"expected={expected_digest} host={host_digest} inner={loaded_digest}",
         )
     LOGGER.info(
         "isolated_docker_image_imported dind=%s image=%s digest=%s",

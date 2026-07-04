@@ -432,6 +432,16 @@ def main(argv: list[str] | None = None) -> int:
             cleanup_probe_layout(candidate_root, evidence_path)
             return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
 
+        if observation.worker_state != "exited" or observation.exit_code is None:
+            LOGGER.error(
+                "docker_worker_failed state=%s exit_code=%s stderr_tail=%s stdout_tail=%s",
+                observation.worker_state,
+                observation.exit_code,
+                worker_stderr[-4000:],
+                worker_stdout[-4000:],
+            )
+            return 1
+
         if args.verify_overlay_after is not None:
             harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
             harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
