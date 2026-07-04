@@ -106,6 +106,14 @@ def verify_controller_state(
             raise RuntimeError(f"candidate_overrode_harness path={item.get('path')}")
 
 
+def emit_ci_phase(phase: str, *, detail: str = "") -> None:
+    message = f"BRIDLE_CI_PHASE={phase}"
+    if detail:
+        message = f"{message} detail={detail}"
+    print(message, file=sys.stderr)
+    LOGGER.info(message)
+
+
 def verify_worker_observation(observation: Any, *, probe: bool) -> None:
     if observation.worker_state not in {"exited", "timed_out", "failed_before_exec"}:
         raise RuntimeError(f"worker_state_invalid state={observation.worker_state}")
@@ -369,10 +377,12 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
                 os.environ["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
             if worker_sandbox.use_docker_sandbox(public_env=build_public_env(candidate_root=candidate_root, probe=False)):
+                emit_ci_phase("isolated_dind_start")
                 isolated = worker_sandbox.start_isolated_docker_for_worker(
                     run_id=os.environ.get("GITHUB_SHA", "")[:12] or None,
                     candidate_host_root=candidate_root,
                 )
+                emit_ci_phase("isolated_dind_ready", detail=isolated.dind_name)
                 ctx.isolated_docker_host = isolated.docker_host
                 ctx.isolated_dind_name = isolated.dind_name
                 ctx.isolated_network = isolated.network
@@ -389,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
                             image_ref=review_image,
                             expected_digest=review_digest or None,
                         )
+                        emit_ci_phase("isolated_review_image_imported", detail=review_image)
                         isolated_module.verify_worker_docker_access(
                             dind_name=isolated.dind_name,
                             network=isolated.network,
@@ -397,7 +408,9 @@ def main(argv: list[str] | None = None) -> int:
                             or worker_sandbox.worker_image_ref(),
                             candidate_host_root=candidate_root,
                         )
+                        emit_ci_phase("isolated_worker_access_verified")
                     except Exception as exc:
+                        emit_ci_phase("isolated_docker_setup_failed", detail=str(exc))
                         LOGGER.error(
                             "isolated_docker_setup_failed image=%s error=%s",
                             review_image,
@@ -405,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         raise
 
+        emit_ci_phase("worker_spawn_start")
         observation, worker_stdout, worker_stderr = run_worker(
             candidate_root=candidate_root,
             trusted_root=trusted_root,
@@ -413,6 +427,11 @@ def main(argv: list[str] | None = None) -> int:
             controller_ipc=ipc_dir,
             ctx=ctx,
             isolated=isolated,
+        )
+
+        emit_ci_phase(
+            "worker_spawn_finished",
+            detail=f"state={observation.worker_state} exit_code={observation.exit_code}",
         )
 
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")

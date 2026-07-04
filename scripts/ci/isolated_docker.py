@@ -40,9 +40,9 @@ def _ensure_candidate_rshared(*, dind_name: str) -> None:
         timeout=30,
     )
     if result.returncode != 0:
-        raise IsolatedDockerError(
-            "isolated_docker_candidate_rshared_failed",
-            detail=(result.stderr or result.stdout or "mount --make-rshared failed").strip(),
+        LOGGER.warning(
+            "isolated_docker_candidate_rshared_failed detail=%s",
+            (result.stderr or result.stdout or "mount --make-rshared failed").strip(),
         )
 
 
@@ -265,6 +265,10 @@ def verify_worker_docker_access(
             (probe_root / subdir).mkdir(parents=True, exist_ok=True)
         (probe_root / "project" / "marker.txt").write_text("ok\n", encoding="utf-8")
         probe_base = f"{INNER_CANDIDATE_ROOT}/.bridle-dind-bind-probe"
+        deep_probe = f"{INNER_CANDIDATE_ROOT}/backend/.bridle-dind-bind-probe-deep"
+        deep_host = candidate_host_root / "backend" / ".bridle-dind-bind-probe-deep" / "project"
+        deep_host.mkdir(parents=True, exist_ok=True)
+        (deep_host / "marker.txt").write_text("deep\n", encoding="utf-8")
         try:
             bind_probe = _run(
                 [
@@ -310,8 +314,33 @@ def verify_worker_docker_access(
             container_id = (bind_probe.stdout or "").strip()
             if container_id:
                 _run(["docker", "exec", dind_name, "docker", "rm", container_id], timeout=60)
+            deep_probe_run = _run(
+                [
+                    "docker",
+                    "exec",
+                    dind_name,
+                    "docker",
+                    "create",
+                    "--network",
+                    "none",
+                    "--mount",
+                    f"type=bind,src={deep_probe}/project,dst=/workspace/project",
+                    image_ref,
+                    "true",
+                ],
+                timeout=120,
+            )
+            if deep_probe_run.returncode != 0:
+                raise IsolatedDockerError(
+                    "isolated_docker_deep_bind_probe_failed",
+                    detail=(deep_probe_run.stderr or deep_probe_run.stdout or "deep bind create failed").strip(),
+                )
+            deep_container_id = (deep_probe_run.stdout or "").strip()
+            if deep_container_id:
+                _run(["docker", "exec", dind_name, "docker", "rm", deep_container_id], timeout=60)
         finally:
             shutil.rmtree(probe_root, ignore_errors=True)
+            shutil.rmtree(deep_host.parent, ignore_errors=True)
     worker_probe_name = f"bridle-dind-worker-probe-{uuid.uuid4().hex[:12]}"
     worker_probe = _run(
         [
