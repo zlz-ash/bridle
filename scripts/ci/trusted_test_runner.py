@@ -357,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
                             image_ref=review_image,
                             worker_image=os.environ.get("BRIDLE_WORKER_IMAGE", "").strip()
                             or worker_sandbox.worker_image_ref(),
+                            candidate_host_root=candidate_root,
                         )
                     except Exception as exc:
                         LOGGER.error(
@@ -454,12 +455,20 @@ def main(argv: list[str] | None = None) -> int:
             harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
             harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
 
-        return finalize_controller_evidence(
+        exit_code = finalize_controller_evidence(
             observation=observation,
             worker_stdout=worker_stdout,
             trusted_root=trusted_root,
             ctx=ctx,
         )
+        if exit_code != 0:
+            if worker_stderr.strip():
+                print("--- worker stderr ---", file=sys.stderr)
+                print(worker_stderr[-12000:], file=sys.stderr)
+            if worker_stdout.strip():
+                print("--- worker stdout ---", file=sys.stderr)
+                print(worker_stdout[-12000:], file=sys.stderr)
+        return exit_code
     finally:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
         worker_sandbox.stop_isolated_docker(isolated)

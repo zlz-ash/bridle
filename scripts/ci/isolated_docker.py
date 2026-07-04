@@ -199,6 +199,7 @@ def verify_worker_docker_access(
     network: str,
     image_ref: str,
     worker_image: str,
+    candidate_host_root: Path | None = None,
 ) -> None:
     probe_name = f"bridle-dind-probe-{uuid.uuid4().hex[:12]}"
     run = _run(
@@ -232,6 +233,59 @@ def verify_worker_docker_access(
             "isolated_docker_review_image_missing",
             detail=(inspect.stderr or inspect.stdout or f"missing image {image_ref}").strip(),
         )
+    if candidate_host_root is not None:
+        marker = candidate_host_root / ".bridle-dind-bind-probe"
+        marker.write_text("ok\n", encoding="utf-8")
+        try:
+            bind_probe = _run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    network,
+                    "-e",
+                    f"DOCKER_HOST=tcp://{dind_name}:2375",
+                    worker_image,
+                    "docker",
+                    "create",
+                    "--mount",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe,dst=/probe,readonly",
+                    image_ref,
+                    "python",
+                    "-c",
+                    "pass",
+                ],
+                timeout=120,
+            )
+            if bind_probe.returncode != 0:
+                raise IsolatedDockerError(
+                    "isolated_docker_bind_mount_probe_failed",
+                    detail=(bind_probe.stderr or bind_probe.stdout or "bind create failed").strip(),
+                )
+            container_id = (bind_probe.stdout or "").strip()
+            if container_id:
+                _run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--network",
+                        network,
+                        "-e",
+                        f"DOCKER_HOST=tcp://{dind_name}:2375",
+                        worker_image,
+                        "docker",
+                        "rm",
+                        container_id,
+                    ],
+                    timeout=60,
+                )
+        finally:
+            try:
+                marker.unlink()
+            except OSError:
+                pass
     LOGGER.info(
         "isolated_docker_worker_access_verified network=%s dind=%s image=%s digest=%s",
         network,
