@@ -239,6 +239,12 @@ def _attach_controller_identity(observation, ipc):
     )
 
 
+def map_public_env_for_docker_worker(public_env: Mapping[str, str], candidate_root: Path) -> dict[str, str]:
+    mapped = dict(public_env)
+    mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] = candidate_root.as_posix()
+    return mapped
+
+
 def spawn_worker(
     *,
     paths: SandboxPaths,
@@ -252,13 +258,22 @@ def spawn_worker(
     request = build_request(paths=paths, pytest_args=pytest_args, public_env=public_env)
     payload = ipc.encode_request(request)
     sandbox_mode = "docker" if use_docker_sandbox(public_env=public_env) else "subprocess"
+    mapped_paths = map_paths_for_sandbox(paths, public_env=public_env)
+    worker_public_env = (
+        map_public_env_for_docker_worker(public_env, mapped_paths.candidate_root)
+        if sandbox_mode == "docker"
+        else dict(public_env)
+    )
+    if sandbox_mode == "docker":
+        request = build_request(paths=paths, pytest_args=pytest_args, public_env=worker_public_env)
+        payload = ipc.encode_request(request)
     LOGGER.info("worker_sandbox_mode mode=%s probe=%s", sandbox_mode, public_env.get("BRIDLE_ISOLATION_PROBE") == "1")
     if sandbox_mode == "docker":
         capture = _spawn_docker_worker(
             request_payload=payload,
             paths=paths,
             timeout=timeout,
-            public_env=public_env,
+            public_env=worker_public_env,
             on_stdout_line=on_stdout_line,
             isolated=isolated,
         )

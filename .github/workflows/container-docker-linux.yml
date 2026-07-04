@@ -197,14 +197,19 @@ jobs:
           set -euo pipefail
           TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
           IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
+          DOCKER_TESTS_LOG="$RUNNER_TEMP/docker-tests.log"
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
           if ! python3 -I "$TRUSTED_TEST_RUNNER" \
             --ipc-transcript "$IPC_DOCKER" \
             --verify-overlay-after "$RUNNER_TEMP/trusted-harness-snapshot.json" \
             "$GITHUB_WORKSPACE/candidate" \
             "$GITHUB_WORKSPACE/trusted-harness" \
-            -- -q -rs 2>&1 | tee "$RUNNER_TEMP/docker-tests.log"; then
-            echo "docker_tests_failed see $RUNNER_TEMP/docker-tests.log and $IPC_DOCKER" >&2
+            -- -q -rs 2>&1 | tee "$DOCKER_TESTS_LOG"; then
+            echo "docker_tests_failed see $DOCKER_TESTS_LOG and $IPC_DOCKER" >&2
+            tail -n 120 "$DOCKER_TESTS_LOG" >&2 || true
+            if [ -f "$IPC_DOCKER" ]; then
+              python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8')), indent=2, sort_keys=True))" "$IPC_DOCKER" >&2
+            fi
             exit 1
           fi
           echo "ipc_docker_transcript=$IPC_DOCKER" >> "$GITHUB_OUTPUT"
