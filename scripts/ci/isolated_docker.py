@@ -123,6 +123,15 @@ def _normalize_image_id(raw: str) -> str:
     return text
 
 
+def _parse_docker_load_id(output: str) -> str | None:
+    for line in output.splitlines():
+        line = line.strip()
+        for prefix in ("Loaded image ID:", "Loaded image:"):
+            if line.startswith(prefix):
+                return _normalize_image_id(line.split(":", 1)[1].strip())
+    return None
+
+
 def import_host_image_to_dind(
     *,
     dind_name: str,
@@ -144,6 +153,7 @@ def import_host_image_to_dind(
 
     tar_path = _staging_tar_path(".tar")
     inner_tar = f"/tmp/bridle-review-{uuid.uuid4().hex[:12]}.tar"
+    loaded_from_output: str | None = None
     try:
         save = _run(["docker", "save", "-o", str(tar_path), image_ref], timeout=600)
         if save.returncode != 0:
@@ -163,6 +173,12 @@ def import_host_image_to_dind(
                 "isolated_docker_image_load_failed",
                 detail=(load.stderr or load.stdout or "docker load failed").strip(),
             )
+        loaded_from_output = _parse_docker_load_id(f"{load.stdout or ''}\n{load.stderr or ''}")
+        if loaded_from_output and loaded_from_output != host_digest:
+            raise IsolatedDockerError(
+                "isolated_docker_loaded_digest_mismatch",
+                detail=f"host={host_digest} loaded={loaded_from_output} image={image_ref}",
+            )
     finally:
         try:
             tar_path.unlink(missing_ok=True)
@@ -175,8 +191,9 @@ def import_host_image_to_dind(
         timeout=60,
     )
     if inspect.returncode != 0:
+        tag_source = loaded_from_output or host_digest
         tag = _run(
-            ["docker", "exec", dind_name, "docker", "tag", host_digest, image_ref],
+            ["docker", "exec", dind_name, "docker", "tag", tag_source, image_ref],
             timeout=30,
         )
         if tag.returncode != 0:
@@ -278,11 +295,15 @@ def verify_worker_docker_access(
                     "--user",
                     "1000",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/project,dst=/container/project",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/project,dst=/workspace/project",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/baseline,dst=/container/baseline,readonly",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/baseline,dst=/workspace/baseline,readonly",
                     "--mount",
-                    "type=bind,src=/candidate/.bridle-dind-bind-probe/diagnostics,dst=/container/diagnostics",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/mocks,dst=/workspace/mocks,readonly",
+                    "--mount",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/output,dst=/workspace/output",
+                    "--mount",
+                    "type=bind,src=/candidate/.bridle-dind-bind-probe/diagnostics,dst=/workspace/diagnostics",
                     image_ref,
                     "python",
                     "-m",

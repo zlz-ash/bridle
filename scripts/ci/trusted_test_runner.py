@@ -481,9 +481,10 @@ def main(argv: list[str] | None = None) -> int:
         if exit_code != 0:
             emit_worker_streams(worker_stdout, worker_stderr)
         return exit_code
-    except Exception:
+    except Exception as exc:
         if worker_stdout or worker_stderr:
             emit_worker_streams(worker_stdout, worker_stderr)
+        LOGGER.error("trusted_controller_failed error=%s", exc)
         raise
     finally:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")

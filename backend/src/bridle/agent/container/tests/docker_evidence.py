@@ -533,7 +533,8 @@ def flush_session_evidence(*, pytest_exitstatus: int | None = None) -> Path | No
     entries = list(_PUBLISHED)
     summary_status = _compute_summary_status(entries, pytest_exitstatus=pytest_exitstatus)
     entry_digests = {entry["test_key"]: canonical_entry_digest(entry) for entry in entries}
-    _validate_key_set("entry_digests", entry_digests)
+    if summary_status == EVIDENCE_STATUS_PASSED:
+        _validate_key_set("entry_digests", entry_digests)
 
     summary: dict[str, Any] = {
         "schema": DOCKER_EVIDENCE_SUMMARY_SCHEMA,

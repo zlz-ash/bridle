@@ -345,6 +345,16 @@ def test_validate_rejects_non_zero_pytest_exitstatus() -> None:
     assert exc.value.error_code == "docker_evidence_pytest_exit_not_zero"
 
 
+def test_flush_allows_partial_entry_digests_when_pytest_failed(evidence_root: Path) -> None:
+    de.begin_docker_evidence_session()
+    path = de.flush_session_evidence(pytest_exitstatus=1)
+    assert path is not None
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    assert summary["status"] == de.EVIDENCE_STATUS_FAILED
+    assert summary["entry_digests"] == {}
+    assert summary["pytest_exitstatus"] == 1
+
+
 def test_validate_rejects_extra_entry_digest_key() -> None:
     summary = _passed_summary()
     summary["entry_digests"]["extra"] = "deadbeef"
