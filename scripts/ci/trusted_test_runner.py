@@ -116,6 +116,8 @@ def emit_ci_phase(phase: str, *, detail: str = "") -> None:
     if evidence_raw:
         log_path = Path(evidence_raw) / "ci-phases.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        if phase == "isolated_dind_start":
+            log_path.write_text("", encoding="utf-8")
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(message + "\n")
 

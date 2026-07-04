@@ -193,7 +193,6 @@ def import_host_image_to_dind(
         )
 
     tar_path = _staging_tar_path(".tar")
-    inner_tar = f"/tmp/bridle-review-{uuid.uuid4().hex[:12]}.tar"
     loaded_from_output: str | None = None
     try:
         save = _run(["docker", "save", "-o", str(tar_path), image_ref], timeout=600)
@@ -202,19 +201,30 @@ def import_host_image_to_dind(
                 "isolated_docker_image_save_failed",
                 detail=(save.stderr or save.stdout or "docker save failed").strip(),
             )
-        copied = _run(["docker", "cp", str(tar_path), f"{dind_name}:{inner_tar}"], timeout=120)
-        if copied.returncode != 0:
+        if not tar_path.is_file() or tar_path.stat().st_size == 0:
             raise IsolatedDockerError(
-                "isolated_docker_image_copy_failed",
-                detail=(copied.stderr or copied.stdout or "docker cp failed").strip(),
+                "isolated_docker_image_save_failed",
+                detail=f"saved tar missing or empty path={tar_path}",
             )
-        load = _run(["docker", "exec", dind_name, "docker", "load", "-i", inner_tar], timeout=600)
+        with tar_path.open("rb") as tar_handle:
+            load = subprocess.run(
+                ["docker", "exec", "-i", dind_name, "docker", "load"],
+                stdin=tar_handle,
+                capture_output=True,
+                timeout=600,
+                check=False,
+            )
         if load.returncode != 0:
             raise IsolatedDockerError(
                 "isolated_docker_image_load_failed",
-                detail=(load.stderr or load.stdout or "docker load failed").strip(),
+                detail=(load.stderr or load.stdout or b"docker load failed")
+                .decode("utf-8", errors="replace")
+                .strip(),
             )
-        loaded_from_output = _parse_docker_load_id(f"{load.stdout or ''}\n{load.stderr or ''}")
+        loaded_from_output = _parse_docker_load_id(
+            f"{(load.stdout or b'').decode('utf-8', errors='replace')}\n"
+            f"{(load.stderr or b'').decode('utf-8', errors='replace')}"
+        )
         if loaded_from_output and loaded_from_output != host_digest:
             raise IsolatedDockerError(
                 "isolated_docker_loaded_digest_mismatch",
@@ -225,7 +235,6 @@ def import_host_image_to_dind(
             tar_path.unlink(missing_ok=True)
         except OSError:
             pass
-        _run(["docker", "exec", dind_name, "rm", "-f", inner_tar], timeout=30)
 
     inspect = _run(
         ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
