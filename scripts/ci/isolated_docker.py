@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
+ISOLATED_WORKER_DOCKER_HOST = "tcp://127.0.0.1:2375"
 
 
 class IsolatedDockerError(RuntimeError):
@@ -29,7 +30,7 @@ def _candidate_bind_mounts(host_candidate: str) -> list[str]:
     """Expose the host checkout inside DinD at the same absolute path (nested bind-safe)."""
     return [
         "--mount",
-        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=rshared",
+        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=shared",
     ]
 
 
@@ -237,9 +238,9 @@ def verify_worker_docker_access(
             "--name",
             probe_name,
             "--network",
-            network,
+            f"container:{dind_name}",
             "-e",
-            f"DOCKER_HOST=tcp://{dind_name}:2375",
+            f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
             worker_image,
             "docker",
             "info",
@@ -274,9 +275,9 @@ def verify_worker_docker_access(
                     "run",
                     "--rm",
                     "--network",
-                    network,
+                    f"container:{dind_name}",
                     "-e",
-                    f"DOCKER_HOST=tcp://{dind_name}:2375",
+                    f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
                     worker_image,
                     "docker",
                     "create",
@@ -322,9 +323,9 @@ def verify_worker_docker_access(
                         "run",
                         "--rm",
                         "--network",
-                        network,
+                        f"container:{dind_name}",
                         "-e",
-                        f"DOCKER_HOST=tcp://{dind_name}:2375",
+                        f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
                         worker_image,
                         "docker",
                         "rm",

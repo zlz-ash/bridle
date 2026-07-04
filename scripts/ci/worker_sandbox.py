@@ -163,7 +163,7 @@ def _spawn_docker_worker(
     env_args: list[str] = []
     merged_env = dict(public_env)
     if isolated is not None and not probe:
-        merged_env["DOCKER_HOST"] = isolated.docker_host
+        merged_env["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
     for key, value in merged_env.items():
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
@@ -179,18 +179,28 @@ def _spawn_docker_worker(
         ]
     )
     volume_args = [
-        "--mount",
-        f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=rshared",
         "-v",
         f"{paths.trusted_config.parent.resolve()}:/trusted-config:ro",
         "-v",
         f"{paths.trusted_scripts.resolve()}:/trusted-scripts:ro",
     ]
+    if isolated is not None and not probe:
+        volume_args = [
+            "--volumes-from",
+            f"{isolated.dind_name}:rw",
+            *volume_args,
+        ]
+    else:
+        volume_args = [
+            "--mount",
+            f"type=bind,source={host_candidate},target={host_candidate},bind-propagation=shared",
+            *volume_args,
+        ]
     if paths.controller_ipc is not None:
         volume_args.extend(["-v", f"{paths.controller_ipc.resolve()}:/controller-ipc:ro"])
     network_args = ["--network", "none"] if probe else []
     if isolated is not None and not probe:
-        network_args = ["--network", isolated.network]
+        network_args = ["--network", f"container:{isolated.dind_name}"]
     run_uid = os.getuid() if hasattr(os, "getuid") else 1000
     run_gid = os.getgid() if hasattr(os, "getgid") else 1000
     cmd = [
@@ -279,7 +289,7 @@ def spawn_worker(
         else dict(public_env)
     )
     if sandbox_mode == "docker" and isolated is not None:
-        worker_public_env["DOCKER_HOST"] = isolated.docker_host
+        worker_public_env["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
     if sandbox_mode == "docker":
         request = build_request(paths=paths, pytest_args=pytest_args, public_env=worker_public_env)
         payload = ipc.encode_request(request)

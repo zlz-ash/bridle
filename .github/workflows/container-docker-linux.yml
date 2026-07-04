@@ -260,6 +260,21 @@ jobs:
             ${{ steps.docker-tests.outputs.ipc_docker_transcript }}
           if-no-files-found: error
 
+      - name: Dump docker gate diagnostics on failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo "=== docker-tests.log (tail) ===" >&2
+          tail -n 200 "$RUNNER_TEMP/docker-tests.log" >&2 || true
+          echo "=== controller-failure.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" >&2
+          fi
+          echo "=== session-summary.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/session-summary.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/session-summary.json" >&2
+          fi
+
       - name: Upload Docker integration evidence (diagnostics)
         if: failure()
         uses: actions/upload-artifact@v4
