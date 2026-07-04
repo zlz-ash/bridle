@@ -61,6 +61,10 @@ def pytest_arguments(
             *extra_args,
         ]
     test_file = candidate / "backend/src/bridle/agent/container/tests/test_docker_integration.py"
+    capture_args: list[str] = []
+    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1":
+        # Sentinel REQUEST and CRITICAL_EVIDENCE must reach the controller stream in real time.
+        capture_args = ["-s", "--capture=no"]
     return [
         "-m",
         "pytest",
@@ -72,6 +76,7 @@ def pytest_arguments(
         str(test_file.parent),
         "-p",
         "no:cacheprovider",
+        *capture_args,
         str(test_file),
         *extra_args,
     ]

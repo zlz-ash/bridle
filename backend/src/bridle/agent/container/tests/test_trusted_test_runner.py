@@ -99,3 +99,18 @@ def test_container_conftest_provides_test_workspace_with_worker_confcutdir() -> 
     assert confcutdir.name == "tests"
     assert confcutdir.parent.name == "container"
     assert any("test_docker_integration.py" in arg for arg in args)
+
+
+def test_pytest_arguments_disable_capture_for_docker_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate_worker = trusted_runner._load_module(
+        "bridle_candidate_worker_capture",
+        REPO_ROOT / "scripts/ci/candidate_worker.py",
+    )
+    monkeypatch.setenv("BRIDLE_RUN_DOCKER_TESTS", "1")
+    args = candidate_worker.pytest_arguments(
+        candidate_root=REPO_ROOT,
+        trusted_config=REPO_ROOT / "backend/pyproject.toml",
+        extra_args=("-q",),
+    )
+    assert "-s" in args
+    assert "--capture=no" in args
