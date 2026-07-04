@@ -163,7 +163,7 @@ def _spawn_docker_worker(
     env_args: list[str] = []
     merged_env = dict(public_env)
     if isolated is not None and not probe:
-        merged_env["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
+        merged_env["DOCKER_HOST"] = isolated.docker_host
     for key, value in merged_env.items():
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
@@ -200,7 +200,7 @@ def _spawn_docker_worker(
         volume_args.extend(["-v", f"{paths.controller_ipc.resolve()}:/controller-ipc:ro"])
     network_args = ["--network", "none"] if probe else []
     if isolated is not None and not probe:
-        network_args = ["--network", f"container:{isolated.dind_name}"]
+        network_args = ["--network", isolated.network]
     run_uid = os.getuid() if hasattr(os, "getuid") else 1000
     run_gid = os.getgid() if hasattr(os, "getgid") else 1000
     cmd = [
@@ -289,7 +289,7 @@ def spawn_worker(
         else dict(public_env)
     )
     if sandbox_mode == "docker" and isolated is not None:
-        worker_public_env["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
+        worker_public_env["DOCKER_HOST"] = isolated.docker_host
     if sandbox_mode == "docker":
         request = build_request(paths=paths, pytest_args=pytest_args, public_env=worker_public_env)
         payload = ipc.encode_request(request)
@@ -340,6 +340,12 @@ def spawn_worker(
     uid = controller_uid()
     if proc_returncode not in (0, None):
         stdout, stderr, truncated_stdout, truncated_stderr = _decode_streams(raw_stdout, raw_stderr, ipc)
+        LOGGER.error(
+            "worker_container_start_failed returncode=%s stderr=%s stdout=%s",
+            proc_returncode,
+            stderr[-4000:],
+            stdout[-2000:],
+        )
         return (
             ipc.WorkerObservation(
                 worker_state=ipc.WORKER_STATE_FAILED_BEFORE_EXEC,

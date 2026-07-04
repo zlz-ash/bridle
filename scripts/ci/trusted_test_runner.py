@@ -123,6 +123,11 @@ def verify_worker_observation(observation: Any, *, probe: bool) -> None:
             raise RuntimeError(f"worker_exit_nonzero code={observation.exit_code}")
         return
     if observation.worker_state != "exited":
+        if observation.worker_state == "failed_before_exec":
+            raise RuntimeError(
+                f"worker_failed_before_exec exit_code={observation.exit_code} "
+                f"stderr={observation.stderr[-4000:]}"
+            )
         raise RuntimeError(f"worker_state_not_successful state={observation.worker_state}")
 
 

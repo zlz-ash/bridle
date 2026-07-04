@@ -12,7 +12,6 @@ import uuid
 from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
-ISOLATED_WORKER_DOCKER_HOST = "tcp://127.0.0.1:2375"
 
 
 class IsolatedDockerError(RuntimeError):
@@ -229,28 +228,12 @@ def verify_worker_docker_access(
     worker_image: str,
     candidate_host_root: Path | None = None,
 ) -> None:
-    probe_name = f"bridle-dind-probe-{uuid.uuid4().hex[:12]}"
-    run = _run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--name",
-            probe_name,
-            "--network",
-            f"container:{dind_name}",
-            "-e",
-            f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
-            worker_image,
-            "docker",
-            "info",
-        ],
-        timeout=120,
-    )
-    if run.returncode != 0:
+    docker_host = f"tcp://{dind_name}:2375"
+    inner_info = _run(["docker", "exec", dind_name, "docker", "info"], timeout=120)
+    if inner_info.returncode != 0:
         raise IsolatedDockerError(
-            "isolated_docker_worker_network_unreachable",
-            detail=(run.stderr or run.stdout or "docker info failed").strip(),
+            "isolated_docker_inner_daemon_unreachable",
+            detail=(inner_info.stderr or inner_info.stdout or "inner docker info failed").strip(),
         )
     inspect = _run(
         ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
@@ -272,13 +255,8 @@ def verify_worker_docker_access(
             bind_probe = _run(
                 [
                     "docker",
-                    "run",
-                    "--rm",
-                    "--network",
-                    f"container:{dind_name}",
-                    "-e",
-                    f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
-                    worker_image,
+                    "exec",
+                    dind_name,
                     "docker",
                     "create",
                     "--network",
@@ -317,24 +295,34 @@ def verify_worker_docker_access(
                 )
             container_id = (bind_probe.stdout or "").strip()
             if container_id:
-                _run(
-                    [
-                        "docker",
-                        "run",
-                        "--rm",
-                        "--network",
-                        f"container:{dind_name}",
-                        "-e",
-                        f"DOCKER_HOST={ISOLATED_WORKER_DOCKER_HOST}",
-                        worker_image,
-                        "docker",
-                        "rm",
-                        container_id,
-                    ],
-                    timeout=60,
-                )
+                _run(["docker", "exec", dind_name, "docker", "rm", container_id], timeout=60)
         finally:
             shutil.rmtree(probe_root, ignore_errors=True)
+    worker_probe_name = f"bridle-dind-worker-probe-{uuid.uuid4().hex[:12]}"
+    worker_probe = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            worker_probe_name,
+            "--network",
+            network,
+            "--volumes-from",
+            f"{dind_name}:rw",
+            "-e",
+            f"DOCKER_HOST={docker_host}",
+            worker_image,
+            "docker",
+            "info",
+        ],
+        timeout=120,
+    )
+    if worker_probe.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_worker_network_unreachable",
+            detail=(worker_probe.stderr or worker_probe.stdout or "worker docker info failed").strip(),
+        )
     LOGGER.info(
         "isolated_docker_worker_access_verified network=%s dind=%s image=%s digest=%s",
         network,
