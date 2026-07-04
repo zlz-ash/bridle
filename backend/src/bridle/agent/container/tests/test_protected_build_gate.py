@@ -202,13 +202,11 @@ def test_isolated_docker_candidate_mount_uses_inner_root() -> None:
     assert "bind-propagation=rshared" in mounts[1]
 
 
-def test_docker_worker_run_identity_matches_agent_uid() -> None:
+def test_docker_worker_run_identity_uses_host_uid() -> None:
     worker_sandbox = _load("bridle_worker_sandbox_identity", "worker_sandbox.py")
-    assert worker_sandbox.docker_worker_run_identity({"BRIDLE_RUN_DOCKER_TESTS": "1"}) == (1000, 1000)
-    host_identity = worker_sandbox.docker_worker_run_identity({"BRIDLE_ISOLATION_PROBE": "1"})
-    assert worker_sandbox.docker_worker_run_identity(
-        {"BRIDLE_RUN_DOCKER_TESTS": "1", "BRIDLE_ISOLATION_PROBE": "1"}
-    ) == host_identity
+    host_uid = os.getuid() if hasattr(os, "getuid") else 1000
+    host_gid = os.getgid() if hasattr(os, "getgid") else 1000
+    assert worker_sandbox.docker_worker_run_identity({"BRIDLE_RUN_DOCKER_TESTS": "1"}) == (host_uid, host_gid)
 
 
 def test_parse_docker_load_id_ignores_tag_only_output() -> None:

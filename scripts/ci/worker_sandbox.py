@@ -185,8 +185,7 @@ def _append_worker_diagnostic(message: str) -> None:
 
 
 def docker_worker_run_identity(public_env: Mapping[str, str]) -> tuple[int, int]:
-    if public_env.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and public_env.get("BRIDLE_ISOLATION_PROBE") != "1":
-        return 1000, 1000
+    del public_env
     run_uid = os.getuid() if hasattr(os, "getuid") else 1000
     run_gid = os.getgid() if hasattr(os, "getgid") else 1000
     return run_uid, run_gid

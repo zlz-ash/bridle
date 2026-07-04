@@ -4,12 +4,15 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from bridle.agent.container.active_slot import (
+    ActiveSlotLayout,
+    align_rw_mount_roots_for_agent_uid,
     build_slot_mounts,
     collect_active_slot,
     ensure_slot_roots,
@@ -24,6 +27,41 @@ from bridle.agent.container.active_slot import (
 )
 from bridle.agent.container.candidate_path_guard import CandidatePathError
 from bridle.agent.container.entrypoint import run_active_slot_task
+
+
+def test_align_rw_mount_roots_for_agent_uid_invokes_root_chown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BRIDLE_RUN_DOCKER_TESTS", "1")
+    monkeypatch.setenv("BRIDLE_WORKER_IMAGE", "bridle-worker:test")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    layout = ActiveSlotLayout(
+        slot_root=tmp_path / "slot",
+        project=tmp_path / "slot" / "project",
+        baseline=tmp_path / "slot" / "baseline",
+        mocks=tmp_path / "slot" / "mocks",
+        output=tmp_path / "slot" / "output",
+        diagnostics=tmp_path / "slot" / "diagnostics",
+    )
+    for path in (layout.project, layout.output, layout.diagnostics):
+        path.mkdir(parents=True, exist_ok=True)
+    align_rw_mount_roots_for_agent_uid(layout)
+    assert len(calls) == 3
+    assert all("chown" in call for call in calls)
+    assert all("1000:1000" in call for call in calls)
 
 
 def _candidate(module_root: Path, candidate_id: str) -> Path:

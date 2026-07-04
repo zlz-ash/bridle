@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import stat
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -738,6 +739,56 @@ def _remove_link_entry(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+_AGENT_CONTAINER_UID = 1000
+_AGENT_CONTAINER_GID = 1000
+
+
+def align_rw_mount_roots_for_agent_uid(
+    layout: ActiveSlotLayout,
+    *,
+    uid: int = _AGENT_CONTAINER_UID,
+    gid: int = _AGENT_CONTAINER_GID,
+) -> None:
+    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") != "1":
+        return
+    if os.environ.get("BRIDLE_CONTAINER_DRY_RUN") == "1":
+        return
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    if not docker_host and shutil.which("docker") is None:
+        return
+    docker_exe = shutil.which("docker") or "docker"
+    image = (
+        os.environ.get("BRIDLE_WORKER_IMAGE", "").strip()
+        or os.environ.get("BRIDLE_AGENT_IMAGE", "").strip()
+        or "alpine:3.20"
+    )
+    for name in _RW_MOUNT_ROOTS:
+        root = getattr(layout, name)
+        if not root.is_dir():
+            continue
+        cmd = [
+            docker_exe,
+            "run",
+            "--rm",
+            "--user",
+            "0",
+            "-v",
+            f"{root.resolve()}:/mnt:rw",
+            image,
+            "chown",
+            "-R",
+            f"{uid}:{gid}",
+            "/mnt",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "chown failed").strip()
+            raise CandidatePathError(
+                "active_slot_uid_align_failed",
+                detail=f"{name}:{root}:{detail}",
+            )
+
+
 def prepare_active_slot(
     module_root: Path,
     candidate_root: Path,
@@ -771,6 +822,7 @@ def prepare_active_slot(
             _validate_mount_root(dst, root_name=name, module_root=module_root)
             _populate()
     write_lease(layout, candidate_rel=candidate_rel, run_id=run_id, module_root=module_root)
+    align_rw_mount_roots_for_agent_uid(layout)
     logger.info(
         "active_slot_prepared",
         extra={
