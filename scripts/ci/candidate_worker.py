@@ -103,7 +103,6 @@ def run_worker_request(request_raw: str) -> str:
         [sys.executable, *invocation],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=False,
     )
     stdout_parts: list[bytes] = []
     assert proc.stdout is not None
