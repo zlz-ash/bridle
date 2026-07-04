@@ -176,9 +176,14 @@ def run_worker(
 ):
     script_dir = trusted_scripts_path(trusted_root)
     worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
+    config_path = trusted_config_path(trusted_root)
+    if probe:
+        probe_config = script_dir / "protected/pytest-probe.toml"
+        if probe_config.is_file():
+            config_path = probe_config
     paths = worker_sandbox.SandboxPaths(
         candidate_root=candidate_root.resolve(),
-        trusted_config=trusted_config_path(trusted_root),
+        trusted_config=config_path.resolve(),
         trusted_scripts=script_dir.resolve(),
         controller_ipc=controller_ipc,
     )
@@ -328,14 +333,40 @@ def main(argv: list[str] | None = None) -> int:
     worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
     probe_report = worker_sandbox.parse_probe_report(worker_stdout) if args.probe_isolation else None
 
-    verify_worker_observation(observation, probe=args.probe_isolation)
-    verify_controller_state(
-        before_pytest=before_pytest,
-        harness_before=harness_before,
-        harness_path=harness_path,
-        evidence_dir=evidence_path,
-        probe_report=probe_report,
-    )
+    if args.ipc_transcript is not None:
+        partial_transcript = {
+            "observation": json.loads(
+                _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
+            ),
+            "probe_report_untrusted": probe_report,
+            "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
+            "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
+        }
+        args.ipc_transcript.parent.mkdir(parents=True, exist_ok=True)
+        args.ipc_transcript.write_text(
+            json.dumps(partial_transcript, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    try:
+        verify_worker_observation(observation, probe=args.probe_isolation)
+        verify_controller_state(
+            before_pytest=before_pytest,
+            harness_before=harness_before,
+            harness_path=harness_path,
+            evidence_dir=evidence_path,
+            probe_report=probe_report,
+        )
+    except RuntimeError as exc:
+        LOGGER.error(
+            "trusted_controller_verification_failed error=%s worker_state=%s exit_code=%s stderr_tail=%s probe_report=%s",
+            exc,
+            observation.worker_state,
+            observation.exit_code,
+            worker_stderr[-4000:],
+            probe_report,
+        )
+        raise
 
     if args.probe_isolation and observation.worker_uid is not None and observation.controller_uid is not None:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
@@ -351,9 +382,9 @@ def main(argv: list[str] | None = None) -> int:
         "probe_report_untrusted": probe_report,
         "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
         "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
+        "verified": True,
     }
     if args.ipc_transcript is not None:
-        args.ipc_transcript.parent.mkdir(parents=True, exist_ok=True)
         args.ipc_transcript.write_text(json.dumps(transcript, indent=2, sort_keys=True), encoding="utf-8")
 
     if args.probe_isolation:

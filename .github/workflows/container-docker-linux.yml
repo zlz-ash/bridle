@@ -137,12 +137,23 @@ jobs:
           mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
           TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
           IPC_PROBE="$RUNNER_TEMP/trusted-ipc-probe.json"
-          python3 -I "$TRUSTED_TEST_RUNNER" \
+          PROBE_LOG="$RUNNER_TEMP/probe.log"
+          if ! python3 "$TRUSTED_TEST_RUNNER" \
             --probe-isolation \
             --ipc-transcript "$IPC_PROBE" \
             "$GITHUB_WORKSPACE/candidate" \
             "$GITHUB_WORKSPACE/trusted-harness" \
-            -- -q -rs 2>&1 | tee "$RUNNER_TEMP/probe.log"
+            -- -q -rs 2>&1 | tee "$PROBE_LOG"; then
+            echo "probe_failed see $PROBE_LOG and $IPC_PROBE" >&2
+            if [ -f "$IPC_PROBE" ]; then
+              python3 - "$IPC_PROBE" <<'PY'
+import json, sys
+payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
+print(json.dumps(payload, indent=2, sort_keys=True))
+PY
+            fi
+            exit 1
+          fi
           echo "ipc_probe_transcript=$IPC_PROBE" >> "$GITHUB_OUTPUT"
 
       - name: Run Docker integration tests and gate
@@ -203,5 +214,6 @@ jobs:
           path: |
             ${{ runner.temp }}/bridle-docker-evidence
             ${{ runner.temp }}/trusted-ipc-probe.json
+            ${{ runner.temp }}/probe.log
             ${{ runner.temp }}/trusted-ipc-docker.json
           if-no-files-found: warn

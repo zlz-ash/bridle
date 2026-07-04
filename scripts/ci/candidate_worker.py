@@ -55,6 +55,8 @@ def pytest_arguments(
             str(trusted_config.resolve()),
             "--rootdir",
             str(probe_root),
+            "--confcutdir",
+            str(probe_root),
             str(probe_root),
             *extra_args,
         ]

@@ -71,7 +71,7 @@ def map_paths_for_sandbox(paths: SandboxPaths, *, public_env: Mapping[str, str] 
     controller_ipc = Path("/controller-ipc") if paths.controller_ipc is not None else None
     return SandboxPaths(
         candidate_root=Path("/candidate"),
-        trusted_config=Path("/trusted-config/pyproject.toml"),
+        trusted_config=Path("/trusted-config") / paths.trusted_config.name,
         trusted_scripts=Path("/trusted-scripts"),
         controller_ipc=controller_ipc,
     )
@@ -193,7 +193,6 @@ def _spawn_docker_worker(
         *env_args,
         worker_image_ref(),
         "python",
-        "-I",
         "/trusted-scripts/candidate_worker.py",
     ]
     LOGGER.info(
