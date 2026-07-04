@@ -146,11 +146,7 @@ jobs:
             -- -q -rs 2>&1 | tee "$PROBE_LOG"; then
             echo "probe_failed see $PROBE_LOG and $IPC_PROBE" >&2
             if [ -f "$IPC_PROBE" ]; then
-              python3 - "$IPC_PROBE" <<'PY'
-import json, sys
-payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
-print(json.dumps(payload, indent=2, sort_keys=True))
-PY
+              python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8')), indent=2, sort_keys=True))" "$IPC_PROBE"
             fi
             exit 1
           fi
