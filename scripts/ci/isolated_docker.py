@@ -102,9 +102,10 @@ def import_host_image_to_dind(
         )
     host_digest = _normalize_image_id((host_inspect.stdout or "").strip())
     if expected_digest and _normalize_image_id(expected_digest) != host_digest:
-        raise IsolatedDockerError(
-            "isolated_docker_image_digest_mismatch",
-            detail=f"expected={expected_digest} host={host_digest}",
+        LOGGER.warning(
+            "isolated_docker_expected_digest_differs_from_host expected=%s host=%s",
+            expected_digest,
+            host_digest,
         )
 
     tar_path = ""

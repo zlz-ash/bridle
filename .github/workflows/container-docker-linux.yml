@@ -87,7 +87,7 @@ jobs:
           WORKER_TAG="bridle-worker:${GITHUB_SHA::12}"
           docker build -f "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/protected/worker.Dockerfile" \
             -t "$WORKER_TAG" \
-            "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/protected"
+            "$GITHUB_WORKSPACE/trusted-harness"
           WORKER_DIGEST=$(docker image inspect -f '{{.Id}}' "$WORKER_TAG")
           if [[ "$WORKER_DIGEST" != sha256:* ]]; then
             WORKER_DIGEST="sha256:${WORKER_DIGEST}"
