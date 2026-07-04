@@ -176,3 +176,45 @@ def import_host_image_to_dind(
         loaded_digest,
     )
     return loaded_digest
+
+
+def verify_worker_docker_access(*, dind_name: str, network: str, image_ref: str) -> None:
+    probe_name = f"bridle-dind-probe-{uuid.uuid4().hex[:12]}"
+    run = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            probe_name,
+            "--network",
+            network,
+            "-e",
+            f"DOCKER_HOST=tcp://{dind_name}:2375",
+            "docker:24-cli",
+            "docker",
+            "info",
+        ],
+        timeout=60,
+    )
+    if run.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_worker_network_unreachable",
+            detail=(run.stderr or run.stdout or "docker info failed").strip(),
+        )
+    inspect = _run(
+        ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
+        timeout=60,
+    )
+    if inspect.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_review_image_missing",
+            detail=(inspect.stderr or inspect.stdout or f"missing image {image_ref}").strip(),
+        )
+    LOGGER.info(
+        "isolated_docker_worker_access_verified network=%s dind=%s image=%s digest=%s",
+        network,
+        dind_name,
+        image_ref,
+        (inspect.stdout or "").strip(),
+    )

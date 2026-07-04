@@ -79,3 +79,23 @@ def test_verify_worker_observation_rejects_missing_exit_code() -> None:
     )
     with pytest.raises(RuntimeError, match="worker_exit_code_missing"):
         trusted_runner.verify_worker_observation(observation, probe=False)
+
+
+def test_container_conftest_provides_test_workspace_with_worker_confcutdir() -> None:
+    candidate_worker = trusted_runner._load_module(
+        "bridle_candidate_worker",
+        REPO_ROOT / "scripts/ci/candidate_worker.py",
+    )
+    candidate_root = REPO_ROOT
+    trusted_config = REPO_ROOT / "backend/pyproject.toml"
+    args = candidate_worker.pytest_arguments(
+        candidate_root=candidate_root,
+        trusted_config=trusted_config,
+        extra_args=("-q",),
+    )
+    assert "--confcutdir" in args
+    cut_index = args.index("--confcutdir")
+    confcutdir = Path(args[cut_index + 1])
+    assert confcutdir.name == "tests"
+    assert confcutdir.parent.name == "container"
+    assert any("test_docker_integration.py" in arg for arg in args)

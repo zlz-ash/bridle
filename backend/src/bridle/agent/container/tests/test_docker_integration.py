@@ -345,9 +345,15 @@ def test_container_creates_slot_escape_symlinks():
     return rel, candidate
 
 
+def _candidate_root_for_relative_paths() -> Path:
+    if os.environ.get("BRIDLE_CANDIDATE_WORKER") == "1":
+        return Path("/candidate").resolve()
+    return Path(os.environ["BRIDLE_TRUSTED_CHECKOUT_ROOT"]).resolve()
+
+
 def _await_controller_sentinel_ack(outside: Path) -> str:
-    checkout_root = Path(os.environ["BRIDLE_TRUSTED_CHECKOUT_ROOT"]).resolve()
-    candidate_relative = outside.resolve().relative_to(checkout_root).as_posix()
+    candidate_root = _candidate_root_for_relative_paths()
+    candidate_relative = outside.resolve().relative_to(candidate_root).as_posix()
     request_id = uuid.uuid4().hex[:12]
     print(
         SENTINEL_REQUEST_PREFIX

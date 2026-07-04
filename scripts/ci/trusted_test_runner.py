@@ -350,6 +350,11 @@ def main(argv: list[str] | None = None) -> int:
                             image_ref=review_image,
                             expected_digest=review_digest or None,
                         )
+                        isolated_module.verify_worker_docker_access(
+                            dind_name=isolated.dind_name,
+                            network=isolated.network,
+                            image_ref=review_image,
+                        )
                     except Exception as exc:
                         LOGGER.error(
                             "isolated_docker_image_import_failed image=%s error=%s",
