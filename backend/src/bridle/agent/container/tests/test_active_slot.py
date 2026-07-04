@@ -510,8 +510,10 @@ class TestActiveSlotMounts:
         )
         link = layout.output / "escape.txt"
         link.symlink_to(outside)
-        with pytest.raises(CandidatePathError, match="refuse_symlink_or_reparse"):
-            collect_active_slot(module_root, cand, project_root=test_workspace)
+        collect_active_slot(module_root, cand, project_root=test_workspace)
+        assert link.is_symlink()
+        assert not (cand / "output" / "escape.txt").exists()
+        assert outside.read_text(encoding="utf-8") == "secret\n"
 
 
 class TestEntrypointBaselineGuard:

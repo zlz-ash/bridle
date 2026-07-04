@@ -869,6 +869,7 @@ def collect_active_slot(
 ) -> None:
     """Copy writable slot artifacts back; refuse links and out-of-scope targets."""
     layout = slot_layout(active_slot_dir(module_root))
+    restore_rw_mount_roots_for_host_worker(layout)
     _validate_layout_mount_roots(layout, module_root=module_root)
     slot_metadata = _entry_metadata(module_root, _ACTIVE_DIR)
     if slot_metadata is None or not stat.S_ISDIR(slot_metadata.st_mode):
@@ -951,7 +952,8 @@ def _copy_tree_no_links(
         dirnames[:] = [name for name in dirnames if not (root_path / name).is_symlink()]
         for name in filenames:
             child = root_path / name
-            _refuse_link(child)
+            if child.is_symlink() or _is_reparse(child):
+                continue
             out = target_dir / name
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(child, out)
