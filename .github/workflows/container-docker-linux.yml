@@ -194,6 +194,28 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py" \
             verify-overlay "$GITHUB_WORKSPACE/candidate" "$RUNNER_TEMP/trusted-harness-snapshot.json"
 
+      - name: Preflight isolated Docker chain
+        working-directory: candidate
+        env:
+          BRIDLE_RUN_DOCKER_TESTS: "1"
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+          BRIDLE_TRUSTED_CHECKOUT_ROOT: ${{ github.workspace }}/candidate
+          BRIDLE_WORKER_DOCKER_SANDBOX: "1"
+          BRIDLE_RUNNER_TEMP: ${{ runner.temp }}
+          BRIDLE_STAGING_ROOT: ${{ runner.temp }}
+          BRIDLE_WORKER_IMAGE: ${{ steps.worker-image.outputs.worker_image }}
+          BRIDLE_REVIEW_SOURCE_DIGEST: ${{ steps.review-image.outputs.source_digest }}
+          BRIDLE_REVIEW_IMAGE_DIGEST: ${{ steps.review-image.outputs.image_digest }}
+          BRIDLE_AGENT_IMAGE: ${{ steps.review-image.outputs.image_tag }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
+          python3 -I "$TRUSTED_TEST_RUNNER" \
+            --preflight-isolated-docker \
+            "$GITHUB_WORKSPACE/candidate" \
+            "$GITHUB_WORKSPACE/trusted-harness"
+
       - name: Run Docker integration tests
         id: docker-tests
         working-directory: candidate

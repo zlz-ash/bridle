@@ -231,6 +231,47 @@ def cleanup_probe_layout(candidate_root: Path, evidence_dir: Path | None) -> Non
             forged.unlink()
 
 
+def prepare_isolated_docker_context(
+    *,
+    candidate_root: Path,
+    ctx: Any,
+    worker_sandbox: Any,
+    script_dir: Path,
+) -> Any:
+    review_image = os.environ.get("BRIDLE_AGENT_IMAGE", "").strip()
+    review_digest = os.environ.get("BRIDLE_REVIEW_IMAGE_DIGEST", "").strip()
+    if not review_image:
+        raise RuntimeError("isolated_docker_review_image_env_missing")
+    emit_ci_phase("isolated_dind_start")
+    isolated = worker_sandbox.start_isolated_docker_for_worker(
+        run_id=os.environ.get("GITHUB_SHA", "")[:12] or None,
+        candidate_host_root=candidate_root,
+    )
+    emit_ci_phase("isolated_dind_ready", detail=isolated.dind_name)
+    ctx.isolated_docker_host = isolated.docker_host
+    ctx.isolated_dind_name = isolated.dind_name
+    ctx.isolated_network = isolated.network
+    isolated_module = _load_module(
+        "bridle_isolated_docker_import",
+        script_dir / "isolated_docker.py",
+    )
+    isolated_module.import_host_image_to_dind(
+        dind_name=isolated.dind_name,
+        image_ref=review_image,
+        expected_digest=review_digest or None,
+    )
+    emit_ci_phase("isolated_review_image_imported", detail=review_image)
+    isolated_module.verify_worker_docker_access(
+        dind_name=isolated.dind_name,
+        network=isolated.network,
+        image_ref=review_image,
+        worker_image=os.environ.get("BRIDLE_WORKER_IMAGE", "").strip() or worker_sandbox.worker_image_ref(),
+        candidate_host_root=candidate_root,
+    )
+    emit_ci_phase("isolated_worker_access_verified")
+    return isolated
+
+
 def run_worker(
     *,
     candidate_root: Path,
@@ -301,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ipc-transcript", type=Path)
     parser.add_argument("--verify-overlay-after", type=Path)
     parser.add_argument("--probe-isolation", action="store_true")
+    parser.add_argument("--preflight-isolated-docker", action="store_true")
     parser.add_argument("candidate_root", type=Path)
     parser.add_argument("trusted_root", type=Path)
     parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
@@ -383,46 +425,23 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
                 os.environ["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
             if worker_sandbox.use_docker_sandbox(public_env=build_public_env(candidate_root=candidate_root, probe=False)):
-                emit_ci_phase("isolated_dind_start")
-                isolated = worker_sandbox.start_isolated_docker_for_worker(
-                    run_id=os.environ.get("GITHUB_SHA", "")[:12] or None,
-                    candidate_host_root=candidate_root,
-                )
-                emit_ci_phase("isolated_dind_ready", detail=isolated.dind_name)
-                ctx.isolated_docker_host = isolated.docker_host
-                ctx.isolated_dind_name = isolated.dind_name
-                ctx.isolated_network = isolated.network
-                review_image = os.environ.get("BRIDLE_AGENT_IMAGE", "").strip()
-                review_digest = os.environ.get("BRIDLE_REVIEW_IMAGE_DIGEST", "").strip()
-                if review_image:
-                    isolated_module = _load_module(
-                        "bridle_isolated_docker_import",
-                        script_dir / "isolated_docker.py",
+                try:
+                    isolated = prepare_isolated_docker_context(
+                        candidate_root=candidate_root,
+                        ctx=ctx,
+                        worker_sandbox=worker_sandbox,
+                        script_dir=script_dir,
                     )
-                    try:
-                        isolated_module.import_host_image_to_dind(
-                            dind_name=isolated.dind_name,
-                            image_ref=review_image,
-                            expected_digest=review_digest or None,
-                        )
-                        emit_ci_phase("isolated_review_image_imported", detail=review_image)
-                        isolated_module.verify_worker_docker_access(
-                            dind_name=isolated.dind_name,
-                            network=isolated.network,
-                            image_ref=review_image,
-                            worker_image=os.environ.get("BRIDLE_WORKER_IMAGE", "").strip()
-                            or worker_sandbox.worker_image_ref(),
-                            candidate_host_root=candidate_root,
-                        )
-                        emit_ci_phase("isolated_worker_access_verified")
-                    except Exception as exc:
-                        emit_ci_phase("isolated_docker_setup_failed", detail=str(exc))
-                        LOGGER.error(
-                            "isolated_docker_setup_failed image=%s error=%s",
-                            review_image,
-                            exc,
-                        )
-                        raise
+                except Exception as exc:
+                    emit_ci_phase("isolated_docker_setup_failed", detail=str(exc))
+                    LOGGER.error("isolated_docker_setup_failed error=%s", exc)
+                    raise
+                if args.preflight_isolated_docker:
+                    emit_ci_phase("preflight_isolated_docker_ok")
+                    return 0
+
+        if args.preflight_isolated_docker:
+            raise RuntimeError("preflight_isolated_docker_requires_linux_docker_sandbox")
 
         emit_ci_phase("worker_spawn_start")
         observation, worker_stdout, worker_stderr = run_worker(

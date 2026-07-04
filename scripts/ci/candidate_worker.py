@@ -90,6 +90,27 @@ def run_worker_request(request_raw: str) -> str:
     os.environ["BRIDLE_CANDIDATE_WORKER"] = "1"
 
     candidate_source = candidate_root / "backend/src"
+    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1":
+        integration_test = (
+            candidate_root / "backend/src/bridle/agent/container/tests/test_docker_integration.py"
+        )
+        if not integration_test.is_file():
+            raise RuntimeError(f"candidate_worker_test_file_missing path={integration_test}")
+        if os.environ.get("DOCKER_HOST", "").strip():
+            docker_probe = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if docker_probe.returncode != 0:
+                raise RuntimeError(
+                    "candidate_worker_docker_unreachable "
+                    f"host={os.environ.get('DOCKER_HOST')} "
+                    f"stderr={(docker_probe.stderr or docker_probe.stdout or '').strip()}"
+                )
+
     sys.path.insert(0, str(candidate_source))
     os.chdir(candidate_root / "backend")
 

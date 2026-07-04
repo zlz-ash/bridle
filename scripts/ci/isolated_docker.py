@@ -34,16 +34,19 @@ def _candidate_bind_mounts(host_candidate: str) -> list[str]:
     ]
 
 
-def _ensure_candidate_rshared(*, dind_name: str) -> None:
-    result = _run(
-        ["docker", "exec", dind_name, "mount", "--make-rshared", INNER_CANDIDATE_ROOT],
-        timeout=30,
-    )
-    if result.returncode != 0:
-        LOGGER.warning(
-            "isolated_docker_candidate_rshared_failed detail=%s",
-            (result.stderr or result.stdout or "mount --make-rshared failed").strip(),
+def _ensure_candidate_mount_propagation(*, dind_name: str) -> None:
+    for flag in ("--make-rshared", "--make-shared"):
+        result = _run(
+            ["docker", "exec", dind_name, "mount", flag, INNER_CANDIDATE_ROOT],
+            timeout=30,
         )
+        if result.returncode == 0:
+            LOGGER.info("isolated_docker_candidate_mount_propagation flag=%s", flag)
+            return
+    LOGGER.warning(
+        "isolated_docker_candidate_mount_propagation_failed detail=%s",
+        (result.stderr or result.stdout or "mount propagation failed").strip(),
+    )
 
 
 def _staging_tar_path(suffix: str) -> Path:
@@ -106,7 +109,7 @@ def start_isolated_daemon(
         stop_isolated_daemon(network=network, dind_name=dind_name)
         raise IsolatedDockerError("isolated_docker_dind_not_ready", detail=dind_name)
     if candidate_host_root is not None:
-        _ensure_candidate_rshared(dind_name=dind_name)
+        _ensure_candidate_mount_propagation(dind_name=dind_name)
     docker_host = f"tcp://{dind_name}:2375"
     LOGGER.info("isolated_docker_started network=%s dind=%s host=%s", network, dind_name, docker_host)
     return docker_host, network, dind_name
