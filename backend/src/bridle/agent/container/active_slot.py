@@ -685,6 +685,7 @@ def clear_slot_contents(layout: ActiveSlotLayout, *, module_root: Path | None = 
 
 def clear_active_slot(module_root: Path, *, project_root: Path) -> None:
     layout = ensure_slot_roots(module_root)
+    restore_rw_mount_roots_for_host_worker(layout)
     clear_slot_contents(layout, module_root=module_root)
 
 
@@ -743,18 +744,23 @@ _AGENT_CONTAINER_UID = 1000
 _AGENT_CONTAINER_GID = 1000
 
 
-def align_rw_mount_roots_for_agent_uid(
+def _should_align_mount_uids_via_docker() -> bool:
+    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") != "1":
+        return False
+    if os.environ.get("BRIDLE_CONTAINER_DRY_RUN") == "1":
+        return False
+    if os.environ.get("DOCKER_HOST", "").strip():
+        return True
+    return shutil.which("docker") is not None
+
+
+def _docker_chown_rw_mount_roots(
     layout: ActiveSlotLayout,
     *,
-    uid: int = _AGENT_CONTAINER_UID,
-    gid: int = _AGENT_CONTAINER_GID,
+    uid: int,
+    gid: int,
 ) -> None:
-    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") != "1":
-        return
-    if os.environ.get("BRIDLE_CONTAINER_DRY_RUN") == "1":
-        return
-    docker_host = os.environ.get("DOCKER_HOST", "").strip()
-    if not docker_host and shutil.which("docker") is None:
+    if not _should_align_mount_uids_via_docker():
         return
     docker_exe = shutil.which("docker") or "docker"
     image = (
@@ -789,6 +795,21 @@ def align_rw_mount_roots_for_agent_uid(
             )
 
 
+def restore_rw_mount_roots_for_host_worker(layout: ActiveSlotLayout) -> None:
+    host_uid = os.getuid() if hasattr(os, "getuid") else _AGENT_CONTAINER_UID
+    host_gid = os.getgid() if hasattr(os, "getgid") else _AGENT_CONTAINER_GID
+    _docker_chown_rw_mount_roots(layout, uid=host_uid, gid=host_gid)
+
+
+def align_rw_mount_roots_for_agent_uid(
+    layout: ActiveSlotLayout,
+    *,
+    uid: int = _AGENT_CONTAINER_UID,
+    gid: int = _AGENT_CONTAINER_GID,
+) -> None:
+    _docker_chown_rw_mount_roots(layout, uid=uid, gid=gid)
+
+
 def prepare_active_slot(
     module_root: Path,
     candidate_root: Path,
@@ -799,6 +820,7 @@ def prepare_active_slot(
 ) -> ActiveSlotLayout:
     """Clear and populate the module active slot from one host candidate."""
     layout = ensure_slot_roots(module_root)
+    restore_rw_mount_roots_for_host_worker(layout)
     clear_slot_contents(layout, module_root=module_root)
     for name in _SLOT_SUBDIRS:
         src = candidate_root / name

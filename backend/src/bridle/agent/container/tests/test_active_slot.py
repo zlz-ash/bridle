@@ -14,6 +14,7 @@ from bridle.agent.container.active_slot import (
     ActiveSlotLayout,
     align_rw_mount_roots_for_agent_uid,
     build_slot_mounts,
+    restore_rw_mount_roots_for_host_worker,
     collect_active_slot,
     ensure_slot_roots,
     prepare_active_slot,
@@ -62,6 +63,42 @@ def test_align_rw_mount_roots_for_agent_uid_invokes_root_chown(
     assert len(calls) == 3
     assert all("chown" in call for call in calls)
     assert all("1000:1000" in call for call in calls)
+
+
+def test_restore_rw_mount_roots_for_host_worker_chowns_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BRIDLE_RUN_DOCKER_TESTS", "1")
+    monkeypatch.setenv("BRIDLE_WORKER_IMAGE", "bridle-worker:test")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    layout = ActiveSlotLayout(
+        slot_root=tmp_path / "slot",
+        project=tmp_path / "slot" / "project",
+        baseline=tmp_path / "slot" / "baseline",
+        mocks=tmp_path / "slot" / "mocks",
+        output=tmp_path / "slot" / "output",
+        diagnostics=tmp_path / "slot" / "diagnostics",
+    )
+    for path in (layout.project, layout.output, layout.diagnostics):
+        path.mkdir(parents=True, exist_ok=True)
+    restore_rw_mount_roots_for_host_worker(layout)
+    host_uid = os.getuid() if hasattr(os, "getuid") else 1000
+    host_gid = os.getgid() if hasattr(os, "getgid") else 1000
+    assert len(calls) == 3
+    assert all(f"{host_uid}:{host_gid}" in call for call in calls)
 
 
 def _candidate(module_root: Path, candidate_id: str) -> Path:
