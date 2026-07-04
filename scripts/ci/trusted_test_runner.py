@@ -269,6 +269,14 @@ def prepare_isolated_docker_context(
         candidate_host_root=candidate_root,
     )
     emit_ci_phase("isolated_worker_access_verified")
+    isolated_module._write_setup_transcript(
+        {
+            "status": "ok",
+            "dind_name": isolated.dind_name,
+            "review_image": review_image,
+            "review_digest": review_digest,
+        }
+    )
     return isolated
 
 
@@ -433,7 +441,17 @@ def main(argv: list[str] | None = None) -> int:
                         script_dir=script_dir,
                     )
                 except Exception as exc:
-                    emit_ci_phase("isolated_docker_setup_failed", detail=str(exc))
+                    detail = getattr(exc, "detail", None) or str(exc)
+                    error_code = getattr(exc, "error_code", type(exc).__name__)
+                    isolated_module = _load_module(
+                        "bridle_isolated_docker_transcript",
+                        script_dir / "isolated_docker.py",
+                    )
+                    if hasattr(isolated_module, "_write_setup_transcript"):
+                        isolated_module._write_setup_transcript(
+                            {"error_code": str(error_code), "detail": str(detail)}
+                        )
+                    emit_ci_phase("isolated_docker_setup_failed", detail=f"{error_code}:{detail}")
                     LOGGER.error("isolated_docker_setup_failed error=%s", exc)
                     raise
                 if args.preflight_isolated_docker:

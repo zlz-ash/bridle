@@ -2,6 +2,7 @@
 """Per-run isolated Docker daemon lifecycle for candidate workers."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -49,6 +50,31 @@ def _ensure_candidate_mount_propagation(*, dind_name: str) -> None:
     )
 
 
+def _host_prepare_candidate_mount(candidate_host_root: Path) -> None:
+    if not hasattr(os, "getuid"):
+        return
+    candidate = candidate_host_root.resolve()
+    for path in (candidate, candidate.parent):
+        share = _run(["mount", "--make-shared", str(path)], timeout=30)
+        if share.returncode == 0:
+            LOGGER.info("isolated_docker_host_shared path=%s", path)
+            return
+    LOGGER.warning(
+        "isolated_docker_host_shared_failed path=%s detail=%s",
+        candidate,
+        (share.stderr or share.stdout or "mount --make-shared failed").strip(),
+    )
+
+
+def _write_setup_transcript(payload: dict[str, str]) -> None:
+    raw = os.environ.get("BRIDLE_DOCKER_EVIDENCE_DIR", "").strip()
+    if not raw:
+        return
+    path = Path(raw) / "isolated-setup-transcript.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _staging_tar_path(suffix: str) -> Path:
     for key in ("BRIDLE_STAGING_ROOT", "BRIDLE_RUNNER_TEMP", "RUNNER_TEMP", "TMPDIR"):
         root = os.environ.get(key, "").strip()
@@ -73,6 +99,7 @@ def start_isolated_daemon(
         raise IsolatedDockerError("isolated_docker_network_create_failed", detail=create_net.stderr.strip())
     volume_args: list[str] = []
     if candidate_host_root is not None:
+        _host_prepare_candidate_mount(candidate_host_root)
         host_candidate = str(candidate_host_root.resolve())
         volume_args.extend(_candidate_bind_mounts(host_candidate))
     create_dind = _run(
@@ -90,6 +117,7 @@ def start_isolated_daemon(
             "DOCKER_TLS_CERTDIR=",
             "docker:24-dind",
             "dockerd",
+            "--storage-driver=vfs",
             "--host=unix:///var/run/docker.sock",
             "--host=tcp://0.0.0.0:2375",
         ],

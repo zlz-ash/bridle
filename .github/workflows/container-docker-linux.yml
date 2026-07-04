@@ -211,10 +211,25 @@ jobs:
         run: |
           set -euo pipefail
           TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
-          python3 -I "$TRUSTED_TEST_RUNNER" \
+          PREFLIGHT_LOG="$RUNNER_TEMP/preflight-isolated.log"
+          mkdir -p "$BRIDLE_DOCKER_EVIDENCE_DIR"
+          if ! python3 -I "$TRUSTED_TEST_RUNNER" \
             --preflight-isolated-docker \
             "$GITHUB_WORKSPACE/candidate" \
-            "$GITHUB_WORKSPACE/trusted-harness"
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            2>&1 | tee "$PREFLIGHT_LOG"; then
+            echo "preflight_isolated_docker_failed" >&2
+            if [ -f "$BRIDLE_DOCKER_EVIDENCE_DIR/ci-phases.log" ]; then
+              echo "=== ci-phases.log ===" >&2
+              cat "$BRIDLE_DOCKER_EVIDENCE_DIR/ci-phases.log" >&2
+            fi
+            if [ -f "$BRIDLE_DOCKER_EVIDENCE_DIR/isolated-setup-transcript.json" ]; then
+              echo "=== isolated-setup-transcript.json ===" >&2
+              cat "$BRIDLE_DOCKER_EVIDENCE_DIR/isolated-setup-transcript.json" >&2
+            fi
+            tail -n 120 "$PREFLIGHT_LOG" >&2
+            exit 1
+          fi
 
       - name: Run Docker integration tests
         id: docker-tests
@@ -294,6 +309,12 @@ jobs:
           if [ -f "$RUNNER_TEMP/bridle-docker-evidence/ci-phases.log" ]; then
             cat "$RUNNER_TEMP/bridle-docker-evidence/ci-phases.log" >&2
           fi
+          echo "=== isolated-setup-transcript.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/isolated-setup-transcript.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/isolated-setup-transcript.json" >&2
+          fi
+          echo "=== preflight-isolated.log (tail) ===" >&2
+          tail -n 80 "$RUNNER_TEMP/preflight-isolated.log" >&2 || true
           echo "=== controller-failure.json ===" >&2
           if [ -f "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" ]; then
             cat "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" >&2
@@ -313,6 +334,7 @@ jobs:
             ${{ runner.temp }}/trusted-ipc-probe.json
             ${{ runner.temp }}/probe.log
             ${{ runner.temp }}/trusted-ipc-docker.json
+            ${{ runner.temp }}/preflight-isolated.log
             ${{ runner.temp }}/docker-tests.log
             ${{ runner.temp }}/gate.log
           if-no-files-found: warn
