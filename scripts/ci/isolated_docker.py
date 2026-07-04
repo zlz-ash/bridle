@@ -75,3 +75,60 @@ def stop_isolated_daemon(*, network: str, dind_name: str) -> None:
     net_rm = _run(["docker", "network", "rm", network], timeout=30)
     if net_rm.returncode != 0 and "No such network" not in (net_rm.stderr or ""):
         LOGGER.warning("isolated_docker_network_remove_failed name=%s detail=%s", network, net_rm.stderr.strip())
+
+
+def _normalize_image_id(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("sha256:"):
+        return text
+    if len(text) == 64 and all(ch in "0123456789abcdef" for ch in text):
+        return f"sha256:{text}"
+    return text
+
+
+def _run_bytes(args: list[str], *, timeout: int = 600) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+
+
+def import_host_image_to_dind(
+    *,
+    dind_name: str,
+    image_ref: str,
+    expected_digest: str | None = None,
+) -> str:
+    save = _run_bytes(["docker", "save", image_ref], timeout=600)
+    if save.returncode != 0:
+        detail = save.stderr.decode("utf-8", errors="replace").strip()
+        raise IsolatedDockerError("isolated_docker_image_save_failed", detail=detail)
+    load = subprocess.run(
+        ["docker", "exec", "-i", dind_name, "docker", "load"],
+        input=save.stdout,
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    if load.returncode != 0:
+        detail = (load.stderr or load.stdout or b"").decode("utf-8", errors="replace").strip()
+        raise IsolatedDockerError("isolated_docker_image_load_failed", detail=detail)
+    inspect = _run(
+        ["docker", "exec", dind_name, "docker", "image", "inspect", "-f", "{{.Id}}", image_ref],
+        timeout=60,
+    )
+    if inspect.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_image_inspect_failed",
+            detail=(inspect.stderr or inspect.stdout).strip(),
+        )
+    loaded_digest = _normalize_image_id((inspect.stdout or "").strip())
+    if expected_digest and _normalize_image_id(expected_digest) != loaded_digest:
+        raise IsolatedDockerError(
+            "isolated_docker_image_digest_mismatch",
+            detail=f"expected={expected_digest} loaded={loaded_digest}",
+        )
+    LOGGER.info(
+        "isolated_docker_image_imported dind=%s image=%s digest=%s",
+        dind_name,
+        image_ref,
+        loaded_digest,
+    )
+    return loaded_digest

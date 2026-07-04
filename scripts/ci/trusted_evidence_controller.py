@@ -136,8 +136,17 @@ def _controller_teardown(
     sys.path.insert(0, str(trusted_pythonpath))
     from bridle.agent.container.tests.docker_test_resources import assert_run_teardown_clean, finalize_run_teardown
 
-    teardown = finalize_run_teardown(it_run_id)
-    assert_run_teardown_clean(teardown)
+    previous_docker_host = os.environ.get("DOCKER_HOST")
+    if ctx.isolated_docker_host:
+        os.environ["DOCKER_HOST"] = ctx.isolated_docker_host
+    try:
+        teardown = finalize_run_teardown(it_run_id)
+        assert_run_teardown_clean(teardown)
+    finally:
+        if previous_docker_host is None:
+            os.environ.pop("DOCKER_HOST", None)
+        else:
+            os.environ["DOCKER_HOST"] = previous_docker_host
     return teardown
 
 

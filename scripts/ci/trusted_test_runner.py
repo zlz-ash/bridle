@@ -299,25 +299,40 @@ def main(argv: list[str] | None = None) -> int:
         controller_ipc_dir=ipc_dir,
     )
     isolated = None
-    if not args.probe_isolation and os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and os.name != "nt":
-        evidence_controller.mark_evidence_run_started(trusted_pythonpath=trusted_root / "backend/src")
-        if ipc_dir is not None:
-            lease = ctx.lease_registry.create_lease(candidate_root=candidate_root, ipc_dir=ipc_dir)
-            ctx.lease_id = lease.lease_id
-            ctx.issued_it_run_id = uuid.uuid4().hex[:12]
-            ctx.lease_registry.register_it_run_id(
-                ctx.lease_id,
-                ctx.issued_it_run_id,
-                ipc_dir=ipc_dir,
-            )
-            os.environ["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
-            os.environ["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
-        if worker_sandbox.use_docker_sandbox(public_env=build_public_env(candidate_root=candidate_root, probe=False)):
-            isolated = worker_sandbox.start_isolated_docker_for_worker(
-                run_id=os.environ.get("GITHUB_SHA", "")[:12] or None
-            )
-
     try:
+        if not args.probe_isolation and os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and os.name != "nt":
+            evidence_controller.mark_evidence_run_started(trusted_pythonpath=trusted_root / "backend/src")
+            if ipc_dir is not None:
+                lease = ctx.lease_registry.create_lease(candidate_root=candidate_root, ipc_dir=ipc_dir)
+                ctx.lease_id = lease.lease_id
+                ctx.issued_it_run_id = uuid.uuid4().hex[:12]
+                ctx.lease_registry.register_it_run_id(
+                    ctx.lease_id,
+                    ctx.issued_it_run_id,
+                    ipc_dir=ipc_dir,
+                )
+                os.environ["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
+                os.environ["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
+            if worker_sandbox.use_docker_sandbox(public_env=build_public_env(candidate_root=candidate_root, probe=False)):
+                isolated = worker_sandbox.start_isolated_docker_for_worker(
+                    run_id=os.environ.get("GITHUB_SHA", "")[:12] or None
+                )
+                ctx.isolated_docker_host = isolated.docker_host
+                ctx.isolated_dind_name = isolated.dind_name
+                ctx.isolated_network = isolated.network
+                review_image = os.environ.get("BRIDLE_AGENT_IMAGE", "").strip()
+                review_digest = os.environ.get("BRIDLE_REVIEW_IMAGE_DIGEST", "").strip()
+                if review_image:
+                    isolated_module = _load_module(
+                        "bridle_isolated_docker_import",
+                        script_dir / "isolated_docker.py",
+                    )
+                    isolated_module.import_host_image_to_dind(
+                        dind_name=isolated.dind_name,
+                        image_ref=review_image,
+                        expected_digest=review_digest or None,
+                    )
+
         observation, worker_stdout, worker_stderr = run_worker(
             candidate_root=candidate_root,
             trusted_root=trusted_root,
@@ -327,83 +342,83 @@ def main(argv: list[str] | None = None) -> int:
             ctx=ctx,
             isolated=isolated,
         )
-    finally:
-        worker_sandbox.stop_isolated_docker(isolated)
 
-    worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
-    probe_report = worker_sandbox.parse_probe_report(worker_stdout) if args.probe_isolation else None
+        worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
+        probe_report = worker_sandbox.parse_probe_report(worker_stdout) if args.probe_isolation else None
 
-    if args.ipc_transcript is not None:
-        partial_transcript = {
+        if args.ipc_transcript is not None:
+            partial_transcript = {
+                "observation": json.loads(
+                    _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
+                ),
+                "probe_report_untrusted": probe_report,
+                "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
+                "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
+            }
+            args.ipc_transcript.parent.mkdir(parents=True, exist_ok=True)
+            args.ipc_transcript.write_text(
+                json.dumps(partial_transcript, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+
+        try:
+            verify_worker_observation(observation, probe=args.probe_isolation)
+            verify_controller_state(
+                before_pytest=before_pytest,
+                harness_before=harness_before,
+                harness_path=harness_path,
+                evidence_dir=evidence_path,
+                probe_report=probe_report,
+            )
+        except RuntimeError as exc:
+            LOGGER.error(
+                "trusted_controller_verification_failed error=%s worker_state=%s exit_code=%s stderr_tail=%s probe_report=%s",
+                exc,
+                observation.worker_state,
+                observation.exit_code,
+                worker_stderr[-4000:],
+                probe_report,
+            )
+            raise
+
+        if args.probe_isolation and observation.worker_uid is not None and observation.controller_uid is not None:
+            if observation.worker_uid == observation.controller_uid and worker_sandbox.use_docker_sandbox(
+                public_env=build_public_env(candidate_root=candidate_root, probe=True)
+            ) is False:
+                LOGGER.warning("worker_uid_matches_controller subprocess_mode_only")
+
+        transcript = {
             "observation": json.loads(
                 _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
             ),
             "probe_report_untrusted": probe_report,
             "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
             "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
+            "verified": True,
         }
-        args.ipc_transcript.parent.mkdir(parents=True, exist_ok=True)
-        args.ipc_transcript.write_text(
-            json.dumps(partial_transcript, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        if args.ipc_transcript is not None:
+            args.ipc_transcript.write_text(json.dumps(transcript, indent=2, sort_keys=True), encoding="utf-8")
 
-    try:
-        verify_worker_observation(observation, probe=args.probe_isolation)
-        verify_controller_state(
-            before_pytest=before_pytest,
-            harness_before=harness_before,
-            harness_path=harness_path,
-            evidence_dir=evidence_path,
-            probe_report=probe_report,
-        )
-    except RuntimeError as exc:
-        LOGGER.error(
-            "trusted_controller_verification_failed error=%s worker_state=%s exit_code=%s stderr_tail=%s probe_report=%s",
-            exc,
-            observation.worker_state,
-            observation.exit_code,
-            worker_stderr[-4000:],
-            probe_report,
-        )
-        raise
+        if args.probe_isolation:
+            if observation.worker_state != "exited" or observation.exit_code is None:
+                if worker_stderr.strip():
+                    LOGGER.error("probe_worker_stderr=%s", worker_stderr[-4000:])
+                return 1
+            return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
 
-    if args.probe_isolation and observation.worker_uid is not None and observation.controller_uid is not None:
+        if args.verify_overlay_after is not None:
+            harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
+            harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
+
+        return finalize_controller_evidence(
+            observation=observation,
+            worker_stdout=worker_stdout,
+            trusted_root=trusted_root,
+            ctx=ctx,
+        )
+    finally:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
-        if observation.worker_uid == observation.controller_uid and worker_sandbox.use_docker_sandbox(
-            public_env=build_public_env(candidate_root=candidate_root, probe=True)
-        ) is False:
-            LOGGER.warning("worker_uid_matches_controller subprocess_mode_only")
-
-    transcript = {
-        "observation": json.loads(
-            _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
-        ),
-        "probe_report_untrusted": probe_report,
-        "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
-        "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
-        "verified": True,
-    }
-    if args.ipc_transcript is not None:
-        args.ipc_transcript.write_text(json.dumps(transcript, indent=2, sort_keys=True), encoding="utf-8")
-
-    if args.probe_isolation:
-        if observation.worker_state != "exited" or observation.exit_code is None:
-            if worker_stderr.strip():
-                LOGGER.error("probe_worker_stderr=%s", worker_stderr[-4000:])
-            return 1
-        return 0 if observation.exit_code in {0, 5} else int(observation.exit_code)
-
-    if args.verify_overlay_after is not None:
-        harness = _load_module("bridle_trusted_harness", script_dir / "trusted_harness.py")
-        harness.verify_overlay_snapshot(candidate_root, harness._read_snapshot(args.verify_overlay_after))
-
-    return finalize_controller_evidence(
-        observation=observation,
-        worker_stdout=worker_stdout,
-        trusted_root=trusted_root,
-        ctx=ctx,
-    )
+        worker_sandbox.stop_isolated_docker(isolated)
 
 
 if __name__ == "__main__":

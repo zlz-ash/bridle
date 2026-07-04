@@ -33,3 +33,6 @@ class ControllerExecutionContext:
     sentinel_by_handle: dict[str, Any] = field(default_factory=dict)
     handled_request_ids: set[str] = field(default_factory=set)
     lease_registry: Any = field(default_factory=_new_lease_registry)
+    isolated_docker_host: str | None = None
+    isolated_dind_name: str | None = None
+    isolated_network: str | None = None
