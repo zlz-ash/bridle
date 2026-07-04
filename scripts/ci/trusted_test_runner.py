@@ -91,9 +91,15 @@ def verify_controller_state(
         return
     if probe_report.get("control_env_read", {}).get("succeeded"):
         raise RuntimeError("candidate_leaked_control_env")
+    evidence_root = evidence_dir.resolve().as_posix() if evidence_dir is not None else ""
     for item in probe_report.get("evidence_write", {}).get("outcomes") or []:
-        if item.get("succeeded"):
-            raise RuntimeError(f"candidate_wrote_blocked_path path={item.get('path')}")
+        if not item.get("succeeded"):
+            continue
+        path = str(item.get("path") or "")
+        if path.startswith("/trusted-config") or path.startswith("/trusted-scripts"):
+            raise RuntimeError(f"candidate_wrote_blocked_path path={path}")
+        if evidence_root and path.startswith(evidence_root):
+            raise RuntimeError(f"candidate_wrote_blocked_path path={path}")
     for item in probe_report.get("harness_override", {}).get("outcomes") or []:
         if item.get("succeeded"):
             raise RuntimeError(f"candidate_overrode_harness path={item.get('path')}")
