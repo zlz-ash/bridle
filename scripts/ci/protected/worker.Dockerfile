@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends docker.io \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir "pytest==${PYTEST_VERSION}"
+    && pip install --no-cache-dir "pytest==${PYTEST_VERSION}" "pytest-asyncio>=0.25"
 
 RUN groupadd --gid 1000 worker \
     && useradd --create-home --uid 1000 --gid 1000 worker
