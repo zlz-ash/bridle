@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm@sha256:64b08b961deac775763807a2f4cd545fd5cc86309f24a5edd065c92a5e066b00
+FROM python:3.12-slim-bookworm
 
 ARG WORKER_IMAGE_DIGEST=unknown
 ARG PRODUCER_VERSION=bridle.worker/v1
