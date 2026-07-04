@@ -163,6 +163,7 @@ def _spawn_docker_worker(
     for key, value in merged_env.items():
         env_args.extend(["-e", f"{key}={value}"])
     env_args.extend(["-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-e", "BRIDLE_CANDIDATE_WORKER=1"])
+    env_args.extend(["-e", "PYTHONPATH=/candidate/backend/src"])
     volume_args = [
         "-v",
         f"{paths.candidate_root.resolve()}:/candidate:rw",
