@@ -342,17 +342,32 @@ def verify_worker_docker_access(
             shutil.rmtree(probe_root, ignore_errors=True)
             shutil.rmtree(deep_host.parent, ignore_errors=True)
     worker_probe_name = f"bridle-dind-worker-probe-{uuid.uuid4().hex[:12]}"
+    worker_probe_args = [
+        "docker",
+        "run",
+        "--rm",
+        "--name",
+        worker_probe_name,
+        "--network",
+        network,
+    ]
+    if candidate_host_root is not None:
+        host_candidate = str(candidate_host_root.resolve())
+        worker_probe_args.extend(
+            [
+                "--mount",
+                f"type=bind,source={host_candidate},target={INNER_CANDIDATE_ROOT},bind-propagation=rshared",
+            ]
+        )
+    else:
+        worker_probe_args.extend(["--volumes-from", f"{dind_name}:rw"])
+    run_uid = os.getuid() if hasattr(os, "getuid") else 1000
+    run_gid = os.getgid() if hasattr(os, "getgid") else 1000
     worker_probe = _run(
         [
-            "docker",
-            "run",
-            "--rm",
-            "--name",
-            worker_probe_name,
-            "--network",
-            network,
-            "--volumes-from",
-            f"{dind_name}:rw",
+            *worker_probe_args,
+            "-u",
+            f"{run_uid}:{run_gid}",
             "-e",
             f"DOCKER_HOST={docker_host}",
             worker_image,

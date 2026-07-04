@@ -112,6 +112,12 @@ def emit_ci_phase(phase: str, *, detail: str = "") -> None:
         message = f"{message} detail={detail}"
     print(message, file=sys.stderr)
     LOGGER.info(message)
+    evidence_raw = os.environ.get("BRIDLE_DOCKER_EVIDENCE_DIR", "").strip()
+    if evidence_raw:
+        log_path = Path(evidence_raw) / "ci-phases.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(message + "\n")
 
 
 def verify_worker_observation(observation: Any, *, probe: bool) -> None:

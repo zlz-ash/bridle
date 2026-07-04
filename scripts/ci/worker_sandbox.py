@@ -171,6 +171,16 @@ def _spawn_subprocess_worker(
     return _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line)
 
 
+def _append_worker_diagnostic(message: str) -> None:
+    raw = os.environ.get("BRIDLE_DOCKER_EVIDENCE_DIR", "").strip()
+    if not raw:
+        return
+    log_path = Path(raw) / "ci-phases.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
+
+
 def _spawn_docker_worker(
     *,
     request_payload: str,
@@ -209,9 +219,10 @@ def _spawn_docker_worker(
         f"{paths.trusted_scripts.resolve()}:/trusted-scripts:ro",
     ]
     if isolated is not None and not probe:
+        host_candidate = str(paths.candidate_root.resolve())
         volume_args = [
-            "--volumes-from",
-            f"{isolated.dind_name}:rw",
+            "--mount",
+            f"type=bind,source={host_candidate},target={INNER_CANDIDATE_ROOT},bind-propagation=rshared",
             *volume_args,
         ]
     else:
@@ -245,11 +256,12 @@ def _spawn_docker_worker(
         "/trusted-scripts/candidate_worker.py",
     ]
     LOGGER.info(
-        "worker_sandbox_docker_started name=%s probe=%s image=%s isolated=%s",
+        "worker_sandbox_docker_started name=%s probe=%s image=%s isolated=%s cmd=%s",
         container_name,
         probe,
         worker_image_ref(),
         isolated is not None,
+        " ".join(cmd),
     )
     proc = subprocess.Popen(
         cmd,
@@ -261,6 +273,14 @@ def _spawn_docker_worker(
     proc.stdin.write(request_payload.encode("utf-8"))
     proc.stdin.close()
     capture = _capture_process(proc, timeout=timeout, on_stdout_line=on_stdout_line)
+    if capture.returncode not in (0, None):
+        stderr_text = capture.stderr.decode("utf-8", errors="replace")
+        stdout_text = capture.stdout.decode("utf-8", errors="replace")
+        _append_worker_diagnostic(
+            f"worker_container_start_failed returncode={capture.returncode} "
+            f"stderr={stderr_text[-4000:]} stdout={stdout_text[-2000:]}"
+        )
+        _append_worker_diagnostic(f"worker_container_cmd={' '.join(cmd)}")
     if capture.timed_out:
         inspect = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
@@ -375,12 +395,12 @@ def spawn_worker(
     uid = controller_uid()
     if proc_returncode not in (0, None):
         stdout, stderr, truncated_stdout, truncated_stderr = _decode_streams(raw_stdout, raw_stderr, ipc)
-        LOGGER.error(
-            "worker_container_start_failed returncode=%s stderr=%s stdout=%s",
-            proc_returncode,
-            stderr[-4000:],
-            stdout[-2000:],
+        failure_msg = (
+            f"worker_container_start_failed returncode={proc_returncode} "
+            f"stderr={stderr[-4000:]} stdout={stdout[-2000:]}"
         )
+        LOGGER.error(failure_msg)
+        _append_worker_diagnostic(failure_msg)
         return (
             ipc.WorkerObservation(
                 worker_state=ipc.WORKER_STATE_FAILED_BEFORE_EXEC,
