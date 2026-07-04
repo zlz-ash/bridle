@@ -44,11 +44,6 @@ jobs:
           ref: ${{ steps.trusted-ref.outputs.ref }}
           path: trusted-harness
 
-      - name: Validate GitHub ruleset spec
-        env:
-          BRIDLE_RULESET_RELAXED: "1"
-        run: python3 trusted-harness/scripts/ci/verify_github_ruleset.py --relaxed trusted-harness/.github/rulesets/protected-docker-posix-gate.json
-
       - name: Bootstrap trusted harness controller when base lacks scripts
         run: |
           if [ ! -f trusted-harness/scripts/ci/trusted_test_runner.py ]; then
@@ -58,11 +53,18 @@ jobs:
               cp -a candidate/scripts/ci trusted-harness/scripts/
               cp -a candidate/.github/rulesets trusted-harness/.github/ 2>/dev/null || true
               cp candidate/.github/trusted-docker-harness.txt trusted-harness/.github/ 2>/dev/null || true
+              cp -a candidate/backend trusted-harness/
+              touch trusted-harness/.bridle-bootstrapped
             else
               echo "trusted harness missing on base branch; merge scripts/ci to default branch first" >&2
               exit 1
             fi
           fi
+
+      - name: Validate GitHub ruleset spec
+        env:
+          BRIDLE_RULESET_RELAXED: "1"
+        run: python3 trusted-harness/scripts/ci/verify_github_ruleset.py --relaxed trusted-harness/.github/rulesets/protected-docker-posix-gate.json
 
       - name: Overlay trusted harness onto candidate workspace
         run: |
