@@ -226,12 +226,12 @@ from pathlib import Path
 
 def test_no_sibling_leak():
 {sibling_lines}
-    assert Path("/workspace/project/marker.txt").read_text(encoding="utf-8") == "{marker}"
+    assert Path("/workspace/project/marker.txt").read_text(encoding="utf-8") == "{marker}\\n"
 """.strip()
         + "\n",
         encoding="utf-8",
     )
-    (candidate / "project" / "marker.txt").write_text(marker, encoding="utf-8")
+    (candidate / "project" / "marker.txt").write_text(f"{marker}\n", encoding="utf-8")
     (candidate / "baseline" / "tests").mkdir(parents=True, exist_ok=True)
     (candidate / "baseline" / "tests" / "test_ok.py").write_text(
         "def test_ok(): assert True\n", encoding="utf-8"
