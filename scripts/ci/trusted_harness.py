@@ -110,10 +110,39 @@ def _module_file_candidates(module_name: str) -> tuple[str, str]:
     )
 
 
+def _package_root_for(rel_path: str) -> str | None:
+    """Return the package directory (posix, no trailing slash) for a .py file
+    based on known test package layouts under backend/tests."""
+    parts = PurePosixPath(rel_path).parts
+    if len(parts) >= 2 and parts[0] == "backend" and parts[1] == "tests":
+        # Treat backend/tests/<...>/ as a package root for relative imports.
+        # For backend/tests/agent/container/foo.py the package is backend/tests/agent/container.
+        return "/".join(parts[:-1])
+    return None
+
+
+def _resolve_relative_import(rel_path: str, level: int, module: str | None) -> str | None:
+    """Resolve a level-N relative import from a manifest .py file to a manifest path."""
+    pkg = _package_root_for(rel_path)
+    if pkg is None or level < 1:
+        return None
+    base_parts = pkg.split("/")
+    # level=1 means current package; level=2 means parent, etc.
+    if level - 1 > len(base_parts):
+        return None
+    target_pkg_parts = base_parts[: len(base_parts) - (level - 1)] if level > 1 else base_parts
+    if module:
+        target_parts = target_pkg_parts + module.split(".")
+    else:
+        target_parts = target_pkg_parts
+    module_file = "/".join(target_parts) + ".py"
+    return module_file
+
+
 def audit_manifest_import_closure(trusted_root: Path, entries: list[str]) -> None:
     trusted = _absolute_without_resolve(trusted_root)
     entry_set = set(parse_manifest_lines(entries))
-    prefix = "bridle.agent.container.tests"
+    legacy_prefix = "bridle.agent.container.tests"
     missing: set[str] = set()
     forbidden_dynamic: set[str] = set()
 
@@ -124,20 +153,27 @@ def audit_manifest_import_closure(trusted_root: Path, entries: list[str]) -> Non
         source_text = source_path.read_text(encoding="utf-8")
         tree = ast.parse(source_text, filename=relative)
         imported_modules: set[str] = set()
+        relative_targets: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imported_modules.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                if node.module == prefix:
-                    imported_modules.update(f"{prefix}.{alias.name}" for alias in node.names)
-                else:
-                    imported_modules.add(node.module)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    resolved = _resolve_relative_import(relative, node.level, node.module)
+                    if resolved is not None:
+                        relative_targets.add(resolved)
+                    continue
+                if node.module:
+                    if node.module == legacy_prefix:
+                        imported_modules.update(f"{legacy_prefix}.{alias.name}" for alias in node.names)
+                    else:
+                        imported_modules.add(node.module)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
                 value = node.value
                 if "scripts/ci/" in value or value.endswith("sentinel_registry.py"):
                     forbidden_dynamic.add(f"{relative}:{value}")
         for module_name in imported_modules:
-            if not module_name.startswith(f"{prefix}."):
+            if not module_name.startswith(f"{legacy_prefix}."):
                 continue
             candidates = _module_file_candidates(module_name)
             existing = next(
@@ -150,6 +186,12 @@ def audit_manifest_import_closure(trusted_root: Path, entries: list[str]) -> Non
             )
             if existing is not None and existing not in entry_set:
                 missing.add(existing)
+        for target in relative_targets:
+            if target not in entry_set:
+                # Only flag if the target file actually exists on disk; otherwise
+                # it is an external dependency outside the harness closure.
+                if trusted.joinpath(*PurePosixPath(target).parts).is_file():
+                    missing.add(target)
         if "importlib.util.spec_from_file_location" in source_text or "spec_from_file_location" in source_text:
             forbidden_dynamic.add(relative)
     if missing:
@@ -488,12 +530,34 @@ def verify_review_image(image: str, expected_source_digest: str, *, run_id: str 
     if run_id:
         _DOCKER_REGISTRY.verify_tag(run_id=run_id, tag=image, image_id=digest)
     LOGGER.info(
-        "trusted_harness_image_verified image=%s source_digest=%s image_digest=%s",
+        "trusted_harness_image_verified image=%s source_digest=%s image_digest=%s run_id=%s",
         image,
         expected_source_digest,
         digest,
+        run_id,
     )
     return digest
+
+
+def release_review_image(tag: str, *, run_id: str) -> None:
+    """Release tag ownership and remove the image, verifying identity before acting."""
+    inspect = _run(["docker", "image", "inspect", "-f", "{{.Id}}", tag], timeout=15)
+    if inspect.returncode != 0 or not inspect.stdout.strip():
+        _DOCKER_REGISTRY.release_tag(run_id=run_id, tag=tag)
+        LOGGER.info("trusted_harness_image_release_missing tag=%s run_id=%s", tag, run_id)
+        return
+    image_id = inspect.stdout.strip()
+    if not image_id.startswith("sha256:"):
+        image_id = f"sha256:{image_id}"
+    _DOCKER_REGISTRY.verify_tag(run_id=run_id, tag=tag, image_id=image_id)
+    remove = _run(["docker", "image", "rm", "-f", tag], timeout=60)
+    if remove.returncode != 0:
+        raise TrustedHarnessError(
+            "trusted_harness_image_remove_failed",
+            detail=(remove.stderr or remove.stdout or tag).strip(),
+        )
+    _DOCKER_REGISTRY.release_tag(run_id=run_id, tag=tag)
+    LOGGER.info("trusted_harness_image_released tag=%s run_id=%s image_id=%s", tag, run_id, image_id)
 
 
 def _write_snapshot(path: Path, snapshot: dict[str, str]) -> None:
@@ -532,12 +596,18 @@ def main(argv: list[str] | None = None) -> int:
     image_parser = subparsers.add_parser("verify-image")
     image_parser.add_argument("image")
     image_parser.add_argument("--source-digest", required=True)
+    image_parser.add_argument("--run-id", default="")
 
     build_parser = subparsers.add_parser("build-image")
     build_parser.add_argument("trusted_root", type=Path)
     build_parser.add_argument("staging_root", type=Path)
     build_parser.add_argument("tag")
     build_parser.add_argument("--source-digest", required=True)
+    build_parser.add_argument("--run-id", default="")
+
+    release_parser = subparsers.add_parser("release-image")
+    release_parser.add_argument("tag")
+    release_parser.add_argument("--run-id", required=True)
 
     args = parser.parse_args(argv)
     _configure_logging()
@@ -552,15 +622,18 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "source-digest":
             print(compute_candidate_source_digest(args.candidate_root))
         elif args.command == "verify-image":
-            print(verify_review_image(args.image, args.source_digest))
+            print(verify_review_image(args.image, args.source_digest, run_id=args.run_id or None))
         elif args.command == "build-image":
             build_protected_review_image(
                 trusted_root=args.trusted_root,
                 staging_root=args.staging_root,
                 tag=args.tag,
                 source_digest=args.source_digest,
+                run_id=args.run_id or None,
             )
-            print(verify_review_image(args.tag, args.source_digest))
+            print(verify_review_image(args.tag, args.source_digest, run_id=args.run_id or None))
+        elif args.command == "release-image":
+            release_review_image(args.tag, run_id=args.run_id)
     except (OSError, subprocess.TimeoutExpired, TrustedHarnessError) as exc:
         error_code = getattr(exc, "error_code", "trusted_harness_io_error")
         detail = getattr(exc, "detail", str(exc))

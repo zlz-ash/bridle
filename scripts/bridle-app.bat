@@ -14,6 +14,8 @@ set "PROJECT_ROOT=D:\Bridle"
 set "VENV_PY=%PROJECT_ROOT%\.venv\Scripts\python.exe"
 set "FRONTEND_DIR=%PROJECT_ROOT%\frontend"
 set "APP_URL=http://localhost:5173"
+set "BACKEND_PORT=8900"
+set "FRONTEND_PORT=5173"
 set "CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe"
 set "LOG_DIR=%PROJECT_ROOT%\scripts\.app-logs"
 set "BACKEND_TITLE=Bridle Backend"
@@ -23,6 +25,12 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 set "LOG_FILE=%LOG_DIR%\launcher.log"
 
 echo [%date% %time%] === Bridle launcher start === >> "%LOG_FILE%"
+
+for %%P in (%BACKEND_PORT% %FRONTEND_PORT%) do (
+    for /f "tokens=5" %%I in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
+        taskkill /PID %%I /T /F >nul 2>&1
+    )
+)
 
 REM --- sanity checks ---
 if not exist "%VENV_PY%" (
@@ -43,7 +51,7 @@ if not exist "%CHROME%" (
 
 REM --- start backend in its own window ---
 echo [%date% %time%] starting backend... >> "%LOG_FILE%"
-start "%BACKEND_TITLE%" cmd /k "cd /d %PROJECT_ROOT% && %VENV_PY% -m bridle serve"
+start "%BACKEND_TITLE%" cmd /k "cd /d %PROJECT_ROOT% && %VENV_PY% -m bridle serve --no-reload"
 
 REM --- start frontend in its own window ---
 echo [%date% %time%] starting frontend... >> "%LOG_FILE%"

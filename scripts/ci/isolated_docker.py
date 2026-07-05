@@ -6,8 +6,8 @@ import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -15,6 +15,7 @@ from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
 INNER_CANDIDATE_ROOT = "/bridle-candidate"
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 class IsolatedDockerError(RuntimeError):
@@ -22,6 +23,17 @@ class IsolatedDockerError(RuntimeError):
         self.error_code = error_code
         self.detail = detail
         super().__init__(detail or error_code)
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(metadata.st_mode):
+        return True
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return bool(attributes & FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _run(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -77,14 +89,24 @@ def _write_setup_transcript(payload: dict[str, str]) -> None:
 
 
 def _staging_tar_path(suffix: str) -> Path:
+    """Resolve a run-scoped tar path under an explicitly allowed directory.
+
+    Never fall back to system tempfile: on Windows that lands on C: drive, and
+    on Linux it may land outside the workspace/runner-temp boundary the harness
+    is allowed to write. Fail closed if no allowed root is configured.
+    """
     for key in ("BRIDLE_STAGING_ROOT", "BRIDLE_RUNNER_TEMP", "RUNNER_TEMP", "TMPDIR"):
         root = os.environ.get(key, "").strip()
         if root:
             staging = Path(root)
+            if _is_link_or_reparse(staging):
+                raise IsolatedDockerError("isolated_docker_staging_root_link_rejected", detail=str(staging))
             staging.mkdir(parents=True, exist_ok=True)
             return staging / f"bridle-review-{uuid.uuid4().hex[:12]}{suffix}"
-    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    return Path(handle.name)
+    raise IsolatedDockerError(
+        "isolated_docker_staging_root_missing",
+        detail="set BRIDLE_STAGING_ROOT/RUNNER_TEMP/TMPDIR to an allowed directory",
+    )
 
 
 def start_isolated_daemon(

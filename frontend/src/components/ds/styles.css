@@ -1,0 +1,740 @@
+/* ============================================================
+   Bridle Design System — component styles
+   All `.brd-*` rules from the design system, consolidated.
+   Consumed via `frontend/src/styles.css` after token imports.
+   ============================================================ */
+
+/* ---------- Button ---------- */
+.brd-btn {
+  --_bg: var(--cream-08);
+  --_fg: var(--text-cream-1);
+  --_bd: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-inline);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-normal);
+  line-height: 1;
+  white-space: nowrap;
+  padding: 0 16px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--_bg);
+  color: var(--_fg);
+  border: 1px solid var(--_bd);
+  cursor: pointer;
+  user-select: none;
+  transition: var(--transition-hover);
+}
+.brd-btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.brd-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.brd-btn svg { width: 16px; height: 16px; }
+.brd-btn--sm { height: 30px; padding: 0 12px; font-size: var(--text-caption); }
+.brd-btn--lg { height: 42px; padding: 0 20px; font-size: var(--text-body); }
+.brd-btn--primary { --_bg: var(--accent-amber); --_fg: var(--text-ink-1); font-weight: var(--weight-semibold); }
+.brd-btn--primary:not(:disabled):hover { box-shadow: var(--glow-amber-sm); filter: brightness(1.04); }
+.brd-btn--primary:not(:disabled):active { filter: brightness(0.94); }
+.brd-btn--secondary { --_bg: var(--cream-08); --_fg: var(--text-cream-1); --_bd: var(--hairline); }
+.brd-btn--secondary:not(:disabled):hover { --_bg: var(--cream-12); --_bd: var(--amber-24); }
+.brd-btn--secondary:not(:disabled):active { --_bg: var(--cream-04); }
+.brd-btn--ghost { --_bg: transparent; --_fg: var(--text-cream-2); }
+.brd-btn--ghost:not(:disabled):hover { --_bg: var(--cream-08); --_fg: var(--text-cream-1); }
+.brd-btn--danger { --_bg: transparent; --_fg: var(--accent-copper); --_bd: rgba(224, 136, 85, 0.4); }
+.brd-btn--danger:not(:disabled):hover { --_bg: rgba(224, 136, 85, 0.12); }
+
+/* ---------- IconButton ---------- */
+.brd-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-cream-2);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: var(--transition-hover);
+}
+.brd-iconbtn:hover { background: var(--cream-08); color: var(--text-cream-1); }
+.brd-iconbtn:active { background: var(--cream-04); }
+.brd-iconbtn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.brd-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.brd-iconbtn svg { width: 18px; height: 18px; }
+.brd-iconbtn--sm { width: 30px; height: 30px; }
+.brd-iconbtn--sm svg { width: 16px; height: 16px; }
+.brd-iconbtn--solid { background: var(--cream-08); border-color: var(--hairline); }
+.brd-iconbtn--solid:hover { background: var(--cream-12); border-color: var(--amber-24); }
+.brd-iconbtn--active { color: var(--accent-amber); background: var(--amber-12); }
+
+/* ---------- Input ---------- */
+.brd-field {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-inline);
+  font-family: var(--font-sans);
+  transition: var(--transition-hover);
+}
+.brd-field input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--text-body);
+  letter-spacing: var(--tracking-normal);
+  color: inherit;
+}
+.brd-field input::placeholder { color: inherit; opacity: 0.5; }
+.brd-field .brd-field-ic { display: flex; flex-shrink: 0; }
+.brd-field .brd-field-ic svg { width: 18px; height: 18px; }
+.brd-field--field {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--cream-04);
+  border: 1px solid var(--hairline);
+  color: var(--text-cream-1);
+}
+.brd-field--field .brd-field-ic { color: var(--text-cream-3); }
+.brd-field--field:hover { border-color: var(--amber-24); }
+.brd-field--field:focus-within { border-color: var(--accent-amber); box-shadow: 0 0 0 3px var(--amber-12); }
+.brd-field--pill {
+  min-height: 48px;
+  padding: 0 8px 0 20px;
+  border-radius: var(--radius-pill);
+  background: var(--input);
+  border: 1px solid transparent;
+  color: var(--text-ink-1);
+  box-shadow: var(--shadow-card);
+}
+.brd-field--pill .brd-field-ic { color: var(--text-ink-2); }
+.brd-field--pill:focus-within { box-shadow: var(--shadow-card), 0 0 0 3px var(--amber-40); }
+.brd-field--invalid.brd-field--field { border-color: var(--accent-copper); }
+.brd-field[aria-disabled='true'] { opacity: 0.5; pointer-events: none; }
+
+/* ---------- Badge ---------- */
+.brd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 4px 9px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.brd-badge .brd-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.brd-badge--neutral { background: var(--cream-08); color: var(--text-cream-2); border-color: var(--hairline); }
+.brd-badge--idle { background: var(--cream-08); color: var(--text-cream-3); }
+.brd-badge--running { background: var(--amber-12); color: var(--accent-amber); border-color: var(--amber-24); }
+.brd-badge--completed { background: rgba(127, 184, 155, 0.12); color: var(--accent-sage); border-color: rgba(127, 184, 155, 0.32); }
+.brd-badge--failed { background: rgba(224, 136, 85, 0.12); color: var(--accent-copper); border-color: rgba(224, 136, 85, 0.32); }
+.brd-badge--count { font-family: var(--font-mono); font-feature-settings: var(--mono-features); text-transform: none; letter-spacing: 0; }
+.brd-badge--running .brd-badge-dot { animation: bridle-blink 1.4s var(--ease-in-out) infinite; }
+
+/* ---------- Switch ---------- */
+.brd-switch {
+  --_w: 40px;
+  --_h: 24px;
+  --_pad: 3px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: var(--_w);
+  height: var(--_h);
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--cream-12);
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+.brd-switch:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.brd-switch[disabled] { opacity: 0.4; cursor: not-allowed; }
+.brd-switch .brd-knob {
+  position: absolute;
+  top: var(--_pad);
+  left: var(--_pad);
+  width: calc(var(--_h) - var(--_pad) * 2 - 2px);
+  height: calc(var(--_h) - var(--_pad) * 2 - 2px);
+  border-radius: 50%;
+  background: var(--text-cream-1);
+  transition: transform var(--dur-quick) var(--ease-out), background var(--dur-hover) var(--ease-out);
+}
+.brd-switch[aria-checked='true'] { background: var(--accent-amber); border-color: transparent; }
+.brd-switch[aria-checked='true'] .brd-knob {
+  transform: translateX(calc(var(--_w) - var(--_h)));
+  background: var(--text-ink-1);
+}
+
+/* ---------- Tabs ---------- */
+.brd-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--cream-04);
+  border: 1px solid var(--hairline);
+}
+.brd-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--text-cream-3);
+  padding: 6px 12px;
+  border-radius: 6px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--transition-hover);
+}
+.brd-tab:hover { color: var(--text-cream-1); }
+.brd-tab:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.brd-tab[aria-selected='true'] { background: var(--cream-12); color: var(--text-cream-1); }
+.brd-tab svg { width: 15px; height: 15px; }
+
+/* ---------- Card ---------- */
+.brd-card { border-radius: var(--radius-card); position: relative; }
+.brd-card--panel { background: var(--panel); border: 1px solid var(--hairline); box-shadow: var(--shadow-card); color: var(--text-cream-1); }
+.brd-card--sunk { background: var(--cream-04); border: 1px solid var(--hairline); color: var(--text-cream-1); }
+.brd-card--glass {
+  background: var(--card);
+  -webkit-backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay));
+  border: 1px solid rgba(245, 232, 208, 0.5);
+  box-shadow: var(--shadow-card);
+  color: var(--text-ink-1);
+}
+.brd-card__body { padding: var(--pad-card); }
+.brd-card__head {
+  padding: 14px var(--pad-card);
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.brd-card--glass .brd-card__head { border-bottom-color: rgba(26, 22, 18, 0.1); }
+.brd-card__title { font-size: var(--text-h3); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); margin: 0; }
+
+/* ---------- Toast ---------- */
+.brd-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 12px 14px;
+  border-radius: var(--radius-bubble);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-pop);
+  color: var(--text-cream-1);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  animation: bridle-overlay-in var(--dur-overlay) var(--ease-overlay);
+}
+.brd-toast__accent { width: 3px; align-self: stretch; border-radius: 3px; flex: none; background: var(--text-cream-3); }
+.brd-toast--running .brd-toast__accent { background: var(--accent-amber); }
+.brd-toast--completed .brd-toast__accent { background: var(--accent-sage); }
+.brd-toast--failed .brd-toast__accent { background: var(--accent-copper); }
+.brd-toast__ic { display: flex; flex: none; color: var(--text-cream-2); margin-top: 1px; }
+.brd-toast__ic svg { width: 16px; height: 16px; }
+.brd-toast__body { flex: 1; min-width: 0; }
+.brd-toast__title { font-weight: var(--weight-semibold); }
+.brd-toast__msg { color: var(--text-cream-2); margin-top: 2px; }
+.brd-toast__msg .mono,
+.brd-toast__msg code { font-family: var(--font-mono); font-feature-settings: var(--mono-features); }
+
+/* ---------- Tooltip ---------- */
+.brd-tip-wrap { position: relative; display: inline-flex; }
+.brd-tip {
+  position: absolute;
+  z-index: 50;
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  bottom: calc(100% + 8px);
+  pointer-events: none;
+  opacity: 0;
+  background: var(--panel);
+  color: var(--text-cream-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  padding: 5px 9px;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  line-height: 1;
+  box-shadow: var(--shadow-pop);
+  transition: opacity var(--dur-hover) var(--ease-out), transform var(--dur-hover) var(--ease-out);
+}
+.brd-tip[data-side='bottom'] { bottom: auto; top: calc(100% + 8px); transform: translateX(-50%) translateY(-2px); }
+.brd-tip-wrap:hover .brd-tip,
+.brd-tip-wrap:focus-within .brd-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+.brd-tip kbd { font-family: var(--font-mono); color: var(--text-cream-3); margin-left: 6px; font-size: var(--text-micro); }
+
+/* ---------- AgentNode ---------- */
+.brd-node {
+  width: var(--brd-node-w, 160px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 13px;
+  border-radius: var(--radius-node);
+  background: var(--node-idle);
+  border: 1px solid var(--hairline);
+  color: var(--text-cream-1);
+  font-family: var(--font-sans);
+  transition: border-color var(--dur-hover) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out);
+}
+.brd-node__top { display: flex; align-items: center; gap: 7px; }
+.brd-node__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-cream-3); }
+.brd-node__ic { display: flex; color: var(--text-cream-2); margin-left: auto; }
+.brd-node__ic svg { width: 15px; height: 15px; }
+.brd-node__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brd-node__meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--text-cream-3);
+  font-feature-settings: var(--mono-features);
+}
+.brd-node--running {
+  background: #3a2f1a;
+  border-color: var(--amber-40);
+  animation: bridle-glow 2s var(--ease-in-out) infinite, bridle-pulse 2s var(--ease-in-out) infinite;
+}
+.brd-node--running .brd-node__dot { background: var(--accent-amber); }
+.brd-node--running .brd-node__title { color: var(--accent-amber); }
+.brd-node--running .brd-node__meta { color: var(--accent-amber); opacity: 0.85; }
+.brd-node--completed { border-color: rgba(127, 184, 155, 0.45); }
+.brd-node--completed .brd-node__dot { background: var(--accent-sage); }
+.brd-node--failed { border-color: rgba(224, 136, 85, 0.45); }
+.brd-node--failed .brd-node__dot { background: var(--accent-copper); }
+.brd-node--failed .brd-node__title { color: var(--accent-copper); }
+.brd-node--punch { position: relative; z-index: 5; mix-blend-mode: screen; }
+.brd-node[role='button'] { cursor: pointer; }
+.brd-node[role='button']:hover { border-color: var(--amber-24); }
+.brd-node--selected { box-shadow: 0 0 0 1px var(--accent-amber), var(--glow-amber-sm); border-color: transparent; }
+
+/* ---------- ConversationBubble ---------- */
+.brd-bubble {
+  max-width: 84%;
+  padding: 10px 13px;
+  border-radius: var(--radius-bubble);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  width: fit-content;
+  word-break: break-word;
+  animation: bridle-overlay-in var(--dur-overlay) var(--ease-overlay);
+}
+.brd-bubble--user {
+  background: var(--text-ink-1);
+  color: var(--text-cream-1);
+  margin-left: auto;
+  border-bottom-right-radius: 5px;
+}
+.brd-bubble--agent {
+  background: rgba(26, 22, 18, 0.07);
+  color: var(--text-ink-1);
+  border-bottom-left-radius: 5px;
+}
+.brd-bubble code,
+.brd-bubble .mono { font-family: var(--font-mono); font-feature-settings: var(--mono-features); font-size: 0.92em; }
+.brd-bubble--agent code { background: rgba(26, 22, 18, 0.08); padding: 1px 5px; border-radius: var(--radius-xs); }
+.brd-bubble--user code { background: var(--cream-12); padding: 1px 5px; border-radius: var(--radius-xs); }
+.brd-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  vertical-align: -2px;
+  margin-left: 2px;
+  background: var(--text-ink-1);
+  border-radius: 1px;
+  animation: bridle-blink 1s steps(2, start) infinite;
+}
+.brd-bubble--user .brd-caret { background: var(--text-cream-1); }
+
+/* ============================================================
+   App shell (Phase 3)
+   `.bridle-shell` re-asserts the new dark canvas locally so the
+   legacy :root --canvas does not bleed into the layered overlay
+   surface. Outside this class, legacy chrome keeps its old palette
+   until Phase 5 deletes the legacy block.
+   ============================================================ */
+.bridle-shell {
+  /* override colliding tokens within shell scope */
+  --canvas: #0F1F1A;
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  color: var(--text-cream-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  letter-spacing: var(--tracking-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  min-width: 1280px;
+  min-height: 800px;
+}
+
+.bridle-shell ::selection {
+  background: var(--amber-24);
+  color: var(--text-cream-1);
+}
+
+.bridle-shell ::-webkit-scrollbar { width: 8px; height: 8px; }
+.bridle-shell ::-webkit-scrollbar-thumb { background: var(--cream-12); border-radius: var(--radius-full); }
+.bridle-shell ::-webkit-scrollbar-thumb:hover { background: var(--cream-20); }
+.bridle-shell ::-webkit-scrollbar-track { background: transparent; }
+
+.bridle-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.bridle-canvas-zone {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* faint amber dot grid behind the flow */
+.bridle-dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 200, 87, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  pointer-events: none;
+}
+
+.bridle-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px;
+  color: var(--text-cream-2);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* workspace switcher wrapper inside the toolbar; keeps the legacy
+   switcher's chrome from blowing up the toolbar height */
+.bridle-workspace-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 280px;
+}
+.bridle-workspace-slot .workspace-switcher,
+.bridle-workspace-slot .ws-trigger {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Signature overlay — when the conversation card is open, every
+   flowchart node behind the card collapses into a soft state-color
+   blob (text crushed by the card's 40px blur). We target BOTH the
+   ds AgentNode (`.brd-node--*`) and the legacy Flow node markup
+   (`.node[data-st="..."]`) so the overlay works regardless of which
+   renderer is in use. */
+.bridle-canvas-zone.flow--overlay .brd-node *,
+.bridle-canvas-zone.flow--overlay .node * {
+  color: transparent !important;
+}
+.bridle-canvas-zone.flow--overlay .brd-node,
+.bridle-canvas-zone.flow--overlay .node {
+  border-color: transparent !important;
+}
+.bridle-canvas-zone.flow--overlay .brd-node--running,
+.bridle-canvas-zone.flow--overlay .node[data-st='running'] {
+  background: rgb(255, 200, 87) !important;
+  mix-blend-mode: screen;
+  box-shadow: 0 0 140px rgba(255, 200, 87, 1), 0 0 64px rgba(255, 200, 87, 0.95) !important;
+  animation: bridle-glow 2.6s var(--ease-in-out) infinite, bridle-pulse 2.6s var(--ease-in-out) infinite !important;
+}
+.bridle-canvas-zone.flow--overlay .brd-node--completed,
+.bridle-canvas-zone.flow--overlay .node[data-st='completed'] {
+  background: rgb(127, 184, 155) !important;
+  box-shadow: 0 0 56px rgba(127, 184, 155, 0.85) !important;
+}
+.bridle-canvas-zone.flow--overlay .brd-node--failed,
+.bridle-canvas-zone.flow--overlay .node[data-st='failed'] {
+  background: rgb(224, 136, 85) !important;
+  box-shadow: 0 0 56px rgba(224, 136, 85, 0.85) !important;
+}
+.bridle-canvas-zone.flow--overlay .brd-node--idle,
+.bridle-canvas-zone.flow--overlay .node[data-st='pending'],
+.bridle-canvas-zone.flow--overlay .node[data-st='ready'],
+.bridle-canvas-zone.flow--overlay .node[data-st='blocked'],
+.bridle-canvas-zone.flow--overlay .node[data-st='cancelled'],
+.bridle-canvas-zone.flow--overlay .node[data-st='archived'] {
+  background: rgba(45, 63, 54, 1) !important;
+  box-shadow: 0 0 22px rgba(45, 63, 54, 0.70) !important;
+}
+
+/* Dynamic Island pill entrance */
+@keyframes bridle-island-in {
+  from {
+    transform: translateX(-50%) scale(0.95);
+  }
+  to {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+/* Chat card scrollbar uses ink, not cream (it sits on a cream surface) */
+.brd-chat-scroll::-webkit-scrollbar { width: 8px; }
+.brd-chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(26, 22, 18, 0.20);
+  border-radius: 999px;
+}
+.brd-chat-scroll::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bridle-canvas-zone.flow--overlay .brd-node--running,
+  .bridle-canvas-zone.flow--overlay .node[data-st='running'] {
+    animation: none !important;
+  }
+}
+
+/* Flow.tsx still renders its own <section class="graph"> with a
+   `.graph-head` toolbar (stats + zoom + door). In the new shell we
+   already have a header for that — hide the duplicate, and force the
+   inner `.diagram-wrap` to fill the canvas zone (legacy `.graph` uses
+   `flex: 1` which collapses to 0 inside our non-flex canvas-zone). */
+.bridle-shell .graph {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bridle-shell .graph-head {
+  display: none;
+}
+.bridle-shell .diagram-wrap {
+  flex: 1;
+  background: transparent !important;
+  background-image: none !important;
+}
+.bridle-shell .zoom-badge {
+  background: var(--cream-08);
+  border: 1px solid var(--hairline);
+  color: var(--text-cream-3);
+}
+
+/* ============================================================
+   Legacy Flow node restyling within the new shell.
+   Flow.tsx still emits `.node[data-st]` markup with `.accent`,
+   `.nbody`, `.nhead`, `.ntitle`, `.nfoot` children styled by the
+   legacy palette. Inside `.bridle-shell`, override those rules so
+   the existing renderer pixel-fits the design's AgentNode
+   without touching Flow.tsx behavior (zoom, pan, edges, selection).
+   ============================================================ */
+.bridle-shell .flow-wrap,
+.bridle-shell .flow-container,
+.bridle-shell .flow,
+.bridle-shell .flow-svg-layer {
+  background: transparent !important;
+}
+
+.bridle-shell .node {
+  background: var(--node-idle);
+  border: 1px solid var(--hairline);
+  color: var(--text-cream-1);
+  border-radius: var(--radius-node);
+  padding: 11px 13px;
+  box-shadow: none;
+  font-family: var(--font-sans);
+  transition:
+    border-color var(--dur-hover) var(--ease-out),
+    box-shadow var(--dur-hover) var(--ease-out);
+}
+.bridle-shell .node .accent {
+  display: none;
+}
+.bridle-shell .node .nbody {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  height: 100%;
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+.bridle-shell .node .nhead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+.bridle-shell .node .ntype {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-cream-3);
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+.bridle-shell .node .warn {
+  color: var(--accent-copper);
+  margin-left: auto;
+}
+.bridle-shell .node .ntitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-cream-1);
+  letter-spacing: var(--tracking-normal);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  margin: 0;
+}
+.bridle-shell .node .nfoot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--text-cream-3);
+  font-feature-settings: var(--mono-features);
+}
+.bridle-shell .node .stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-cream-3);
+  flex: none;
+}
+.bridle-shell .node .stat-label {
+  color: var(--text-cream-3);
+}
+
+.bridle-shell .node:hover {
+  border-color: var(--amber-24);
+}
+.bridle-shell .node.sel {
+  box-shadow: 0 0 0 1px var(--accent-amber), var(--glow-amber-sm);
+  border-color: transparent;
+}
+
+/* state colors */
+.bridle-shell .node[data-st='running'] {
+  background: #3a2f1a;
+  border-color: var(--amber-40);
+  animation:
+    bridle-glow 2s var(--ease-in-out) infinite,
+    bridle-pulse 2s var(--ease-in-out) infinite;
+}
+.bridle-shell .node[data-st='running'] .stat-dot,
+.bridle-shell .node[data-st='running'] .ntitle {
+  color: var(--accent-amber);
+  background: var(--accent-amber);
+}
+.bridle-shell .node[data-st='running'] .ntitle {
+  background: transparent;
+}
+.bridle-shell .node[data-st='running'] .stat-label {
+  color: var(--accent-amber);
+  opacity: 0.85;
+}
+.bridle-shell .node[data-st='completed'] {
+  border-color: rgba(127, 184, 155, 0.45);
+}
+.bridle-shell .node[data-st='completed'] .stat-dot {
+  background: var(--accent-sage);
+}
+.bridle-shell .node[data-st='failed'] {
+  border-color: rgba(224, 136, 85, 0.45);
+}
+.bridle-shell .node[data-st='failed'] .stat-dot,
+.bridle-shell .node[data-st='failed'] .ntitle {
+  color: var(--accent-copper);
+}
+.bridle-shell .node[data-st='failed'] .stat-dot {
+  background: var(--accent-copper);
+}
+.bridle-shell .node[data-st='blocked'] {
+  border-color: rgba(224, 136, 85, 0.30);
+}
+.bridle-shell .node[data-st='blocked'] .stat-dot {
+  background: var(--accent-copper);
+}
+
+/* edges drawn by Flow.tsx as svg paths — make sure they read on dark */
+.bridle-shell .flow-svg-layer .edge,
+.bridle-shell .flow svg path {
+  stroke: var(--hairline);
+}
+
+/* WorkspaceSwitcher inside the toolbar — neutralize legacy chrome that
+   assumes a cream backdrop. Keep functionality, restyle. */
+.bridle-shell .workspace-switcher,
+.bridle-shell .ws-trigger {
+  background: transparent;
+  border: none;
+  color: var(--text-cream-1);
+  font-size: 13px;
+  padding: 0;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.bridle-shell .ws-trigger:hover {
+  color: var(--text-cream-1);
+}
+.bridle-shell .ws-menu,
+.bridle-shell .ws-dialog,
+.bridle-shell .ws-list,
+.bridle-shell .ws-form {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  color: var(--text-cream-1);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-pop);
+}

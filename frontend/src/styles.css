@@ -1,7 +1,29 @@
 /* ============================================================
-   bridle — agent code development workspace
+   Bridle Design System — token entry (Phase 1)
+   Imports the new warm-dark token set ahead of the legacy
+   palette below. base.css is intentionally NOT imported here:
+   it would re-skin <body> immediately. The new shell (Phase 3+)
+   imports base.css inside its own scope.
+   ============================================================ */
+@import url('./styles/tokens/fonts.css');
+@import url('./styles/tokens/colors.css');
+@import url('./styles/tokens/typography.css');
+@import url('./styles/tokens/spacing.css');
+@import url('./styles/tokens/radius.css');
+@import url('./styles/tokens/motion.css');
+
+/* Design-system component styles (Phase 2). Pure `.brd-*` rules; do not
+   touch element selectors, so importing here cannot affect legacy chrome
+   until Phase 3 starts using these classes. */
+@import url('./components/ds/styles.css');
+
+/* ============================================================
+   bridle — agent code development workspace (LEGACY)
    Calm, editorial, architectural. Off-white / soft yellow /
    ink green / pale blue / gray-green. No rounded cards.
+   The :root block below redeclares --canvas etc. AFTER the
+   imports above, so the legacy palette wins for any colliding
+   variable name until Phase 5 removes this block.
    ============================================================ */
 
 :root{
@@ -143,6 +165,24 @@ body{
   display:flex; align-items:center; gap:8px;
   padding:8px 14px;
   border-bottom:1px solid var(--line);
+}
+.chat-head .reset-state-btn{
+  margin-left:auto;
+  font-size:11px;
+  padding:4px 8px;
+  border:1px solid var(--line);
+  border-radius:4px;
+  background:var(--paper);
+  color:var(--ink-3);
+  cursor:pointer;
+}
+.chat-head .reset-state-btn:hover:not(:disabled){
+  border-color:var(--ink-3);
+  color:var(--ink);
+}
+.chat-head .reset-state-btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
 }
 .chat-head .ws-dot{ width:6px; height:6px; border-radius:50%; background:var(--green); flex:0 0 6px; }
 .chat-head .ws-path{ font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.02em; }
@@ -406,66 +446,85 @@ body{
   font-family:var(--mono); font-size:9.5px; color:var(--faint); letter-spacing:.02em;
 }
 
-/* ---- node card ---- */
+/* ---- node card (dark token alignment — paired with new --canvas / --panel) ---- */
 .node{
-  position:absolute; background:var(--paper);
-  border:1px solid var(--line-2);
+  position:absolute; background:var(--node-idle);
+  border:1px solid var(--hairline);
   cursor:pointer; user-select:none;
   display:flex; flex-direction:column;
+  color:var(--text-cream-1);
+  font-family:var(--font-sans);
   transition:border-color .18s, box-shadow .18s, background .18s;
-  box-shadow:0 1px 0 rgba(30,50,42,.04);
 }
-.node .accent{ height:3px; width:100%; background:var(--gray); flex:0 0 3px; }
+.node .accent{ height:3px; width:100%; background:var(--cream-20); flex:0 0 3px; }
 .node .nbody{ padding:9px 12px 10px; display:flex; flex-direction:column; gap:5px; flex:1; }
 .node .nhead{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.node .nid{ font-family:var(--mono); font-size:9.5px; color:var(--faint); letter-spacing:.02em; }
+.node .nid{ font-family:var(--font-mono); font-size:9.5px; color:var(--text-cream-3); letter-spacing:.02em; }
 .node .ntype{
-  font-family:var(--mono); font-size:8.5px; letter-spacing:.12em; text-transform:uppercase;
-  color:var(--muted);
+  font-family:var(--font-mono); font-size:8.5px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--text-cream-2);
 }
-.node .ntitle{ font-family:var(--serif); font-size:15px; color:var(--ink); line-height:1.15; }
+.node .ntitle{
+  font-family:var(--font-sans); font-size:14px; font-weight:var(--weight-semibold);
+  color:var(--text-cream-1); line-height:1.2; letter-spacing:var(--tracking-normal);
+}
 .node .nfoot{ display:flex; align-items:center; gap:6px; margin-top:1px; }
-.node .stat-dot{ width:7px; height:7px; border-radius:50%; background:var(--gray); flex:0 0 7px; }
-.node .stat-label{ font-family:var(--mono); font-size:9.5px; color:var(--ink-3); letter-spacing:.02em; }
-.node:hover{ border-color:var(--line-3); box-shadow:0 6px 18px -10px rgba(30,50,42,.4); }
-.node.sel{ border-color:var(--ink); box-shadow:0 0 0 1px var(--ink), 0 10px 22px -12px rgba(30,50,42,.5); }
+.node .stat-dot{ width:7px; height:7px; border-radius:50%; background:var(--text-cream-3); flex:0 0 7px; }
+.node .stat-label{ font-family:var(--font-mono); font-size:9.5px; color:var(--text-cream-2); letter-spacing:.02em; font-feature-settings:var(--mono-features); }
+.node:hover{ border-color:var(--amber-24); }
+.node.sel{ border-color:transparent; box-shadow:0 0 0 1px var(--accent-amber), var(--glow-amber-sm); }
 
-/* status variants */
-.node[data-st="completed"] .accent{ background:var(--green); }
-.node[data-st="completed"] .stat-dot{ background:var(--green); }
-.node[data-st="completed"]{ background:var(--paper); }
+/* status variants — semantic state colors on accent / dot / border / glow.
+   Base surface stays --node-idle so text contrast is consistent across states. */
+.node[data-st="completed"] .accent{ background:var(--accent-sage); }
+.node[data-st="completed"] .stat-dot{ background:var(--accent-sage); }
+.node[data-st="completed"]{ border-color:rgba(127,184,155,0.30); }
 
-.node[data-st="running"] .accent{ background:var(--blue-2); }
-.node[data-st="running"] .stat-dot{ background:var(--blue-2); animation:dot-pulse 1.5s ease-in-out infinite; }
-.node[data-st="running"]{ animation:node-pulse 1.6s ease-in-out infinite; }
+.node[data-st="running"]{
+  background:#3a2f1a;
+  border-color:var(--amber-40);
+  animation:node-pulse 2s ease-in-out infinite;
+}
+.node[data-st="running"] .accent{ background:var(--accent-amber); }
+.node[data-st="running"] .ntitle{ color:var(--accent-amber); }
+.node[data-st="running"] .stat-dot{ background:var(--accent-amber); animation:dot-pulse 1.5s ease-in-out infinite; }
+.node[data-st="running"] .stat-label{ color:var(--accent-amber); }
 
-.node[data-st="ready"] .accent{ background:var(--blue-2); }
-.node[data-st="ready"] .stat-dot{ background:var(--blue-2); }
-.node[data-st="ready"]{ border-color:var(--blue-2); background:var(--blue-tint); }
+.node[data-st="ready"] .accent{ background:var(--amber-40); }
+.node[data-st="ready"] .stat-dot{ background:var(--amber-40); }
+.node[data-st="ready"]{ border-color:var(--amber-24); }
 
-.node[data-st="blocked"] .accent{ background:var(--red); }
-.node[data-st="blocked"] .stat-dot{ background:var(--red); }
-.node[data-st="blocked"]{ border-color:var(--red); }
+.node[data-st="blocked"] .accent{ background:var(--accent-copper); }
+.node[data-st="blocked"] .stat-dot{ background:var(--accent-copper); }
+.node[data-st="blocked"] .ntitle{ color:var(--accent-copper); }
+.node[data-st="blocked"]{ border-color:rgba(224,136,85,0.45); }
 
-.node[data-st="pending"] .accent{ background:var(--gray); }
-.node[data-st="pending"]{ background:var(--paper-2); }
-.node[data-st="pending"] .ntitle{ color:var(--ink-2); }
+.node[data-st="drifted"] .accent{ background:var(--accent-copper); }
+.node[data-st="drifted"] .stat-dot{ background:var(--accent-copper); }
+.node[data-st="drifted"] .ntitle{ color:var(--accent-copper); }
+.node[data-st="drifted"]{ border-color:rgba(224,136,85,0.55); box-shadow:0 0 0 1px rgba(224,136,85,0.15); }
 
-.node .warn{ color:var(--red); font-size:11px; line-height:1; }
+.node[data-st="pending"] .accent{ background:var(--cream-20); }
+.node[data-st="pending"] .stat-dot{ background:var(--text-cream-3); }
+
+.node .warn{ color:var(--accent-copper); font-size:11px; line-height:1; }
 
 /* compact test node */
-.node.test{ }
-.node.test .ntitle{ font-size:13.5px; }
-.node.test .purpose{ font-family:var(--sans); font-size:11px; color:var(--ink-3); line-height:1.4; }
+.node.test{ border-style:dashed; }
+.node.test .ntitle{ font-size:13px; }
+.node.debt{ border-color:rgba(224,136,85,0.65); }
+.node.debt .ntitle{ color:var(--accent-copper); font-size:12px; }
+.node.test .purpose{ font-family:var(--font-sans); font-size:11px; color:var(--text-cream-2); line-height:1.4; }
 .node.test .metric{
   display:inline-flex; align-items:center; gap:5px;
-  font-family:var(--mono); font-size:9.5px; color:var(--blue-text);
-  background:var(--blue-tint); border:1px solid var(--blue); padding:2px 6px;
+  font-family:var(--font-mono); font-size:9.5px; color:var(--accent-amber);
+  background:var(--amber-12); border:1px solid var(--amber-24); padding:2px 6px;
+  font-feature-settings:var(--mono-features);
 }
 
 @keyframes node-pulse{
-  0%,100%{ box-shadow:0 0 0 1px rgba(168,195,205,.0), 0 1px 0 rgba(30,50,42,.04); }
-  50%{ box-shadow:0 0 0 3px rgba(168,195,205,.45), 0 1px 0 rgba(30,50,42,.04); }
+  0%,100%{ box-shadow:0 0 0 1px rgba(255,200,87,0); }
+  50%{ box-shadow:0 0 0 3px rgba(255,200,87,0.32); }
 }
 @keyframes dot-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
 @keyframes dash-flow{ to{ stroke-dashoffset:-16; } }

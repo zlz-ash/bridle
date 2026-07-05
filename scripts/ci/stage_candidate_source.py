@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import logging
 import os
 import shutil
 import stat
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.stage_candidate_source")
@@ -20,6 +22,85 @@ EXCLUDED_RELATIVE_PATHS = frozenset(
     }
 )
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+OWNERSHIP_SCHEMA = "bridle.staging_ownership/v1"
+OWNERSHIP_FILE = ".bridle-staging-ownership.json"
+
+
+@dataclass(frozen=True)
+class StagingIdentity:
+    path: str
+    device: int
+    inode: int
+    is_symlink: bool
+
+
+def _identity(path: Path) -> StagingIdentity:
+    metadata = os.lstat(path)
+    return StagingIdentity(
+        path=str(path),
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        is_symlink=stat.S_ISLNK(metadata.st_mode)
+        or bool(getattr(metadata, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT),
+    )
+
+
+def _write_ownership(staging: Path, *, run_id: str) -> None:
+    identity = _identity(staging)
+    payload = {
+        "schema": OWNERSHIP_SCHEMA,
+        "run_id": run_id,
+        "path": identity.path,
+        "device": identity.device,
+        "inode": identity.inode,
+        "is_symlink": identity.is_symlink,
+        "created_at": uuid.uuid4().hex,
+    }
+    ownership_path = staging / OWNERSHIP_FILE
+    temporary = ownership_path.with_name(f".{ownership_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, ownership_path)
+
+
+def _verify_ownership(staging: Path, *, run_id: str) -> None:
+    ownership_path = staging / OWNERSHIP_FILE
+    if not ownership_path.is_file() or _is_link_or_reparse(ownership_path):
+        raise StageCandidateError("staging_ownership_missing", detail=str(ownership_path))
+    try:
+        payload = json.loads(ownership_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise StageCandidateError("staging_ownership_invalid", detail=str(exc)) from exc
+    if not isinstance(payload, dict):
+        raise StageCandidateError("staging_ownership_invalid", detail="not_object")
+    if payload.get("schema") != OWNERSHIP_SCHEMA:
+        raise StageCandidateError("staging_ownership_schema_mismatch", detail=str(payload.get("schema")))
+    if payload.get("run_id") != run_id:
+        raise StageCandidateError(
+            "staging_ownership_foreign_run",
+            detail=f"expected={run_id} got={payload.get('run_id')}",
+        )
+    current = _identity(staging)
+    if payload.get("path") != current.path:
+        raise StageCandidateError(
+            "staging_ownership_path_mismatch",
+            detail=f"expected={payload.get('path')} got={current.path}",
+        )
+    if payload.get("device") != current.device or payload.get("inode") != current.inode:
+        raise StageCandidateError(
+            "staging_ownership_identity_mismatch",
+            detail=f"expected dev={payload.get('device')} ino={payload.get('inode')} got dev={current.device} ino={current.inode}",
+        )
+    if payload.get("is_symlink") or current.is_symlink:
+        raise StageCandidateError("staging_ownership_symlink_rejected")
+
+
+def _release_staging(staging: Path, *, run_id: str) -> None:
+    try:
+        _verify_ownership(staging, run_id=run_id)
+    except StageCandidateError:
+        raise
+    shutil.rmtree(staging)
+    LOGGER.info("stage_candidate_staging_released path=%s run_id=%s", staging, run_id)
 
 
 def _allowed_staging_root() -> Path | None:
@@ -94,8 +175,23 @@ def stage_candidate_source(candidate_root: Path, staging_root: Path, *, run_id: 
     if staging.exists():
         if _is_link_or_reparse(staging):
             raise StageCandidateError("stage_candidate_link_rejected", detail=str(staging))
-        shutil.rmtree(staging)
+        if run_id:
+            try:
+                _verify_ownership(staging, run_id=run_id)
+            except StageCandidateError as exc:
+                raise StageCandidateError(
+                    "stage_candidate_foreign_staging",
+                    detail=f"{exc.error_code}:{exc.detail}",
+                ) from exc
+            _release_staging(staging, run_id=run_id)
+        else:
+            raise StageCandidateError(
+                "stage_candidate_existing_without_run_id",
+                detail=str(staging),
+            )
     staging.mkdir(parents=True, exist_ok=True)
+    effective_run_id = run_id or uuid.uuid4().hex[:12]
+    _write_ownership(staging, run_id=effective_run_id)
 
     copied = 0
     for relative_root in ("backend/pyproject.toml",):
@@ -160,10 +256,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate_root", type=Path)
     parser.add_argument("staging_root", type=Path)
+    parser.add_argument("--run-id", default="")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     try:
-        staged = stage_candidate_source(args.candidate_root, args.staging_root)
+        staged = stage_candidate_source(args.candidate_root, args.staging_root, run_id=args.run_id or None)
     except (OSError, StageCandidateError) as exc:
         code = getattr(exc, "error_code", "stage_candidate_io_error")
         detail = getattr(exc, "detail", str(exc))

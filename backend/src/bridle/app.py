@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from contextlib import asynccontextmanager
 
@@ -11,33 +10,33 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from bridle.api.errors import BridleError
-from bridle.api.coding_sessions import router as coding_sessions_router
-from bridle.api.events import router as events_router
-from bridle.api.health import router as health_router
-from bridle.api.node_agent_runs import router as node_agent_runs_router
-from bridle.api.plan_mode import router as plan_mode_router
-from bridle.api.nodes import router as nodes_router
-from bridle.api.plan_change_proposals import router as plan_change_proposals_router
-from bridle.api.plans import router as plans_router
-from bridle.api.proposals import router as proposals_router
-from bridle.api.reports import router as reports_router
-from bridle.api.tasks import router as tasks_router
-from bridle.api.workspace_files import router as workspace_files_router
+from bridle.features.system.events_controller import router as events_router
+from bridle.features.system.health_controller import router as health_router
+from bridle.features.workspace.files_controller import router as workspace_files_router
+from bridle.features.projects.controller import router as projects_router
+from bridle.features.sessions.controller import router as project_sessions_router
+from bridle.features.project_map.controller import router as project_map_router
 from bridle.events.bus import EventBus
 
 logger = logging.getLogger("bridle")
 
 
-def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
+def create_app(test_db=None, test_workspace: str | None = None, container_runner=None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         test_db: If provided, overrides the DB dependency for testing.
         test_workspace: If provided, sets workspace for testing.
+        container_runner: Optional explicit container runner for tests or dry-run.
     """
     if test_workspace is not None:
         from bridle.config import set_workspace
+
         set_workspace(test_workspace)
+        if container_runner is not None:
+            from bridle.agent.container.container_service import configure_runner
+
+            configure_runner(test_workspace, container_runner)
 
     if test_db is not None:
         from bridle.api.deps import set_test_db
@@ -45,20 +44,75 @@ def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if test_db is None and os.getenv("BRIDLE_DISABLE_MAIN_AGENT_CONTAINER", "").strip() != "1":
-            try:
-                from bridle.database import async_session
-                from bridle.services.session_reconciler import SessionReconciler
-
-                async with async_session() as db:
-                    await SessionReconciler.reconcile_on_startup(db)
-            except Exception:
-                logger.exception("session_reconcile_startup_failed")
+        """Run the application lifetime."""
         yield
 
     app = FastAPI(title="Bridle", version="0.2.0", lifespan=lifespan)
     app.state.started_at = time.time()
     EventBus._reset_instance()
+
+    # Only HTTP methods that mutate state produce traces. Pure reads (GET,
+    # HEAD) and CORS preflight (OPTIONS) are dropped to keep Langfuse trace
+    # volume bounded; SSE/poll endpoints would otherwise create thousands of
+    # empty "project_session.request" traces per session.
+    _OBSERVABLE_METHODS = frozenset({"POST", "PATCH", "PUT", "DELETE"})
+    _NON_OBSERVABLE_PATH_PREFIXES = (
+        "/health",
+        "/docs",
+        "/openapi",
+        "/favicon",
+        "/static",
+    )
+
+    def _should_trace(request: Request) -> bool:
+        if request.method not in _OBSERVABLE_METHODS:
+            return False
+        path = request.url.path
+        return not any(path.startswith(p) for p in _NON_OBSERVABLE_PATH_PREFIXES)
+
+    @app.middleware("http")
+    async def observability_middleware(request: Request, call_next):
+        from bridle.observability import get_observability
+        from bridle.observability.context import bind_log_context
+        from bridle.observability.schema import ObservabilityContext
+
+        session_id = request.headers.get("x-bridle-session-id")
+        if session_id is None and "/sessions/" in request.url.path:
+            parts = request.url.path.split("/sessions/", 1)[-1].split("/")
+            if parts and parts[0]:
+                session_id = parts[0]
+
+        if not _should_trace(request):
+            # Still propagate session_id into log context so any business code
+            # downstream (and any explicit start_trace it issues) keeps its
+            # logical session linkage; we only skip the HTTP-level root trace.
+            ctx = ObservabilityContext(session_id=session_id)
+            obs = get_observability()
+            with obs.bind_context(ctx):
+                bind_log_context(session_id=session_id)
+                return await call_next(request)
+
+        obs = get_observability()
+        # ``trace_name`` becomes the Langfuse Trace Name column; ``session_id``
+        # promotes the trace into the Langfuse Sessions view so the thousands
+        # of per-request traces aggregate under one navigable session.
+        trace = obs.start_trace(
+            "project_session.request",
+            session_id=session_id,
+            trace_name=f"{request.method} {request.url.path}",
+            path=request.url.path,
+            method=request.method,
+        )
+        ctx = ObservabilityContext(session_id=session_id)
+        with obs.bind_context(ctx):
+            bind_log_context(session_id=session_id)
+            try:
+                response = await call_next(request)
+                trace.end(status="completed")
+                return response
+            except Exception as exc:
+                trace.end(status="failed", error_code=type(exc).__name__)
+                raise
 
     @app.exception_handler(BridleError)
     async def bridle_error_handler(request: Request, exc: BridleError) -> JSONResponse:
@@ -101,17 +155,12 @@ def create_app(test_db=None, test_workspace: str | None = None) -> FastAPI:
             },
         )
 
-    app.include_router(tasks_router, prefix="/api/v1")
-    app.include_router(plans_router, prefix="/api/v1")
-    app.include_router(nodes_router, prefix="/api/v1")
-    app.include_router(proposals_router, prefix="/api/v1")
-    app.include_router(reports_router, prefix="/api/v1")
-    app.include_router(coding_sessions_router, prefix="/api/v1")
-    app.include_router(plan_mode_router, prefix="/api/v1")
-    app.include_router(node_agent_runs_router, prefix="/api/v1")
-    app.include_router(plan_change_proposals_router, prefix="/api/v1")
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(workspace_files_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
+    app.include_router(projects_router, prefix="/api/v1")
+    app.include_router(project_sessions_router, prefix="/api/v1")
+    app.include_router(project_map_router, prefix="/api/v1")
 
     return app
+

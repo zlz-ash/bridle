@@ -1,0 +1,26 @@
+/* ============================================================
+   Bridle — Spacing tokens
+   4px base grid. Dense product chrome, generous overlay padding.
+   ============================================================ */
+:root {
+  --space-0:   0;
+  --space-1:   2px;
+  --space-2:   4px;
+  --space-3:   8px;
+  --space-4:   12px;
+  --space-5:   16px;
+  --space-6:   20px;
+  --space-7:   24px;
+  --space-8:   32px;
+  --space-9:   40px;
+  --space-10:  48px;
+  --space-12:  64px;
+  --space-16:  96px;
+
+  /* ---- Semantic spacing ---- */
+  --gap-inline:    8px;    /* between inline siblings (icon + label) */
+  --gap-stack:     12px;   /* between stacked controls */
+  --pad-control:   12px;   /* inner padding of buttons/inputs (vertical base) */
+  --pad-card:      20px;   /* inner padding of cards/bubbles */
+  --pad-panel:     24px;   /* inner padding of side panels */
+}

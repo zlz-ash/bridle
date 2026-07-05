@@ -173,12 +173,19 @@ def _spawn_subprocess_worker(
 ):
     env = os.environ.copy()
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    popen_kwargs: dict[str, object] = {
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "env": env,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+    elif os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     proc = subprocess.Popen(
         [sys.executable, "-I", str(worker_script)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
+        **popen_kwargs,
     )
     assert proc.stdin is not None
     proc.stdin.write(request_payload.encode("utf-8"))
@@ -259,14 +266,18 @@ def _spawn_docker_worker(
         ipc_root = paths.controller_ipc.resolve()
         requests_dir = ipc_root / "sentinel-requests"
         acks_dir = ipc_root / "sentinel-acks"
+        events_dir = ipc_root / "test-events"
         requests_dir.mkdir(parents=True, exist_ok=True)
         acks_dir.mkdir(parents=True, exist_ok=True)
+        events_dir.mkdir(parents=True, exist_ok=True)
         volume_args.extend(
             [
                 "-v",
                 f"{requests_dir}:/controller-ipc/sentinel-requests:rw",
                 "-v",
                 f"{acks_dir}:/controller-ipc/sentinel-acks:ro",
+                "-v",
+                f"{events_dir}:/controller-ipc/test-events:rw",
             ]
         )
     network_args = ["--network", "none"] if probe else []
@@ -297,11 +308,16 @@ def _spawn_docker_worker(
         isolated is not None,
         " ".join(cmd),
     )
+    popen_kwargs: dict[str, object] = {
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(
         cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        **popen_kwargs,
     )
     assert proc.stdin is not None
     proc.stdin.write(request_payload.encode("utf-8"))
@@ -345,6 +361,10 @@ def _attach_controller_identity(observation, ipc):
 def map_public_env_for_docker_worker(public_env: Mapping[str, str], candidate_root: Path) -> dict[str, str]:
     mapped = dict(public_env)
     mapped["BRIDLE_TRUSTED_CHECKOUT_ROOT"] = candidate_root.resolve().as_posix()
+    mapped["BRIDLE_CANDIDATE_CONTAINER_ROOT"] = candidate_root.resolve().as_posix()
+    mapped["BRIDLE_TRUSTED_SCRIPTS_DIR"] = "/trusted-scripts"
+    if mapped.get("BRIDLE_TEST_EVENTS_DIR"):
+        mapped["BRIDLE_TEST_EVENTS_DIR"] = "/controller-ipc/test-events"
     return mapped
 
 
@@ -411,10 +431,34 @@ def spawn_worker(
 
     if capture.timed_out:
         stdout, stderr, truncated_stdout, truncated_stderr = _decode_streams(raw_stdout, raw_stderr, ipc)
+        if capture.callback_error:
+            stderr = (stderr + "\n" + f"controller_callback_error:{capture.callback_error}").strip()
         return (
             ipc.WorkerObservation(
                 worker_state=ipc.WORKER_STATE_TIMED_OUT,
                 exit_code=None,
+                stdout=stdout,
+                stderr=stderr,
+                truncated_stdout=truncated_stdout,
+                truncated_stderr=truncated_stderr,
+                worker_pid=None,
+                worker_uid=None,
+                controller_pid=os.getpid(),
+                controller_uid=controller_uid(),
+            ),
+            stdout,
+            stderr,
+        )
+
+    if capture.callback_error:
+        stdout, stderr, truncated_stdout, truncated_stderr = _decode_streams(raw_stdout, raw_stderr, ipc)
+        stderr = (stderr + "\n" + f"controller_callback_error:{capture.callback_error}").strip()
+        LOGGER.error("worker_callback_error error=%s", capture.callback_error)
+        _append_worker_diagnostic(f"worker_callback_error error={capture.callback_error}")
+        return (
+            ipc.WorkerObservation(
+                worker_state=ipc.WORKER_STATE_FAILED_BEFORE_EXEC,
+                exit_code=capture.returncode,
                 stdout=stdout,
                 stderr=stderr,
                 truncated_stdout=truncated_stdout,

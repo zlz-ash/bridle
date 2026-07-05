@@ -1,0 +1,62 @@
+/* ============================================================
+   Bridle — Motion tokens
+   Smooth, confident, NEVER bouncy. The base layer is alive
+   (pulsing running nodes); chrome motion is quick and quiet.
+   ============================================================ */
+:root {
+  /* ---- Durations ---- */
+  --dur-hover:    120ms;   /* @kind other */ /* hover / press feedback */
+  --dur-quick:    160ms;   /* @kind other */
+  --dur-overlay:  240ms;   /* @kind other */ /* overlay open/close */
+  --dur-slow:     320ms;   /* @kind other */
+
+  /* ---- Easing ---- */
+  --ease-out:     cubic-bezier(0.16, 1, 0.3, 1);     /* @kind other */ /* confident decelerate */
+  --ease-in-out:  cubic-bezier(0.45, 0, 0.55, 1);    /* @kind other */
+  /* overlay "spring" (stiffness 220, damping 24) expressed as a non-overshooting curve */
+  --ease-overlay: cubic-bezier(0.22, 0.61, 0.30, 1); /* @kind other */
+
+  /* ---- Composed transitions ---- */
+  --transition-hover:   all var(--dur-hover) var(--ease-out);
+  --transition-overlay: opacity var(--dur-overlay) var(--ease-overlay),
+                        transform var(--dur-overlay) var(--ease-overlay);
+}
+
+/* ---- Signature keyframes ---- */
+
+/* Running-node pulse: scale 1 ↔ 1.02, 2s, never bouncy */
+@keyframes bridle-pulse {
+  0%, 100% { transform: scale(1);    }
+  50%      { transform: scale(1.02); }
+}
+
+/* Amber glow breathing for active nodes */
+@keyframes bridle-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--amber-24), 0 0 16px rgba(255, 200, 87, 0.24); }
+  50%      { box-shadow: 0 0 0 1px var(--amber-40), 0 0 34px rgba(255, 200, 87, 0.50); }
+}
+
+/* Overlay/content entrance — transform-only so the resting state stays
+   visible even when animations are paused/throttled (capture, bg tab, export).
+   Never gate visibility on opacity here. */
+@keyframes bridle-overlay-in {
+  from { transform: translateY(8px) scale(0.99); }
+  to   { transform: translateY(0)   scale(1);    }
+}
+
+/* Optional soft fade for surfaces that are safe to hide pre-animation
+   (e.g. modal scrims). Use sparingly — NOT for primary content. */
+@keyframes bridle-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Streaming caret / typing dots */
+@keyframes bridle-blink {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1;    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+}

@@ -1,0 +1,53 @@
+/* ============================================================
+   Bridle — Base / element defaults
+   Sets the warm-dark canvas, default ink, and a few primitives.
+   Kept minimal; tokens do the heavy lifting.
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Solid-fill fallback for users who request reduced transparency.
+   The translucent cream overlay (--card / --input) becomes opaque so
+   the UI stays readable without backdrop blur. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --card:  #F5E8D0;
+    --input: #F5E8D0;
+  }
+}
+
+html, body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-cream-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+code, pre, kbd, samp, .mono {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--mono-features);
+}
+
+::selection { background: var(--amber-24); color: var(--text-cream-1); }
+
+a { color: var(--accent-amber); text-decoration: none; }
+
+/* Thin, warm scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--cream-12); border-radius: var(--radius-full); }
+*::-webkit-scrollbar-thumb:hover { background: var(--cream-20); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Eyebrow / micro label utility */
+.eyebrow {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-cream-3);
+}

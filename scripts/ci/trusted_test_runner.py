@@ -54,6 +54,7 @@ def trusted_scripts_path(trusted_root: Path) -> Path:
 def build_public_env(*, candidate_root: Path, probe: bool) -> dict[str, str]:
     env: dict[str, str] = {
         "BRIDLE_TRUSTED_CHECKOUT_ROOT": str(candidate_root.resolve()),
+        "BRIDLE_CANDIDATE_CONTAINER_ROOT": str(candidate_root.resolve()),
         "BRIDLE_CANDIDATE_WORKER": "1",
     }
     if probe:
@@ -326,10 +327,18 @@ def run_worker(
         controller_ipc=controller_ipc,
     )
     public_env = build_public_env(candidate_root=candidate_root, probe=probe)
+    public_env["BRIDLE_TRUSTED_SCRIPTS_DIR"] = str(script_dir.resolve())
     if ctx is not None and ctx.lease_id:
         public_env["BRIDLE_RUN_LEASE_ID"] = ctx.lease_id
     if ctx is not None and ctx.issued_it_run_id:
         public_env["BRIDLE_IT_RUN_ID"] = ctx.issued_it_run_id
+    if ctx is not None and ctx.critical_test_nonces:
+        ctrl_ctx_module = _load_module("bridle_controller_context_env", script_dir / "controller_context.py")
+        public_env["BRIDLE_CRITICAL_TEST_NONCES"] = ctrl_ctx_module.nonces_env_payload(ctx)
+    if ctx is not None and ctx.controller_ipc_dir is not None:
+        events_dir = ctx.controller_ipc_dir / "test-events"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        public_env["BRIDLE_TEST_EVENTS_DIR"] = str(events_dir)
     stream_handler = None
     ipc_poll = None
     if ctx is not None:
@@ -441,6 +450,10 @@ def main(argv: list[str] | None = None) -> int:
         candidate_root=candidate_root,
         controller_ipc_dir=ipc_dir,
     )
+    if not args.probe_isolation and os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1" and os.name != "nt":
+        controller_context.issue_critical_test_nonces(ctx)
+        if ipc_dir is not None:
+            (ipc_dir / "test-events").mkdir(parents=True, exist_ok=True)
     isolated = None
     worker_stdout = ""
     worker_stderr = ""

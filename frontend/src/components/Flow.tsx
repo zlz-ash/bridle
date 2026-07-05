@@ -13,6 +13,7 @@ interface Props {
   layout: Layout;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  onExpand?: (id: string) => void;
   zoom: number;
   setZoom: (z: number) => void;
   pan: { x: number; y: number };
@@ -23,13 +24,17 @@ interface Props {
   counts: Counts;
   sessionId: string | null;
   sessionStatus: string | null;
+  mapView?: 'plan' | 'semantic';
+  layerCounts?: { codeEntities: number; blindSpots: number; debt: number };
 }
 
 const STATUS_LABEL: Record<string, string> = {
   completed: 'completed', running: 'running', ready: 'ready',
   blocked: 'blocked', pending: 'pending', failed: 'failed', cancelled: 'cancelled',
+  drifted: 'drifted', mapping: 'mapping', verifying: 'verifying', debt: 'debt', test: 'test',
 };
 
+/** Compute card anchor points; rectangle input exits as SVG routing coordinates. */
 function anchors(n: { x: number; y: number; w: number; h: number }) {
   return {
     l: { x: n.x, y: n.y + n.h / 2 },
@@ -41,19 +46,16 @@ function anchors(n: { x: number; y: number; w: number; h: number }) {
   };
 }
 
+/** Build one dependency edge path; edge/map input exits as an SVG path or null when endpoints are hidden. */
 function edgePath(
-  e: { from: string; to: string; kind: 'flow' | 'test' },
+  e: { from: string; to: string; kind: 'flow' },
   byId: Map<string, LaidOutNode>,
-  channelY: number,
 ): string | null {
   const a = byId.get(e.from);
   const b = byId.get(e.to);
   if (!a || !b) return null;
   const A = anchors(a);
   const B = anchors(b);
-  if (e.kind === 'test') {
-    return `M ${A.b.x} ${A.b.y} V ${channelY} H ${B.t.x} V ${B.t.y}`;
-  }
   if (Math.abs(A.cy - B.cy) < 2) {
     if (B.cx > A.cx) return `M ${A.r.x} ${A.r.y} H ${B.l.x}`;
     return `M ${A.l.x} ${A.l.y} H ${B.r.x}`;
@@ -66,13 +68,16 @@ function edgePath(
   return `M ${A.t.x} ${A.t.y} V ${midY} H ${B.b.x} V ${B.b.y}`;
 }
 
+/** Render one map card; laid-out node input exits as a selectable and expandable node view. */
 function NodeCard({
-  n, selected, onSelect,
-}: { n: LaidOutNode; selected: boolean; onSelect: (id: string) => void }) {
+  n, selected, onSelect, onExpand,
+}: { n: LaidOutNode; selected: boolean; onSelect: (id: string) => void; onExpand?: (id: string) => void }) {
   const style: React.CSSProperties = { left: n.x, top: n.y, width: n.w, height: n.h };
+  const extraClass = n.type === 'test' ? ' test' : n.type === 'debt' ? ' debt' : '';
+  const showWarn = n.status === 'blocked' || n.status === 'drifted' || n.type === 'debt';
   return (
     <div
-      className={'node' + (n.isTest ? ' test' : '') + (selected ? ' sel' : '')}
+      className={'node' + extraClass + (selected ? ' sel' : '')}
       data-st={n.status}
       style={style}
       onClick={(e) => { e.stopPropagation(); onSelect(n.id); }}
@@ -81,28 +86,37 @@ function NodeCard({
       <div className="nbody">
         <div className="nhead">
           <span className="ntype">{n.type}</span>
+          {onExpand ? (
+            <button
+              type="button"
+              aria-label={`Expand ${n.title}`}
+              title="Load child nodes"
+              onClick={(event) => { event.stopPropagation(); onExpand(n.id); }}
+              style={{ marginLeft: 'auto', border: 0, background: 'transparent', cursor: 'pointer' }}
+            >
+              +
+            </button>
+          ) : null}
           {n.status === 'blocked' && <span className="warn">⚠</span>}
+          {n.status === 'drifted' && <span className="warn" title="Drifted from plan">⚠</span>}
+          {n.type === 'debt' && <span className="warn" title="Entangled debt">⚠</span>}
         </div>
         <div className="ntitle">{n.title}</div>
-        {n.isTest ? (
-          <>
-            <div className="purpose">{n.raw.goal}</div>
-          </>
-        ) : (
-          <div className="nfoot">
-            <span className="stat-dot" />
-            <span className="stat-label">{STATUS_LABEL[n.status] || n.status}</span>
-          </div>
-        )}
+        <div className="nfoot">
+          <span className="stat-dot" />
+          <span className="stat-label">{STATUS_LABEL[n.status] || n.status}</span>
+        </div>
       </div>
     </div>
   );
 }
 
+/** Render the zoomable plan map; layout input exits as the existing canvas interaction surface. */
 export function Flow(props: Props) {
   const {
     layout, selected, onSelect, zoom, setZoom, pan, setPan,
-    drawerOpen, toggleDrawer, showGrid, counts, sessionId, sessionStatus,
+    drawerOpen, toggleDrawer, showGrid, counts, sessionId, sessionStatus, onExpand,
+    mapView = 'plan', layerCounts,
   } = props;
 
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -168,16 +182,14 @@ export function Flow(props: Props) {
     };
   }, [setZoom, setPan]);
 
+  /** Reset the viewport; no input exits with default zoom and pan. */
   const fit = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
   const byId = new Map(layout.nodes.map((n) => [n.id, n]));
-  const channelY = layout.lane ? layout.lane.y - 8 : 348;
 
   // svg bounds
   const maxX = layout.nodes.reduce((m, n) => Math.max(m, n.x + n.w), 600) + 60;
-  const maxY = layout.lane
-    ? layout.lane.y + layout.lane.h + 40
-    : layout.nodes.reduce((m, n) => Math.max(m, n.y + n.h), 400) + 80;
+  const maxY = layout.nodes.reduce((m, n) => Math.max(m, n.y + n.h), 400) + 80;
 
   return (
     <section className="graph">
@@ -189,18 +201,31 @@ export function Flow(props: Props) {
                 <span>session {sessionId.slice(0, 4)}</span>
                 <span className="sep">·</span>
                 <span style={{ color: sessionStatus === 'active' ? 'var(--green)' : 'var(--muted)' }}>
-                  {sessionStatus || '—'}
+                  {sessionStatus || '-'}
                 </span>
                 <span className="sep">·</span>
               </>
             )}
-            <span><b>{counts.total}</b> nodes</span>
-            <span className="sep">·</span>
-            <span><b>{counts.completed}</b> done</span>
-            <span className="sep">·</span>
-            <span><b>{counts.running}</b> running</span>
-            <span className="sep">·</span>
-            <span><b>{counts.blocked}</b> blocked</span>
+            <span><b>{counts.total}</b> {mapView === 'plan' ? 'nodes' : 'entities'}</span>
+            {mapView === 'plan' ? (
+              <>
+                <span className="sep">·</span>
+                <span><b>{counts.completed}</b> done</span>
+                <span className="sep">·</span>
+                <span><b>{counts.running}</b> running</span>
+                <span className="sep">·</span>
+                <span><b>{counts.blocked}</b> blocked</span>
+              </>
+            ) : layerCounts ? (
+              <>
+                <span className="sep">·</span>
+                <span><b>{layerCounts.codeEntities}</b> code</span>
+                <span className="sep">·</span>
+                <span><b>{layerCounts.blindSpots}</b> blind</span>
+                <span className="sep">·</span>
+                <span><b>{layerCounts.debt}</b> debt</span>
+              </>
+            ) : null}
           </div>
         </div>
         <div className="toolbar" onClick={(e) => e.stopPropagation()}>
@@ -240,21 +265,6 @@ export function Flow(props: Props) {
           className="diagram"
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
         >
-          {layout.lane && (
-            <div
-              className="lane"
-              style={{
-                left: layout.lane.x, top: layout.lane.y,
-                width: layout.lane.w, height: layout.lane.h,
-              }}
-            >
-              <span className="lane-label">Testing</span>
-              <span className="lane-note">
-                {layout.lane.count} test{layout.lane.count === 1 ? '' : 's'}
-              </span>
-            </div>
-          )}
-
           <svg className="edges" width={maxX} height={maxY}>
             <defs>
               <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5"
@@ -269,12 +279,10 @@ export function Flow(props: Props) {
               </marker>
             </defs>
             {layout.edges.map((e, i) => {
-              const d = edgePath(e, byId, channelY);
+              const d = edgePath(e, byId);
               if (!d) return null;
-              const blue = e.kind === 'test' || e.live;
-              const cls = e.kind === 'test'
-                ? 'edge-test'
-                : 'edge-line edge-flow' + (e.live ? ' live' : '');
+              const blue = e.live;
+              const cls = 'edge-line edge-flow' + (e.live ? ' live' : '');
               return (
                 <path
                   key={i}
@@ -287,7 +295,7 @@ export function Flow(props: Props) {
           </svg>
 
           {layout.nodes.map((n) => (
-            <NodeCard key={n.id} n={n} selected={selected === n.id} onSelect={onSelect} />
+            <NodeCard key={n.id} n={n} selected={selected === n.id} onSelect={onSelect} onExpand={onExpand} />
           ))}
         </div>
       </div>

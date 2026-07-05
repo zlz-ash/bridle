@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,22 @@ def _new_lease_registry():
     return _load_run_lease_module().RunLeaseRegistry()
 
 
+def issue_critical_test_nonces(ctx: Any) -> dict[str, str]:
+    """Mint one-time nonces for each critical test key, stored on the context."""
+    import hashlib
+
+    nonces: dict[str, str] = {}
+    for test_key in ("link_attack", "chmod_poison"):
+        material = f"{test_key}:{uuid.uuid4().hex}".encode("utf-8")
+        nonces[test_key] = hashlib.sha256(material).hexdigest()[:32]
+    ctx.critical_test_nonces = dict(nonces)
+    return nonces
+
+
+def nonces_env_payload(ctx: Any) -> str:
+    return json.dumps(ctx.critical_test_nonces, sort_keys=True)
+
+
 @dataclass
 class ControllerExecutionContext:
     candidate_root: Path
@@ -36,3 +54,5 @@ class ControllerExecutionContext:
     isolated_docker_host: str | None = None
     isolated_dind_name: str | None = None
     isolated_network: str | None = None
+    critical_test_nonces: dict[str, str] = field(default_factory=dict)
+    consumed_test_event_keys: set[str] = field(default_factory=set)

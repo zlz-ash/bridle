@@ -11,7 +11,7 @@
 !/README.md
 
 # Runtime artifacts
-.aicoding/
+.bridle/runtime/
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal
@@ -73,3 +73,27 @@ Desktop.ini
 
 # Local runtime artifacts from launcher scripts
 scripts/.app-logs/
+
+# Local scratch (design bundles, exploration)
+.tmp/
+
+# CI / runner temporary artifacts
+ci-artifact*.zip
+ci-fail-artifact.zip
+.ci-logs.zip
+run-jobs.json
+
+# Isolation probes and remote attachment scratch
+.bridle-isolation-probe/
+.codex-remote-attachments/
+.trae-html-share-packages/
+
+# Local pip and test venv caches
+.pip-cache/
+.test-venv/
+
+# Local Langfuse runtime data
+langfuse/
+
+# Local creative pitch scratch
+bridle-creative-pitch/

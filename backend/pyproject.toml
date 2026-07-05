@@ -39,7 +39,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["src/bridle"]
+testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [dependency-groups]

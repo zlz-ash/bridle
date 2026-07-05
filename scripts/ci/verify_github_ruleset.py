@@ -93,29 +93,122 @@ def validate_ruleset(payload: dict, *, strict: bool = True) -> list[str]:
     return errors
 
 
-def verify_remote_ruleset(*, owner: str, repo: str, expected_name: str) -> list[str]:
+def _normalize_ruleset_for_compare(payload: dict) -> dict:
+    """Project only the fields that matter for the security contract."""
+    conditions = payload.get("conditions") or {}
+    rules = payload.get("rules") or []
+    workflow_rule = next((rule for rule in rules if isinstance(rule, dict) and rule.get("type") == "workflows"), None)
+    workflow_params = workflow_rule.get("parameters") if isinstance(workflow_rule, dict) else None
+    workflows = workflow_params.get("workflows") if isinstance(workflow_params, dict) else None
+    matched_workflow = None
+    if isinstance(workflows, list):
+        candidates = [w for w in workflows if isinstance(w, dict) and w.get("path") == REQUIRED_WORKFLOW_PATH]
+        if candidates:
+            matched_workflow = candidates[0]
+    return {
+        "enforcement": payload.get("enforcement"),
+        "conditions": {
+            "ref_name": conditions.get("ref_name"),
+            "include": (conditions.get("ref_name") or {}).get("include"),
+        },
+        "workflow": {
+            "path": matched_workflow.get("path") if matched_workflow else None,
+            "ref": matched_workflow.get("ref") if matched_workflow else None,
+            "repository_id": matched_workflow.get("repository_id") if matched_workflow else None,
+        },
+        "bypass_actors": payload.get("bypass_actors"),
+        "has_status_only_rule": any(
+            isinstance(rule, dict) and rule.get("type") == "required_status_checks" for rule in rules
+        ),
+    }
+
+
+def verify_remote_ruleset(*, owner: str, repo: str, expected_name: str, expected_spec: dict) -> list[str]:
+    """List rulesets, find the matching ID, GET the full body, compare field-by-field."""
     errors: list[str] = []
-    proc = subprocess.run(
+    list_proc = subprocess.run(
         ["gh", "api", f"repos/{owner}/{repo}/rulesets", "--paginate"],
         capture_output=True,
         text=True,
         check=False,
     )
-    if proc.returncode != 0:
-        return [f"github_api_rulesets_query_failed:{proc.stderr.strip() or proc.stdout.strip()}"]
+    if list_proc.returncode != 0:
+        return [f"github_api_rulesets_query_failed:{(list_proc.stderr or list_proc.stdout).strip()}"]
     try:
-        payload = json.loads(proc.stdout or "[]")
+        listed = json.loads(list_proc.stdout or "[]")
     except json.JSONDecodeError:
         return ["github_api_rulesets_invalid_json"]
-    if not isinstance(payload, list):
+    if not isinstance(listed, list):
         return ["github_api_rulesets_not_list"]
-    matched = [item for item in payload if isinstance(item, dict) and item.get("name") == expected_name]
+    matched = [item for item in listed if isinstance(item, dict) and item.get("name") == expected_name]
     if not matched:
-        errors.append("github_remote_ruleset_missing")
-        return errors
-    remote = matched[0]
-    if remote.get("enforcement") != "active":
-        errors.append("github_remote_ruleset_not_active")
+        return ["github_remote_ruleset_missing"]
+    remote_summary = matched[0]
+    ruleset_id = remote_summary.get("id")
+    if not isinstance(ruleset_id, int):
+        return ["github_remote_ruleset_missing_id"]
+    get_proc = subprocess.run(
+        ["gh", "api", f"repos/{owner}/{repo}/rulesets/{ruleset_id}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if get_proc.returncode != 0:
+        return [f"github_api_ruleset_get_failed:{(get_proc.stderr or get_proc.stdout).strip()}"]
+    try:
+        remote_full = json.loads(get_proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return ["github_api_ruleset_get_invalid_json"]
+    if not isinstance(remote_full, dict):
+        return ["github_api_ruleset_get_not_object"]
+
+    expected_norm = _normalize_ruleset_for_compare(expected_spec)
+    remote_norm = _normalize_ruleset_for_compare(remote_full)
+
+    if remote_norm["enforcement"] != "active":
+        errors.append(f"github_remote_enforcement_not_active:{remote_norm['enforcement']}")
+    if expected_norm["enforcement"] == "active" and remote_norm["enforcement"] != "active":
+        errors.append("github_remote_enforcement_mismatch")
+
+    expected_ref_name = expected_norm["conditions"]["ref_name"]
+    remote_ref_name = remote_norm["conditions"]["ref_name"]
+    if remote_ref_name != expected_ref_name:
+        errors.append(f"github_remote_conditions_ref_name_mismatch:expected={expected_ref_name} got={remote_ref_name}")
+    else:
+        expected_include = (expected_ref_name or {}).get("include")
+        remote_include = (remote_ref_name or {}).get("include")
+        if expected_include != remote_include:
+            errors.append(f"github_remote_conditions_include_mismatch:expected={expected_include} got={remote_include}")
+
+    expected_wf = expected_norm["workflow"]
+    remote_wf = remote_norm["workflow"]
+    if remote_wf["path"] != expected_wf["path"]:
+        errors.append(f"github_remote_workflow_path_mismatch:expected={expected_wf['path']} got={remote_wf['path']}")
+    if remote_wf["ref"] != expected_wf["ref"]:
+        errors.append(f"github_remote_workflow_ref_mismatch:expected={expected_wf['ref']} got={remote_wf['ref']}")
+    if remote_wf["repository_id"] != expected_wf["repository_id"]:
+        errors.append(
+            f"github_remote_workflow_repository_id_mismatch:expected={expected_wf['repository_id']} got={remote_wf['repository_id']}"
+        )
+    if remote_norm["has_status_only_rule"] and not expected_norm["has_status_only_rule"]:
+        errors.append("github_remote_has_status_only_rule")
+    if remote_norm["bypass_actors"] not in (None, []):
+        errors.append(f"github_remote_bypass_actors_not_empty:{remote_norm['bypass_actors']}")
+
+    print(
+        json.dumps(
+            {
+                "ruleset_id": ruleset_id,
+                "ruleset_name": expected_name,
+                "expected_normalized": expected_norm,
+                "remote_normalized": remote_norm,
+                "errors": errors,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
     return errors
 
 
@@ -127,19 +220,13 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path(".github/rulesets/protected-docker-posix-gate.json"),
     )
-    parser.add_argument(
-        "--relaxed",
-        action="store_true",
-        help="Allow placeholder repository_id in local template checks.",
-    )
     parser.add_argument("--verify-remote", action="store_true")
     parser.add_argument("--owner", default=os.environ.get("GITHUB_REPOSITORY_OWNER", ""))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "").split("/")[-1])
     args = parser.parse_args(argv)
-    strict = not args.relaxed and os.environ.get("BRIDLE_RULESET_RELAXED") != "1"
     try:
         payload = load_ruleset(args.ruleset)
-        errors = validate_ruleset(payload, strict=strict)
+        errors = validate_ruleset(payload, strict=True)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"github_ruleset_invalid: {exc}", file=sys.stderr)
         return 1
@@ -147,7 +234,14 @@ def main(argv: list[str] | None = None) -> int:
         if not args.owner or not args.repo:
             errors.append("github_remote_verify_missing_repo")
         else:
-            errors.extend(verify_remote_ruleset(owner=args.owner, repo=args.repo, expected_name=str(payload.get("name"))))
+            errors.extend(
+                verify_remote_ruleset(
+                    owner=args.owner,
+                    repo=args.repo,
+                    expected_name=str(payload.get("name")),
+                    expected_spec=payload,
+                )
+            )
     if errors:
         print("github_ruleset_invalid: " + ", ".join(errors), file=sys.stderr)
         return 1

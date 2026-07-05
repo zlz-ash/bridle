@@ -1,0 +1,39 @@
+/* ============================================================
+   Bridle — Typography tokens
+   Geist Variable for UI/body; Geist Mono Variable for code, IDs, metrics
+   (tabular figures always on for mono). Tight, modern, no serifs.
+   ============================================================ */
+:root {
+  /* ---- Families ---- */
+  --font-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, monospace;
+
+  /* ---- Weights ---- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ---- Type scale (px) — compact UI ramp ---- */
+  --text-display:  34px;   /* hero numerals, large moments */
+  --text-h1:       24px;
+  --text-h2:       19px;
+  --text-h3:       16px;
+  --text-body:     14px;   /* default UI body */
+  --text-sm:       13px;
+  --text-caption:  12px;
+  --text-micro:    11px;   /* labels, eyebrows */
+
+  /* ---- Line heights ---- */
+  --leading-tight:   1.15;
+  --leading-snug:    1.3;
+  --leading-normal:  1.5;
+
+  /* ---- Letter spacing ---- */
+  --tracking-tight:  -0.02em;   /* headings */
+  --tracking-normal: -0.01em;   /* body */
+  --tracking-wide:    0.08em;   /* eyebrows / micro labels (uppercase) */
+
+  /* ---- Mono niceties ---- */
+  --mono-features: "tnum" 1, "zero" 1, "cv01" 1;  /* @kind other */ /* tabular figures, slashed zero */
+}

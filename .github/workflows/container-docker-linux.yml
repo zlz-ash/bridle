@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
       - "backend/pyproject.toml"
       - ".github/workflows/container-docker-linux.yml"
       - ".github/trusted-docker-harness.txt"
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
       - "backend/pyproject.toml"
       - ".github/workflows/container-docker-linux.yml"
       - ".github/trusted-docker-harness.txt"
@@ -44,55 +46,34 @@ jobs:
           ref: ${{ steps.trusted-ref.outputs.ref }}
           path: trusted-harness
 
-      - name: Bootstrap trusted harness controller when base lacks scripts
+      - name: Verify trusted harness closure present (fail-closed, no candidate bootstrap)
         run: |
           set -euo pipefail
-          rollout_from_candidate=0
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            rollout_from_candidate=1
-          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" != "refs/heads/${{ github.event.repository.default_branch }}" ]; then
-            rollout_from_candidate=1
-          fi
-          refresh_overlay_files() {
-            cp -a candidate/scripts/ci trusted-harness/scripts/
-            manifest="trusted-harness/.github/trusted-docker-harness.txt"
-            if [ -f "$manifest" ]; then
-              while IFS= read -r rel || [ -n "$rel" ]; do
-                rel="${rel%%#*}"
-                rel="$(echo "$rel" | xargs)"
-                [ -z "$rel" ] && continue
-                src="candidate/$rel"
-                dst="trusted-harness/$rel"
-                if [ -f "$src" ]; then
-                  mkdir -p "$(dirname "$dst")"
-                  cp "$src" "$dst"
-                fi
-              done < "$manifest"
-            fi
-            touch trusted-harness/.bridle-bootstrapped
-          }
           if [ ! -f trusted-harness/scripts/ci/trusted_test_runner.py ]; then
-            if [ "$rollout_from_candidate" = "1" ]; then
-              echo "Bootstrapping trusted harness from candidate for feature-branch rollout"
-              mkdir -p trusted-harness/scripts trusted-harness/.github
-              cp -a candidate/scripts/ci trusted-harness/scripts/
-              cp -a candidate/.github/rulesets trusted-harness/.github/ 2>/dev/null || true
-              cp candidate/.github/trusted-docker-harness.txt trusted-harness/.github/ 2>/dev/null || true
-              cp -a candidate/backend trusted-harness/
-              touch trusted-harness/.bridle-bootstrapped
-            else
-              echo "trusted harness missing on base branch; merge scripts/ci to default branch first" >&2
-              exit 1
-            fi
-          elif [ "$rollout_from_candidate" = "1" ]; then
-            echo "Refreshing trusted harness overlay + controller from candidate for feature-branch rollout"
-            refresh_overlay_files
+            echo "trusted_harness_missing_on_base: merge scripts/ci to default branch before running this gate" >&2
+            exit 1
           fi
+          if [ ! -f trusted-harness/scripts/ci/verify_github_ruleset.py ]; then
+            echo "trusted_harness_ruleset_verifier_missing_on_base" >&2
+            exit 1
+          fi
+          if [ ! -f trusted-harness/.github/rulesets/protected-docker-posix-gate.json ]; then
+            echo "trusted_harness_ruleset_spec_missing_on_base" >&2
+            exit 1
+          fi
+          if [ ! -f trusted-harness/.github/trusted-docker-harness.txt ]; then
+            echo "trusted_harness_manifest_missing_on_base" >&2
+            exit 1
+          fi
+          # Reject any leftover bootstrap marker from prior runs.
+          if [ -f trusted-harness/.bridle-bootstrapped ]; then
+            echo "trusted_harness_bootstrap_marker_present: refusing to run candidate-provisioned harness" >&2
+            exit 1
+          fi
+          echo "trusted_harness_closure_verified"
 
-      - name: Validate GitHub ruleset spec
-        env:
-          BRIDLE_RULESET_RELAXED: "1"
-        run: python3 trusted-harness/scripts/ci/verify_github_ruleset.py --relaxed trusted-harness/.github/rulesets/protected-docker-posix-gate.json
+      - name: Validate GitHub ruleset spec (strict, from trusted base)
+        run: python3 trusted-harness/scripts/ci/verify_github_ruleset.py trusted-harness/.github/rulesets/protected-docker-posix-gate.json
 
       - name: Overlay trusted harness onto candidate workspace
         run: |
@@ -102,7 +83,9 @@ jobs:
             "$RUNNER_TEMP/trusted-harness-snapshot.json"
           python3 - <<'PY'
           from pathlib import Path
-          conftest = Path("candidate/backend/src/bridle/agent/container/tests/conftest.py")
+          conftest = Path("candidate/backend/tests/agent/container/conftest.py")
+          if not conftest.is_file():
+              raise SystemExit("overlay_missing_container_test_conftest")
           text = conftest.read_text(encoding="utf-8")
           if "def test_workspace" not in text:
               raise SystemExit("overlay_missing_test_workspace_fixture")
@@ -122,11 +105,26 @@ jobs:
           set -euo pipefail
           WORKER_TAG="bridle-worker:${GITHUB_SHA::12}"
           docker build -f "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/protected/worker.Dockerfile" \
+            --build-arg "WORKER_IMAGE_DIGEST=${GITHUB_SHA}" \
             -t "$WORKER_TAG" \
             "$GITHUB_WORKSPACE/trusted-harness"
           WORKER_DIGEST=$(docker image inspect -f '{{.Id}}' "$WORKER_TAG")
           if [[ "$WORKER_DIGEST" != sha256:* ]]; then
             WORKER_DIGEST="sha256:${WORKER_DIGEST}"
+          fi
+          WORKER_LABEL=$(docker image inspect -f '{{index .Config.Labels "bridle.worker_image_digest"}}' "$WORKER_TAG")
+          if [ "$WORKER_LABEL" = "unknown" ] || [ -z "$WORKER_LABEL" ]; then
+            echo "worker_image_digest_label_unknown" >&2
+            exit 1
+          fi
+          if [ "$WORKER_LABEL" != "$GITHUB_SHA" ]; then
+            echo "worker_image_digest_label_mismatch expected=$GITHUB_SHA got=$WORKER_LABEL" >&2
+            exit 1
+          fi
+          BASE_LABEL=$(docker image inspect -f '{{index .Config.Labels "bridle.base_image_digest"}}' "$WORKER_TAG")
+          if [ "$BASE_LABEL" != "sha256:db8e83a44af476c636a6a753adace39ad37863b63c0afd2862db7bbafeeb3944" ]; then
+            echo "worker_base_image_digest_label_mismatch got=$BASE_LABEL" >&2
+            exit 1
           fi
           echo "worker_image=$WORKER_TAG" >> "$GITHUB_OUTPUT"
           echo "worker_image_digest=$WORKER_DIGEST" >> "$GITHUB_OUTPUT"
@@ -138,24 +136,28 @@ jobs:
         run: |
           set -euo pipefail
           TRUSTED_CONTROLLER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py"
+          RUN_ID="review-${GITHUB_SHA::12}"
           STAGING="$RUNNER_TEMP/candidate-source-staging"
-          IMAGE_TAG="bridle-agent:review-${GITHUB_SHA::12}"
+          IMAGE_TAG="bridle-agent:${RUN_ID}"
           STAGING="$(
             bash "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/stage-candidate-source.sh" \
               "$GITHUB_WORKSPACE/candidate" \
               "$GITHUB_WORKSPACE/trusted-harness" \
-              "$STAGING"
+              "$STAGING" \
+              "$RUN_ID"
           )"
           DIGEST=$(python3 -I "$TRUSTED_CONTROLLER" source-digest "$STAGING")
           IMAGE_DIGEST=$(python3 -I "$TRUSTED_CONTROLLER" build-image \
             "$GITHUB_WORKSPACE/trusted-harness" \
             "$STAGING" \
             "$IMAGE_TAG" \
-            --source-digest "$DIGEST")
+            --source-digest "$DIGEST" \
+            --run-id "$RUN_ID")
           echo "source_digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "staging_path=$STAGING" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Run isolation probe
         id: probe
@@ -277,8 +279,8 @@ jobs:
           BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
         run: |
           set -euo pipefail
-          TRUSTED_PYTHONPATH="$GITHUB_WORKSPACE/trusted-harness/backend/src"
-          if ! PYTHONPATH="$TRUSTED_PYTHONPATH" python -m bridle.agent.container.tests.docker_gate \
+          if ! python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/run_docker_gate.py" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
             "$BRIDLE_DOCKER_EVIDENCE_DIR" \
             --source-digest "${{ steps.review-image.outputs.source_digest }}" \
             --image-digest "${{ steps.review-image.outputs.image_digest }}" \
@@ -298,6 +300,20 @@ jobs:
             ${{ steps.probe.outputs.ipc_probe_transcript }}
             ${{ steps.docker-tests.outputs.ipc_docker_transcript }}
           if-no-files-found: error
+
+      - name: Release review image tag
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          RUN_ID="${{ steps.review-image.outputs.run_id }}"
+          IMAGE_TAG="${{ steps.review-image.outputs.image_tag }}"
+          if [ -z "$RUN_ID" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "release_image_skipped missing run_id or image_tag"
+            exit 0
+          fi
+          python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py" \
+            release-image "$IMAGE_TAG" --run-id "$RUN_ID" || echo "release_image_failed tag=$IMAGE_TAG run_id=$RUN_ID"
 
       - name: Dump docker gate diagnostics on failure
         if: failure()
