@@ -261,12 +261,23 @@ REPORT_PREFIX = "{CHMOD_POISON_REPORT_PREFIX}"
 def _poison_mount_root(mount_path: str) -> dict:
     uid = os.getuid()
     gid = os.getgid()
-    before = os.stat(mount_path).st_mode & 0o777
-    entry = {{"path": mount_path, "uid": uid, "gid": gid, "before_mode": before}}
+    st = os.stat(mount_path)
+    before = st.st_mode & 0o777
+    entry = {{
+        "path": mount_path,
+        "uid": uid,
+        "gid": gid,
+        "before_mode": before,
+        "owner_uid": int(st.st_uid),
+        "owner_gid": int(st.st_gid),
+    }}
     fd = None
     try:
         fd = os.open(mount_path, os.O_RDONLY | os.O_DIRECTORY)
-        os.fchmod(fd, 0)
+        try:
+            os.fchmod(fd, 0)
+        except OSError:
+            os.chmod(mount_path, 0)
         after_mode = os.fstat(fd).st_mode & 0o777
         if after_mode == 0:
             entry["rc"] = 0

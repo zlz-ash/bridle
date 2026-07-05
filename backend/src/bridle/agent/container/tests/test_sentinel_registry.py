@@ -48,6 +48,13 @@ def test_same_name_rebuild_with_different_content_fails(tmp_path: Path) -> None:
     assert exc.value.error_code == "sentinel_content_mismatch"
 
 
+def test_verify_accepts_dict_record(tmp_path: Path) -> None:
+    target = tmp_path / "outside-secret.txt"
+    target.write_text("secret\n", encoding="utf-8")
+    record = sentinel_registry.register_external_sentinel(target)
+    sentinel_registry.verify_external_sentinel(target, record.to_dict())
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink sentinel semantics")
 def test_external_symlink_sentinel_rejected(tmp_path: Path) -> None:
     outside = tmp_path / "real-secret.txt"

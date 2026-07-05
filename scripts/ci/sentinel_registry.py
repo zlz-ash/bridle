@@ -87,8 +87,17 @@ def register_external_sentinel(path: Path) -> SentinelRecord:
     return record
 
 
+def _coerce_record(record: SentinelRecord | dict[str, Any]) -> SentinelRecord:
+    if isinstance(record, dict):
+        return _record_from_dict(record)
+    to_dict = getattr(record, "to_dict", None)
+    if callable(to_dict):
+        return _record_from_dict(to_dict())
+    raise SentinelRegistryError("sentinel_record_invalid", detail=type(record).__name__)
+
+
 def verify_external_sentinel(path: Path, record: SentinelRecord | dict[str, Any]) -> None:
-    expected = record if isinstance(record, SentinelRecord) else _record_from_dict(record)
+    expected = _coerce_record(record)
     target = Path(os.path.abspath(os.fspath(path)))
     if str(target) != expected.canonical_path:
         raise SentinelRegistryError(

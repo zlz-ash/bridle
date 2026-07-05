@@ -79,7 +79,7 @@ def register_sentinel_request(
     host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
     record = registry.register_external_sentinel(host_path)
     handle = f"sent-{uuid.uuid4().hex[:16]}"
-    ctx.sentinel_by_handle[handle] = record
+    ctx.sentinel_by_handle[handle] = record.to_dict()
     ctx.handled_request_ids.add(request_id)
     if ctx.controller_ipc_dir is not None:
         ack_dir = ctx.controller_ipc_dir / "sentinel-acks"
@@ -144,7 +144,7 @@ def handle_controller_line(
         host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
         record = registry.register_external_sentinel(host_path)
         handle = f"sent-{uuid.uuid4().hex[:16]}"
-        ctx.sentinel_by_handle[handle] = record
+        ctx.sentinel_by_handle[handle] = record.to_dict()
 
 
 def mark_evidence_run_started(*, trusted_pythonpath: Path) -> None:
@@ -212,10 +212,10 @@ def publish_from_worker_stdout(
             before = ctx.sentinel_by_handle.get(str(sentinel_handle))
             if before is None:
                 raise RuntimeError("sentinel_not_preregistered_by_controller")
-            host_path = Path(before.canonical_path)
+            host_path = Path(str(before["canonical_path"]))
             after_record = registry.register_external_sentinel(host_path)
             registry.verify_external_sentinel(host_path, before)
-            primary["sentinel_before"] = before.to_dict()
+            primary["sentinel_before"] = dict(before)
             primary["sentinel_after"] = after_record.to_dict()
         if payload.get("status") == "passed":
             teardown = _controller_teardown(primary, trusted_pythonpath=trusted_pythonpath, ctx=ctx)
