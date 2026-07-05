@@ -56,7 +56,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 PYTEST_CMD = "python -m pytest tests/test_isolation.py -q"
-CHMOD_POISON_CMD = "python -m pytest tests/test_chmod_poison.py -q -s --capture=no"
+CHMOD_POISON_CMD = (
+    "python -m pytest tests/test_chmod_poison.py -q -s --capture=no "
+    "-p no:cacheprovider --basetemp=/tmp/bridle-chmod-pytest"
+)
 CHMOD_POISON_REPORT_PREFIX = "BRIDLE_CHMOD_POISON_REPORT:"
 LINK_ATTACK_CMD = "python -m pytest tests/test_link_attack.py -q -s --capture=no"
 LINK_ATTACK_REPORT_PREFIX = "BRIDLE_LINK_ATTACK_REPORT:"
@@ -262,7 +265,7 @@ def _poison_mount_root(mount_path: str) -> dict:
     entry = {{"path": mount_path, "uid": uid, "gid": gid, "before_mode": before}}
     fd = None
     try:
-        fd = os.open(mount_path, os.O_RDONLY | os.O_PATH)
+        fd = os.open(mount_path, os.O_RDONLY | os.O_DIRECTORY)
         os.fchmod(fd, 0)
         after_mode = os.fstat(fd).st_mode & 0o777
         if after_mode == 0:

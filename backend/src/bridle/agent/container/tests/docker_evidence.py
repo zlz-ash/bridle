@@ -33,7 +33,10 @@ RW_ROOT_NAMES = ("project", "output", "diagnostics")
 LINK_ATTACK_LINK_NAMES = ("attack.txt", "escape.txt")
 APPROVED_ENTRY_COMMANDS: dict[str, str] = {
     "link_attack": "python -m pytest tests/test_link_attack.py -q -s --capture=no",
-    "chmod_poison": "python -m pytest tests/test_chmod_poison.py -q -s --capture=no",
+    "chmod_poison": (
+        "python -m pytest tests/test_chmod_poison.py -q -s --capture=no "
+        "-p no:cacheprovider --basetemp=/tmp/bridle-chmod-pytest"
+    ),
 }
 LINK_ATTACK_LINK_PATHS: dict[str, str] = {
     "attack.txt": "/workspace/project/attack.txt",

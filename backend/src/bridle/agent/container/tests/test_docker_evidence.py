@@ -106,7 +106,10 @@ def _chmod_primary(**overrides: object) -> dict:
     primary = {
         "attack_uid": 1000,
         "chmod_results": _chmod_results(),
-        "entry_command": "python -m pytest tests/test_chmod_poison.py -q -s --capture=no",
+        "entry_command": (
+            "python -m pytest tests/test_chmod_poison.py -q -s --capture=no "
+            "-p no:cacheprovider --basetemp=/tmp/bridle-chmod-pytest"
+        ),
         "container_id": "sha256:container",
         "it_run_id": "run-owner",
         "module_id": "docker-perm-run-owner",
