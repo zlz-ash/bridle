@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,26 @@ class _FakeReport:
         self.longrepr = ""
 
 
+class _FakeCall:
+    def __init__(self, when: str) -> None:
+        self.when = when
+
+
+class _FakeOutcome:
+    def __init__(self, report: _FakeReport) -> None:
+        self._report = report
+
+    def get_result(self) -> _FakeReport:
+        return self._report
+
+
+def _run_makereport_hook(item: _FakeItem, call: _FakeCall, report: _FakeReport) -> None:
+    gen = observer.pytest_runtest_makereport(item, call)
+    next(gen)
+    with suppress(StopIteration):
+        gen.send(_FakeOutcome(report))
+
+
 def test_observer_match_test_key() -> None:
     assert observer._match_test_key(LINK_NODE) == "link_attack"
     assert observer._match_test_key(CHMOD_NODE) == "chmod_poison"
@@ -100,7 +121,7 @@ def test_observer_started_and_finished(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("BRIDLE_CRITICAL_TEST_NONCES", json.dumps({"link_attack": "n1"}))
     item = _FakeItem(LINK_NODE)
     observer.pytest_runtest_setup(item)
-    observer.pytest_runtest_makereport(item, _FakeReport("call", "passed"))
+    _run_makereport_hook(item, _FakeCall("call"), _FakeReport("call", "passed"))
     started = json.loads((events / "started_link_attack.json").read_text(encoding="utf-8"))
     assert started["test_node_id"] == LINK_NODE
     finished = json.loads((events / "finished_link_attack.json").read_text(encoding="utf-8"))
