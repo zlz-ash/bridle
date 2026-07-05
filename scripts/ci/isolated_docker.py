@@ -153,13 +153,7 @@ def start_isolated_daemon(
 def _resolve_dind_controller_endpoint(*, dind_name: str, network: str) -> str:
     """Resolve the DinD container IP on its network so the host controller can reach it without DNS."""
     inspect = _run(
-        [
-            "docker",
-            "inspect",
-            "-f",
-            f"{{{{range .NetworkSettings.Networks}}{{{{if eq .NetworkName \"{network}\"}}}}{{{{.IPAddress}}{{{{end}}}}}}}}",
-            dind_name,
-        ],
+        ["docker", "inspect", "--type", "container", dind_name],
         timeout=30,
     )
     if inspect.returncode != 0:
@@ -167,7 +161,28 @@ def _resolve_dind_controller_endpoint(*, dind_name: str, network: str) -> str:
             "isolated_docker_endpoint_resolve_failed",
             detail=(inspect.stderr or inspect.stdout or "docker inspect failed").strip(),
         )
-    ip = (inspect.stdout or "").strip()
+    try:
+        payload = json.loads(inspect.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise IsolatedDockerError(
+            "isolated_docker_endpoint_resolve_failed",
+            detail=f"inspect json parse error: {exc}",
+        ) from exc
+    if not isinstance(payload, list) or not payload:
+        raise IsolatedDockerError(
+            "isolated_docker_endpoint_resolve_failed",
+            detail=f"dind={dind_name} inspect returned no payload",
+        )
+    networks = (payload[0] or {}).get("NetworkSettings", {}).get("Networks", {}) or {}
+    entry = networks.get(network)
+    ip = ""
+    if entry is None:
+        for name, cfg in networks.items():
+            if cfg and cfg.get("IPAddress"):
+                ip = str(cfg.get("IPAddress") or "").strip()
+                break
+    else:
+        ip = str(entry.get("IPAddress") or "").strip()
     if not ip:
         raise IsolatedDockerError(
             "isolated_docker_endpoint_resolve_failed",
