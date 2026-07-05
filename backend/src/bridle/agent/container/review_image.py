@@ -37,6 +37,11 @@ class ReviewImageInfo:
 
 
 def find_repo_root(start: Path | None = None) -> Path:
+    env_root = os.environ.get("BRIDLE_CANDIDATE_CONTAINER_ROOT", "").strip()
+    if env_root:
+        candidate = Path(env_root)
+        if (candidate / "backend" / "pyproject.toml").is_file() and (candidate / "backend" / "src").is_dir():
+            return candidate
     cursor = (start or Path(__file__)).resolve()
     for parent in [cursor, *cursor.parents]:
         if (parent / "backend" / "pyproject.toml").is_file() and (parent / "backend" / "src").is_dir():
