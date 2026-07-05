@@ -255,28 +255,36 @@ import os
 
 REPORT_PREFIX = "{CHMOD_POISON_REPORT_PREFIX}"
 
-def test_container_chmods_rw_mount_roots():
+def _poison_mount_root(mount_path: str) -> dict:
     uid = os.getuid()
     gid = os.getgid()
+    before = os.stat(mount_path).st_mode & 0o777
+    entry = {{"path": mount_path, "uid": uid, "gid": gid, "before_mode": before}}
+    fd = None
+    try:
+        fd = os.open(mount_path, os.O_RDONLY | os.O_PATH)
+        os.fchmod(fd, 0)
+        after_mode = os.fstat(fd).st_mode & 0o777
+        if after_mode == 0:
+            entry["rc"] = 0
+            entry["after_mode"] = 0
+        else:
+            entry["rc"] = errno.EPERM
+            entry["after_mode"] = after_mode
+            entry["error"] = "chmod_succeeded_but_mode_not_zero"
+    except OSError as exc:
+        entry["rc"] = exc.errno
+        entry["error"] = str(exc)
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return entry
+
+def test_container_chmods_rw_mount_roots():
     results = []
-    for mount_path in ("/workspace/project", "/workspace/output", "/workspace/diagnostics"):
-        before = os.stat(mount_path).st_mode & 0o777
-        entry = {{"path": mount_path, "uid": uid, "gid": gid, "before_mode": before}}
-        try:
-            os.chmod(mount_path, 0)
-            after_mode = os.stat(mount_path).st_mode & 0o777
-            if after_mode == 0:
-                entry["rc"] = 0
-                entry["after_mode"] = 0
-            else:
-                entry["rc"] = errno.EPERM
-                entry["after_mode"] = after_mode
-                entry["error"] = "chmod_succeeded_but_mode_not_zero"
-        except OSError as exc:
-            entry["rc"] = exc.errno
-            entry["error"] = str(exc)
-        results.append(entry)
-    report = {{"uid": uid, "gid": gid, "results": results}}
+    for mount_path in ("/workspace/output", "/workspace/diagnostics", "/workspace/project"):
+        results.append(_poison_mount_root(mount_path))
+    report = {{"uid": os.getuid(), "gid": os.getgid(), "results": results}}
     print(REPORT_PREFIX + json.dumps(report), flush=True)
     project = next(item for item in results if item["path"] == "/workspace/project")
     assert project.get("rc") == 0, project
