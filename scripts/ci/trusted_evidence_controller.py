@@ -61,6 +61,33 @@ def resolve_candidate_relative_path(candidate_root: Path, candidate_relative: st
     return host_path
 
 
+_INNER_CANDIDATE_ROOT = "/bridle-candidate"
+
+
+def _map_attack_targets_to_host(primary: dict[str, Any], *, candidate_root: Path) -> None:
+    """Translate container-internal symlink targets to host paths for sentinel validation."""
+    results = primary.get("attack_results")
+    if not isinstance(results, list):
+        return
+    prefix = _INNER_CANDIDATE_ROOT
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        target = item.get("target")
+        if not isinstance(target, str) or not target.startswith(prefix):
+            continue
+        remainder = target[len(prefix):]
+        try:
+            mapped = (candidate_root / remainder.lstrip("/")).resolve()
+        except (OSError, ValueError):
+            continue
+        try:
+            mapped.relative_to(candidate_root.resolve())
+        except ValueError:
+            continue
+        item["target"] = str(mapped)
+
+
 def register_sentinel_request(
     payload: dict[str, Any],
     *,
@@ -217,6 +244,7 @@ def publish_from_worker_stdout(
             registry.verify_external_sentinel(host_path, before)
             primary["sentinel_before"] = dict(before)
             primary["sentinel_after"] = after_record.to_dict()
+            _map_attack_targets_to_host(primary, candidate_root=ctx.candidate_root)
         if payload.get("status") == "passed":
             teardown = _controller_teardown(primary, trusted_pythonpath=trusted_pythonpath, ctx=ctx)
             de.publish_passed_evidence(
