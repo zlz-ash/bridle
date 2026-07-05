@@ -183,3 +183,14 @@ def test_verify_rejects_stale_metadata_without_docker(repo_root: Path) -> None:
             digest_resolver=lambda _image: "sha256:dead",
         )
     assert exc_info.value.error_code == "review_image_source_stale"
+
+
+def test_find_repo_root_uses_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When bridle is installed outside the repo tree, find_repo_root uses
+    BRIDLE_CANDIDATE_CONTAINER_ROOT (set by trusted controller in worker container)."""
+    env_root = tmp_path / "candidate-checkout"
+    (env_root / "backend" / "src").mkdir(parents=True)
+    (env_root / "backend" / "pyproject.toml").write_text("[project]\nname='bridle'\n", encoding="utf-8")
+    monkeypatch.setenv("BRIDLE_CANDIDATE_CONTAINER_ROOT", str(env_root))
+    result = find_repo_root()
+    assert result.resolve() == env_root.resolve()
