@@ -43,6 +43,33 @@ def normalize_integration_test_path(fspath: object) -> Path | None:
         return None
 
 
+def resolve_nodeid_file_part(file_part: object) -> Path | None:
+    """Resolve a pytest nodeid file part to an absolute path.
+
+    Worker nodeids are relative to the pytest rootdir (``backend``). When the
+    controller validates on the host, the cwd is not the trusted checkout, so
+    resolve relative paths against the canonical backend root instead.
+    """
+    raw = Path(str(file_part))
+    try:
+        if raw.is_absolute():
+            return raw.resolve()
+    except (OSError, ValueError):
+        return None
+    canonical = canonical_integration_test_path()
+    if canonical is None:
+        try:
+            return raw.resolve()
+        except (OSError, ValueError):
+            return None
+    # canonical = trusted_root / backend / src / bridle / agent / container / tests / test_docker_integration.py
+    backend_root = canonical.parents[len(CANONICAL_INTEGRATION_REL_PARTS) - 2]
+    try:
+        return (backend_root / raw).resolve()
+    except (OSError, ValueError):
+        return None
+
+
 def is_canonical_integration_test_path(fspath: object) -> bool:
     resolved = normalize_integration_test_path(fspath)
     if resolved is None:

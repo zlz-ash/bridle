@@ -93,9 +93,10 @@ def validate_test_node_id_for_key(test_key: str, test_node_id: str) -> None:
     from bridle.agent.container.tests.docker_gate_paths import (
         canonical_integration_test_path,
         normalize_integration_test_path,
+        resolve_nodeid_file_part,
     )
 
-    resolved = normalize_integration_test_path(file_part)
+    resolved = resolve_nodeid_file_part(file_part)
     canonical = canonical_integration_test_path()
     if canonical is not None:
         if resolved is None or resolved != canonical:
