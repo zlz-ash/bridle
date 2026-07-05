@@ -1,0 +1,358 @@
+name: Container Docker Linux
+
+on:
+  push:
+    paths:
+      - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
+      - "backend/pyproject.toml"
+      - ".github/workflows/container-docker-linux.yml"
+      - ".github/trusted-docker-harness.txt"
+      - ".github/rulesets/**"
+      - "scripts/ci/**"
+  pull_request:
+    paths:
+      - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
+      - "backend/pyproject.toml"
+      - ".github/workflows/container-docker-linux.yml"
+      - ".github/trusted-docker-harness.txt"
+      - ".github/rulesets/**"
+      - "scripts/ci/**"
+
+jobs:
+  protected-docker-posix-gate:
+    name: protected-docker-posix-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+          fetch-depth: 0
+
+      - name: Resolve trusted harness ref
+        id: trusted-ref
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.repository.default_branch }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout trusted harness from base/default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.trusted-ref.outputs.ref }}
+          path: trusted-harness
+
+      - name: Verify trusted harness closure present (fail-closed, no candidate bootstrap)
+        run: |
+          set -euo pipefail
+          if [ ! -f trusted-harness/scripts/ci/trusted_test_runner.py ]; then
+            echo "trusted_harness_missing_on_base: merge scripts/ci to default branch before running this gate" >&2
+            exit 1
+          fi
+          if [ ! -f trusted-harness/scripts/ci/verify_github_ruleset.py ]; then
+            echo "trusted_harness_ruleset_verifier_missing_on_base" >&2
+            exit 1
+          fi
+          if [ ! -f trusted-harness/.github/rulesets/protected-docker-posix-gate.json ]; then
+            echo "trusted_harness_ruleset_spec_missing_on_base" >&2
+            exit 1
+          fi
+          if [ ! -f trusted-harness/.github/trusted-docker-harness.txt ]; then
+            echo "trusted_harness_manifest_missing_on_base" >&2
+            exit 1
+          fi
+          # Reject any leftover bootstrap marker from prior runs.
+          if [ -f trusted-harness/.bridle-bootstrapped ]; then
+            echo "trusted_harness_bootstrap_marker_present: refusing to run candidate-provisioned harness" >&2
+            exit 1
+          fi
+          echo "trusted_harness_closure_verified"
+
+      - name: Validate GitHub ruleset spec (strict, from trusted base)
+        run: python3 trusted-harness/scripts/ci/verify_github_ruleset.py trusted-harness/.github/rulesets/protected-docker-posix-gate.json
+
+      - name: Overlay trusted harness onto candidate workspace
+        run: |
+          bash trusted-harness/scripts/ci/overlay-trusted-docker-harness.sh \
+            candidate \
+            trusted-harness \
+            "$RUNNER_TEMP/trusted-harness-snapshot.json"
+          python3 - <<'PY'
+          from pathlib import Path
+          conftest = Path("candidate/backend/tests/agent/container/conftest.py")
+          if not conftest.is_file():
+              raise SystemExit("overlay_missing_container_test_conftest")
+          text = conftest.read_text(encoding="utf-8")
+          if "def test_workspace" not in text:
+              raise SystemExit("overlay_missing_test_workspace_fixture")
+          print("overlay_conftest_ok path=", conftest)
+          PY
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies from trusted revision
+        run: pip install -e trusted-harness/backend "pytest>=8.0"
+
+      - name: Build worker image
+        id: worker-image
+        run: |
+          set -euo pipefail
+          WORKER_TAG="bridle-worker:${GITHUB_SHA::12}"
+          docker build -f "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/protected/worker.Dockerfile" \
+            --build-arg "WORKER_IMAGE_DIGEST=${GITHUB_SHA}" \
+            -t "$WORKER_TAG" \
+            "$GITHUB_WORKSPACE/trusted-harness"
+          WORKER_DIGEST=$(docker image inspect -f '{{.Id}}' "$WORKER_TAG")
+          if [[ "$WORKER_DIGEST" != sha256:* ]]; then
+            WORKER_DIGEST="sha256:${WORKER_DIGEST}"
+          fi
+          WORKER_LABEL=$(docker image inspect -f '{{index .Config.Labels "bridle.worker_image_digest"}}' "$WORKER_TAG")
+          if [ "$WORKER_LABEL" = "unknown" ] || [ -z "$WORKER_LABEL" ]; then
+            echo "worker_image_digest_label_unknown" >&2
+            exit 1
+          fi
+          if [ "$WORKER_LABEL" != "$GITHUB_SHA" ]; then
+            echo "worker_image_digest_label_mismatch expected=$GITHUB_SHA got=$WORKER_LABEL" >&2
+            exit 1
+          fi
+          BASE_LABEL=$(docker image inspect -f '{{index .Config.Labels "bridle.base_image_digest"}}' "$WORKER_TAG")
+          if [ "$BASE_LABEL" != "sha256:db8e83a44af476c636a6a753adace39ad37863b63c0afd2862db7bbafeeb3944" ]; then
+            echo "worker_base_image_digest_label_mismatch got=$BASE_LABEL" >&2
+            exit 1
+          fi
+          echo "worker_image=$WORKER_TAG" >> "$GITHUB_OUTPUT"
+          echo "worker_image_digest=$WORKER_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Stage candidate and build review image
+        id: review-image
+        env:
+          BRIDLE_STAGING_ROOT: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          TRUSTED_CONTROLLER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py"
+          RUN_ID="review-${GITHUB_SHA::12}"
+          STAGING="$RUNNER_TEMP/candidate-source-staging"
+          IMAGE_TAG="bridle-agent:${RUN_ID}"
+          STAGING="$(
+            bash "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/stage-candidate-source.sh" \
+              "$GITHUB_WORKSPACE/candidate" \
+              "$GITHUB_WORKSPACE/trusted-harness" \
+              "$STAGING" \
+              "$RUN_ID"
+          )"
+          DIGEST=$(python3 -I "$TRUSTED_CONTROLLER" source-digest "$STAGING")
+          IMAGE_DIGEST=$(python3 -I "$TRUSTED_CONTROLLER" build-image \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            "$STAGING" \
+            "$IMAGE_TAG" \
+            --source-digest "$DIGEST" \
+            --run-id "$RUN_ID")
+          echo "source_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "staging_path=$STAGING" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Run isolation probe
+        id: probe
+        working-directory: candidate
+        env:
+          BRIDLE_RUN_DOCKER_TESTS: "1"
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+          BRIDLE_TRUSTED_CHECKOUT_ROOT: ${{ github.workspace }}/candidate
+          BRIDLE_WORKER_DOCKER_SANDBOX: "1"
+          BRIDLE_WORKER_IMAGE: ${{ steps.worker-image.outputs.worker_image }}
+          BRIDLE_CONTROLLER_IPC_DIR: ${{ runner.temp }}/bridle-controller-ipc
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-requests"
+          TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
+          IPC_PROBE="$RUNNER_TEMP/trusted-ipc-probe.json"
+          PROBE_LOG="$RUNNER_TEMP/probe.log"
+          if ! python3 "$TRUSTED_TEST_RUNNER" \
+            --probe-isolation \
+            --ipc-transcript "$IPC_PROBE" \
+            "$GITHUB_WORKSPACE/candidate" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            -- -q -rs 2>&1 | tee "$PROBE_LOG"; then
+            echo "probe_failed see $PROBE_LOG and $IPC_PROBE" >&2
+            if [ -f "$IPC_PROBE" ]; then
+              python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8')), indent=2, sort_keys=True))" "$IPC_PROBE"
+            fi
+            exit 1
+          fi
+          echo "ipc_probe_transcript=$IPC_PROBE" >> "$GITHUB_OUTPUT"
+
+      - name: Verify candidate overlay before docker gate
+        run: |
+          set -euo pipefail
+          python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py" \
+            verify-overlay "$GITHUB_WORKSPACE/candidate" "$RUNNER_TEMP/trusted-harness-snapshot.json"
+
+      - name: Preflight isolated Docker chain
+        working-directory: candidate
+        env:
+          BRIDLE_RUN_DOCKER_TESTS: "1"
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+          BRIDLE_TRUSTED_CHECKOUT_ROOT: ${{ github.workspace }}/candidate
+          BRIDLE_WORKER_DOCKER_SANDBOX: "1"
+          BRIDLE_RUNNER_TEMP: ${{ runner.temp }}
+          BRIDLE_STAGING_ROOT: ${{ runner.temp }}
+          BRIDLE_WORKER_IMAGE: ${{ steps.worker-image.outputs.worker_image }}
+          BRIDLE_REVIEW_SOURCE_DIGEST: ${{ steps.review-image.outputs.source_digest }}
+          BRIDLE_REVIEW_IMAGE_DIGEST: ${{ steps.review-image.outputs.image_digest }}
+          BRIDLE_AGENT_IMAGE: ${{ steps.review-image.outputs.image_tag }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
+          PREFLIGHT_LOG="$RUNNER_TEMP/preflight-isolated.log"
+          mkdir -p "$BRIDLE_DOCKER_EVIDENCE_DIR"
+          if ! python3 -I "$TRUSTED_TEST_RUNNER" \
+            --preflight-isolated-docker \
+            "$GITHUB_WORKSPACE/candidate" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            2>&1 | tee "$PREFLIGHT_LOG"; then
+            echo "preflight_isolated_docker_failed" >&2
+            if [ -f "$BRIDLE_DOCKER_EVIDENCE_DIR/ci-phases.log" ]; then
+              echo "=== ci-phases.log ===" >&2
+              cat "$BRIDLE_DOCKER_EVIDENCE_DIR/ci-phases.log" >&2
+            fi
+            if [ -f "$BRIDLE_DOCKER_EVIDENCE_DIR/isolated-setup-transcript.json" ]; then
+              echo "=== isolated-setup-transcript.json ===" >&2
+              cat "$BRIDLE_DOCKER_EVIDENCE_DIR/isolated-setup-transcript.json" >&2
+            fi
+            tail -n 120 "$PREFLIGHT_LOG" >&2
+            exit 1
+          fi
+
+      - name: Run Docker integration tests
+        id: docker-tests
+        working-directory: candidate
+        env:
+          BRIDLE_RUN_DOCKER_TESTS: "1"
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+          BRIDLE_TRUSTED_CHECKOUT_ROOT: ${{ github.workspace }}/candidate
+          BRIDLE_WORKER_DOCKER_SANDBOX: "1"
+          BRIDLE_RUNNER_TEMP: ${{ runner.temp }}
+          BRIDLE_STAGING_ROOT: ${{ runner.temp }}
+          BRIDLE_WORKER_IMAGE: ${{ steps.worker-image.outputs.worker_image }}
+          BRIDLE_REVIEW_SOURCE_DIGEST: ${{ steps.review-image.outputs.source_digest }}
+          BRIDLE_REVIEW_IMAGE_DIGEST: ${{ steps.review-image.outputs.image_digest }}
+          BRIDLE_AGENT_IMAGE: ${{ steps.review-image.outputs.image_tag }}
+          BRIDLE_CONTROLLER_IPC_DIR: ${{ runner.temp }}/bridle-controller-ipc
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TRUSTED_TEST_RUNNER="$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_test_runner.py"
+          IPC_DOCKER="$RUNNER_TEMP/trusted-ipc-docker.json"
+          DOCKER_TESTS_LOG="$RUNNER_TEMP/docker-tests.log"
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-acks"
+          mkdir -p "$BRIDLE_CONTROLLER_IPC_DIR/sentinel-requests"
+          if ! python3 -I "$TRUSTED_TEST_RUNNER" \
+            --ipc-transcript "$IPC_DOCKER" \
+            --verify-overlay-after "$RUNNER_TEMP/trusted-harness-snapshot.json" \
+            "$GITHUB_WORKSPACE/candidate" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            -- -x --maxfail=1 --tb=short -vv -rs 2>&1 | tee "$DOCKER_TESTS_LOG"; then
+            echo "docker_tests_failed see $DOCKER_TESTS_LOG and $IPC_DOCKER" >&2
+            tail -n 200 "$DOCKER_TESTS_LOG" >&2 || true
+            if [ -f "$IPC_DOCKER" ]; then
+              python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding='utf-8')), indent=2, sort_keys=True))" "$IPC_DOCKER" >&2
+            fi
+            exit 1
+          fi
+          echo "ipc_docker_transcript=$IPC_DOCKER" >> "$GITHUB_OUTPUT"
+
+      - name: Validate docker integration evidence
+        id: gate
+        working-directory: candidate
+        env:
+          BRIDLE_DOCKER_EVIDENCE_DIR: ${{ runner.temp }}/bridle-docker-evidence
+        run: |
+          set -euo pipefail
+          if ! python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/run_docker_gate.py" \
+            "$GITHUB_WORKSPACE/trusted-harness" \
+            "$BRIDLE_DOCKER_EVIDENCE_DIR" \
+            --source-digest "${{ steps.review-image.outputs.source_digest }}" \
+            --image-digest "${{ steps.review-image.outputs.image_digest }}" \
+            --github-sha "$GITHUB_SHA" 2>&1 | tee "$RUNNER_TEMP/gate.log"; then
+            echo "docker_gate_failed see $RUNNER_TEMP/gate.log" >&2
+            exit 1
+          fi
+          echo "trusted_harness_ref=${{ steps.trusted-ref.outputs.ref }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated Docker integration evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-integration-evidence-validated
+          path: |
+            ${{ runner.temp }}/bridle-docker-evidence
+            ${{ steps.probe.outputs.ipc_probe_transcript }}
+            ${{ steps.docker-tests.outputs.ipc_docker_transcript }}
+          if-no-files-found: error
+
+      - name: Release review image tag
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          RUN_ID="${{ steps.review-image.outputs.run_id }}"
+          IMAGE_TAG="${{ steps.review-image.outputs.image_tag }}"
+          if [ -z "$RUN_ID" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "release_image_skipped missing run_id or image_tag"
+            exit 0
+          fi
+          python3 -I "$GITHUB_WORKSPACE/trusted-harness/scripts/ci/trusted_harness.py" \
+            release-image "$IMAGE_TAG" --run-id "$RUN_ID" || echo "release_image_failed tag=$IMAGE_TAG run_id=$RUN_ID"
+
+      - name: Dump docker gate diagnostics on failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo "=== docker-tests.log (tail) ===" >&2
+          tail -n 200 "$RUNNER_TEMP/docker-tests.log" >&2 || true
+          echo "=== docker-tests.log (isolated/worker errors) ===" >&2
+          grep -E "BRIDLE_CI_PHASE|isolated_docker|worker_failed|worker_container|bind_mount|FAILED|ERROR" "$RUNNER_TEMP/docker-tests.log" >&2 || true
+          echo "=== ci-phases.log ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/ci-phases.log" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/ci-phases.log" >&2
+          fi
+          echo "=== isolated-setup-transcript.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/isolated-setup-transcript.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/isolated-setup-transcript.json" >&2
+          fi
+          echo "=== preflight-isolated.log (tail) ===" >&2
+          tail -n 80 "$RUNNER_TEMP/preflight-isolated.log" >&2 || true
+          echo "=== controller-failure.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" >&2
+          fi
+          echo "=== session-summary.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/session-summary.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/session-summary.json" >&2
+          fi
+
+      - name: Upload Docker integration evidence (diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-integration-evidence-failed
+          path: |
+            ${{ runner.temp }}/bridle-docker-evidence
+            ${{ runner.temp }}/trusted-ipc-probe.json
+            ${{ runner.temp }}/probe.log
+            ${{ runner.temp }}/trusted-ipc-docker.json
+            ${{ runner.temp }}/preflight-isolated.log
+            ${{ runner.temp }}/docker-tests.log
+            ${{ runner.temp }}/gate.log
+          if-no-files-found: warn

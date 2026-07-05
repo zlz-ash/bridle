@@ -10,8 +10,8 @@ import asyncio
 import ctypes
 import logging
 import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -20,11 +20,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from bridle.config import set_workspace
 import bridle.models  # noqa: F401 — register all ORM tables
+from bridle.config import set_workspace
 from bridle.models.base import Base
 
-TEST_WORKSPACES_ROOT = Path(__file__).resolve().parent / ".test-workspaces"
+TEST_WORKSPACES_ROOT = Path(__file__).resolve().parent.parent / ".test-workspaces"
 
 logger = logging.getLogger("bridle.test")
 
@@ -116,7 +116,7 @@ def test_workspace(request) -> Path:
 
     Located under backend/.test-workspaces/<sanitized-test-name>/.
     Calls set_workspace() so that get_config() returns paths anchored here.
-    Sets up a minimal git repo so that coding session creation succeeds by default.
+    Sets up a minimal git repo for tests that exercise git-aware workspace code.
     """
     test_name = request.node.name
     safe_name = test_name
@@ -199,64 +199,20 @@ async def db(test_workspace: Path) -> AsyncGenerator[AsyncSession, None]:
 def recovery_db_path(test_workspace: Path) -> Path:
     """Provide a file-based SQLite path for restart recovery tests.
 
-    The database file lives under <test_workspace>/.aicoding/.
+    The database file lives under the workspace runtime directory.
     Only use this for tests that need data to persist across sessions.
     """
     from bridle.config import get_config
 
     config = get_config()
-    config.aicoding_dir.mkdir(parents=True, exist_ok=True)
-    return config.aicoding_dir / f"recovery-{uuid4().hex}.sqlite3"
+    config.runtime_dir.mkdir(parents=True, exist_ok=True)
+    return config.runtime_dir / f"recovery-{uuid4().hex}.sqlite3"
 
 
 @pytest.fixture(autouse=True)
 def _stub_complexity_negotiation_llm(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
-    """Deterministic negotiation in tests — never call a real LLM."""
-    nodeid = request.node.nodeid
-    if "test_complexity_negotiation_service" in nodeid:
-        return
-    if "test_plan_import_negotiation.py::TestRunImportComplexityNegotiation" in nodeid:
-        return
-    from bridle.schemas.complexity_negotiation import NegotiationDecision, validate_negotiation_decision
-    from bridle.services import complexity_negotiation_service as cns
-
-    async def _fake_negotiate(
-        self: cns.ComplexityNegotiationService,
-        *,
-        plan_nodes: list,
-        validation_issues: list,
-        round_index: int,
-        max_rounds: int = cns._IMPORT_MAX_ROUNDS,
-    ) -> NegotiationDecision:
-        failing = [v for v in validation_issues if not v.ok]
-        target_id = failing[0].node_id if failing else (plan_nodes[0].id if plan_nodes else "n1")
-        node = next((n for n in plan_nodes if n.id == target_id), plan_nodes[0])
-        node.estimated_minutes = max(node.estimated_minutes or 0, 60)
-        if len((node.goal or "").strip()) < 40:
-            node.goal = (node.goal or "Work") + " with clear acceptance criteria for reviewers"
-        if getattr(node, "acceptance_scope", None) in (None, ""):
-            node.acceptance_scope = "Deliverable meets integration acceptance criteria"
-        if len(node.files) > 5:
-            node.files = node.files[:5]
-        return validate_negotiation_decision(
-            {
-                "action": "expand",
-                "expand": {
-                    "node_id": target_id,
-                    "new_goal": node.goal,
-                    "new_acceptance_scope": node.acceptance_scope or node.goal,
-                    "new_estimated_minutes": node.estimated_minutes,
-                    "additional_files": [],
-                },
-            }
-        )
-
-    monkeypatch.setattr(cns.ComplexityNegotiationService, "negotiate", _fake_negotiate)
-
-    def _fake_default() -> cns.ComplexityNegotiationService:
-        return cns.ComplexityNegotiationService(object())
-
-    monkeypatch.setattr(cns.ComplexityNegotiationService, "default", staticmethod(_fake_default))
+    """The retired plan-import chain no longer needs a global LLM stub."""
+    return
 
 
 @pytest_asyncio.fixture
@@ -264,9 +220,16 @@ async def client(
     db: AsyncSession, test_workspace: Path
 ) -> AsyncGenerator[AsyncClient, None]:
     """Provide an httpx AsyncClient wired to the FastAPI test app."""
+    from bridle.agent.container.container_service import reset_for_tests
+    from bridle.agent.container.runner import FakeContainerRunner
     from bridle.app import create_app
 
-    app = create_app(test_db=db, test_workspace=str(test_workspace))
+    reset_for_tests()
+    app = create_app(
+        test_db=db,
+        test_workspace=str(test_workspace),
+        container_runner=FakeContainerRunner(workspace_root=test_workspace),
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -288,6 +251,7 @@ async def live_client(
     import asyncio
 
     import uvicorn
+
     from bridle.app import create_app
 
     app = create_app(test_db=db, test_workspace=str(test_workspace))
@@ -318,5 +282,5 @@ async def live_client(
         server.should_exit = True
         try:
             await asyncio.wait_for(serve_task, timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             serve_task.cancel()

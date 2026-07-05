@@ -26,16 +26,16 @@ class WorkspaceConfig:
         return self._workspace
 
     @property
-    def aicoding_dir(self) -> Path:
-        """The .aicoding directory under the workspace root."""
-        p = self._workspace / ".aicoding"
+    def runtime_dir(self) -> Path:
+        """Return the Bridle runtime directory, creating it on first access."""
+        p = self._workspace / ".bridle" / "runtime"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
     @property
     def db_path(self) -> Path:
-        """SQLite database path."""
-        return self.aicoding_dir / "db.sqlite3"
+        """Return the application SQLite database path."""
+        return self.runtime_dir / "db.sqlite3"
 
     @property
     def database_url(self) -> str:
@@ -44,38 +44,31 @@ class WorkspaceConfig:
 
     @property
     def runs_dir(self) -> Path:
-        p = self.aicoding_dir / "runs"
+        """Return the runtime run-artifact directory."""
+        p = self.runtime_dir / "runs"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
     @property
     def logs_dir(self) -> Path:
-        p = self.aicoding_dir / "logs"
+        """Return the structured-log directory."""
+        p = self.runtime_dir / "logs"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
     @property
     def reports_dir(self) -> Path:
-        p = self.aicoding_dir / "reports"
+        """Return the generated-report directory."""
+        p = self.runtime_dir / "reports"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
     @property
     def context_dir(self) -> Path:
-        p = self.aicoding_dir / "context"
+        """Return the persisted runtime-context directory."""
+        p = self.runtime_dir / "context"
         p.mkdir(parents=True, exist_ok=True)
         return p
-
-    @property
-    def current_plan_path(self) -> Path:
-        """Path to the current-plan.json file mirror."""
-        return self.aicoding_dir / "current-plan.json"
-
-    @property
-    def plan_summary_path(self) -> Path:
-        """Path to the plan-summary.json file."""
-        return self.aicoding_dir / "plan-summary.json"
-
 
 # ---------------------------------------------------------------------------
 # Global singleton — set once at startup, read everywhere else.

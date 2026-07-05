@@ -7,9 +7,11 @@ $frontendDir   = Join-Path $projectRoot "frontend"
 $appUrl        = "http://localhost:5173"
 $backendHost   = "127.0.0.1"
 $backendPort   = 8900
+$frontendPort  = 5173
 $chrome        = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $logDir        = Join-Path $projectRoot "scripts\.app-logs"
 $chromeProfile = Join-Path $logDir "chrome-profile"
+$stateFile     = Join-Path $logDir "launcher_state.json"
 
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -48,7 +50,52 @@ function Kill-Tree {
     } catch {}
 }
 
+function Get-ListeningPids {
+    param([int[]]$Ports)
+    $lines = cmd /c "netstat -ano -p tcp" 2>$null
+    $pids = @()
+    foreach ($line in $lines) {
+        if ($line -notmatch "LISTENING") { continue }
+        foreach ($port in $Ports) {
+            if ($line -match "[:\.]$port\s+") {
+                $parts = ($line -split "\s+") | Where-Object { $_ }
+                $pidText = $parts[-1]
+                $pid = 0
+                if ([int]::TryParse($pidText, [ref]$pid) -and $pid -gt 0) {
+                    $pids += $pid
+                }
+                break
+            }
+        }
+    }
+    return $pids | Select-Object -Unique
+}
+
+function Cleanup-StaleLauncherState {
+    $stalePids = @()
+    if (Test-Path $stateFile) {
+        try {
+            $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+            foreach ($name in @("backendPid", "frontendPid")) {
+                $value = $state.$name
+                if ($value) { $stalePids += [int]$value }
+            }
+        } catch {
+            Write-Log "failed to parse launcher state: $_"
+        }
+    }
+
+    $stalePids += Get-ListeningPids -Ports @($backendPort, $frontendPort)
+    $stalePids = $stalePids | Where-Object { $_ -gt 0 } | Select-Object -Unique
+    foreach ($procId in $stalePids) {
+        if ($procId -eq $PID) { continue }
+        Write-Log "cleaning stale pid=$procId"
+        Kill-Tree $procId
+    }
+}
+
 Write-Log "=== launcher start ==="
+Cleanup-StaleLauncherState
 
 foreach ($p in @($venvPy, (Join-Path $frontendDir "package.json"), $chrome, $workspace)) {
     if (-not (Test-Path $p)) {
@@ -59,7 +106,7 @@ foreach ($p in @($venvPy, (Join-Path $frontendDir "package.json"), $chrome, $wor
 
 try {
     $backend = Start-Process -FilePath $venvPy `
-        -ArgumentList @("-m", "bridle", "serve", "-w", $workspace) `
+        -ArgumentList @("-m", "bridle", "serve", "-w", $workspace, "--no-reload") `
         -WorkingDirectory $projectRoot `
         -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $backendOut `
@@ -83,6 +130,13 @@ try {
     Kill-Tree $backend.Id
     exit 1
 }
+
+@{
+    backendPid = $backend.Id
+    frontendPid = $frontend.Id
+    workspace = $workspace
+    startedAt = [DateTime]::Now.ToString("o")
+} | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding utf8
 
 Write-Log "waiting for frontend on $appUrl (up to 180s)"
 $ready = $false
@@ -147,4 +201,5 @@ try {
 Write-Log "shutting down backend + frontend"
 Kill-Tree $backend.Id
 Kill-Tree $frontend.Id
+Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
 Write-Log "=== launcher exit ==="

@@ -1,0 +1,34 @@
+/* ============================================================
+   Bridle — Radius, elevation & blur tokens
+   Soft-but-precise corners. Elevation comes from blur + amber
+   glow, not heavy drop shadows. Backdrop blur is structural,
+   not decorative — it powers the signature translucent overlay.
+   ============================================================ */
+:root {
+  /* ---- Corner radii ---- */
+  --radius-pill:   24px;   /* input bar, pills */
+  --radius-card:   16px;   /* cards, panels, overlay surface */
+  --radius-node:   12px;   /* flowchart nodes */
+  --radius-bubble: 12px;   /* conversation bubbles */
+  --radius-sm:     8px;    /* chips, small controls */
+  --radius-xs:     6px;    /* tags, inline tokens */
+  --radius-full:   999px;  /* avatars, dots, switches */
+
+  /* ---- Backdrop blur ---- */
+  --blur-overlay:  32px;   /* THE signature: conversation overlay glass */
+  --blur-panel:    12px;   /* lighter chrome blur */
+
+  /* ---- Elevation (restrained; warm shadows) ---- */
+  --shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.38);
+  --shadow-pop:  0 16px 48px rgba(0, 0, 0, 0.46);
+
+  /* ---- Glow (amber brand light) ---- */
+  --glow-amber-sm: 0 0 0 1px var(--amber-24), 0 0 16px rgba(255, 200, 87, 0.28);
+  --glow-amber-lg: 0 0 0 1px var(--amber-40), 0 0 32px rgba(255, 200, 87, 0.45);
+  --glow-sage:     0 0 16px rgba(127, 184, 155, 0.30);
+  --glow-copper:   0 0 16px rgba(224, 136, 85, 0.32);
+
+  /* ---- Focus ring ---- */
+  --ring-focus: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent-amber);
+}

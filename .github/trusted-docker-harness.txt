@@ -1,0 +1,9 @@
+# Trusted Docker POSIX harness files overlaid from base/default ref in CI.
+backend/tests/agent/container/conftest.py
+backend/tests/agent/container/__init__.py
+backend/tests/agent/container/docker_evidence.py
+backend/tests/agent/container/docker_gate.py
+backend/tests/agent/container/docker_gate_paths.py
+backend/tests/agent/container/docker_test_resources.py
+backend/tests/agent/container/test_dind_boundary_isolation.py
+backend/tests/agent/container/test_docker_integration.py

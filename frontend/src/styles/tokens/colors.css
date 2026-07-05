@@ -1,0 +1,65 @@
+/* ============================================================
+   Bridle — Color tokens
+   A warm dark palette: deep ink-green base, dark-walnut panels,
+   cream overlay surfaces, amber brand glow. Semantic agent states
+   map to amber (running), sage (completed), copper (failed).
+   ============================================================ */
+:root {
+  /* ---- Base surfaces ---- */
+  --canvas:        #0F1F1A;                    /* deep ink green — base layer (the "alive" flowchart plane) */
+  --panel:         #1F1814;                    /* dark walnut — right panel + header chrome */
+  --card:          rgba(245, 232, 208, 0.55);  /* translucent cream — conversation overlay surface */
+  --input:         rgba(245, 232, 208, 0.88);  /* near-solid cream — input bar surface */
+
+  /* ---- Ink ---- */
+  --text-cream:    #F5E8D0;                     /* primary text on dark surfaces */
+  --text-ink:      #1A1612;                     /* text on cream surfaces */
+
+  /* ---- Accents / semantic agent states ---- */
+  --accent-amber:  #FFC857;   /* primary brand glow, focus, RUNNING node */
+  --accent-copper: #E08855;   /* FAILED / warning */
+  --accent-sage:   #7FB89B;   /* COMPLETED / success */
+
+  /* ---- Flow primitives ---- */
+  --node-idle:     #2D3F36;   /* idle node fill on canvas */
+  --hairline:      rgba(255, 200, 87, 0.18);   /* 1px separators — warm, low-contrast */
+
+  /* ---- Derived cream text hierarchy (on dark surfaces) ---- */
+  --text-cream-1:  #F5E8D0;                    /* primary */
+  --text-cream-2:  rgba(245, 232, 208, 0.66);  /* secondary */
+  --text-cream-3:  rgba(245, 232, 208, 0.42);  /* muted / captions */
+  --text-cream-4:  rgba(245, 232, 208, 0.24);  /* disabled / faintest */
+
+  /* ---- Derived ink text hierarchy (on cream surfaces) ---- */
+  --text-ink-1:    #1A1612;                    /* primary */
+  --text-ink-2:    rgba(26, 22, 18, 0.62);     /* secondary */
+  --text-ink-3:    rgba(26, 22, 18, 0.40);     /* muted */
+
+  /* ---- Cream-tinted fills (chips, hovers on dark) ---- */
+  --cream-04:      rgba(245, 232, 208, 0.04);
+  --cream-08:      rgba(245, 232, 208, 0.08);
+  --cream-12:      rgba(245, 232, 208, 0.12);
+  --cream-20:      rgba(245, 232, 208, 0.20);
+
+  /* ---- Amber tints ---- */
+  --amber-12:      rgba(255, 200, 87, 0.12);
+  --amber-24:      rgba(255, 200, 87, 0.24);
+  --amber-40:      rgba(255, 200, 87, 0.40);
+  --amber-glow:    rgba(255, 200, 87, 0.45);   /* used in node glow / focus ring */
+
+  /* ---- Semantic aliases ---- */
+  --surface-base:      var(--canvas);
+  --surface-panel:     var(--panel);
+  --surface-card:      var(--card);
+  --surface-input:     var(--input);
+
+  --border-hairline:   var(--hairline);
+  --border-strong:     var(--amber-24);
+
+  --focus-ring:        var(--accent-amber);
+
+  --state-running:     var(--accent-amber);
+  --state-completed:   var(--accent-sage);
+  --state-failed:      var(--accent-copper);
+  --state-idle:        var(--node-idle);
+}

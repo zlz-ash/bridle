@@ -1,0 +1,5 @@
+/* Bridle webfonts.
+   Geist Variable (UI/body) + Geist Mono Variable (code/data), self-hosted
+   via @fontsource-variable/geist and @fontsource-variable/geist-mono.
+   The @font-face declarations are pulled in from main.tsx so this file
+   stays empty. No Google Fonts <link>, no runtime CDN dependency. */

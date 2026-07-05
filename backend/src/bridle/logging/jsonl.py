@@ -5,6 +5,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from bridle.logging.facade import emit_event as _emit_event
+
 
 class JSONLFormatter(logging.Formatter):
     """Format log records as single-line JSON objects."""
@@ -18,7 +20,6 @@ class JSONLFormatter(logging.Formatter):
             "status": getattr(record, "status", "unknown"),
         }
 
-        # Optional context fields
         for field in ("task_id", "node_id", "plan_node_id", "run_id", "duration_ms"):
             value = getattr(record, field, None)
             if value is not None:
@@ -52,17 +53,13 @@ def log_event(
     duration_ms: int | None = None,
     detail: dict | None = None,
 ) -> None:
-    """Emit a structured log event."""
-    logger = get_jsonl_logger()
-    logger.info(
+    """Emit a structured log event via logging facade."""
+    _emit_event(
         action,
-        extra={
-            "action": action,
-            "status": status,
-            "task_id": task_id,
-            "node_id": node_id,
-            "run_id": run_id,
-            "duration_ms": duration_ms,
-            "detail": detail,
-        },
+        status,
+        task_id=task_id,
+        node_id=node_id,
+        run_id=run_id,
+        duration_ms=duration_ms,
+        detail=detail,
     )

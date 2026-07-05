@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bridle"
 version = "0.1.0"
-description = "Persistence-first AI Coding workflow kernel"
+description = "Project-map runtime for Bridle workspaces"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -19,12 +19,14 @@ dependencies = [
     "sse-starlette>=2.1",
     "python-dotenv>=1.0",
     "httpx>=0.28",
+    "langfuse>=4,<5",
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-typescript>=0.23",
 ]
 
 [project.scripts]
 bridle = "bridle.cli:app"
-bridle-main-agent = "bridle.container_entrypoints.main_agent:main"
-bridle-node-agent = "bridle.container_entrypoints.node_agent:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
