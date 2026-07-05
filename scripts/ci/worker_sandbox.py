@@ -32,6 +32,7 @@ class IsolatedDockerContext:
     controller_docker_host: str
     network: str
     dind_name: str
+    dind_container_id: str
 
 
 def _load_module(name: str, path: Path):
@@ -120,7 +121,7 @@ def build_request(
 
 def start_isolated_docker_for_worker(*, run_id: str | None = None, candidate_host_root: Path | None = None) -> IsolatedDockerContext:
     isolated = _load_module("bridle_isolated_docker", SCRIPT_DIR / "isolated_docker.py")
-    docker_host, controller_docker_host, network, dind_name = isolated.start_isolated_daemon(
+    docker_host, controller_docker_host, network, dind_name, dind_container_id = isolated.start_isolated_daemon(
         run_id=run_id,
         candidate_host_root=candidate_host_root,
     )
@@ -129,14 +130,19 @@ def start_isolated_docker_for_worker(*, run_id: str | None = None, candidate_hos
         controller_docker_host=controller_docker_host,
         network=network,
         dind_name=dind_name,
+        dind_container_id=dind_container_id,
     )
 
 
-def stop_isolated_docker(context: IsolatedDockerContext | None) -> None:
+def stop_isolated_docker(context: IsolatedDockerContext | None):
     if context is None:
-        return
+        return None
     isolated = _load_module("bridle_isolated_docker", SCRIPT_DIR / "isolated_docker.py")
-    isolated.stop_isolated_daemon(network=context.network, dind_name=context.dind_name)
+    return isolated.stop_isolated_daemon(
+        network=context.network,
+        dind_name=context.dind_name,
+        dind_container_id=context.dind_container_id,
+    )
 
 
 def _capture_process(

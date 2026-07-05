@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 LOGGER = logging.getLogger("bridle.isolated_docker")
@@ -140,14 +141,19 @@ def start_isolated_daemon(
         _ensure_candidate_mount_propagation(dind_name=dind_name)
     worker_docker_host = f"tcp://{dind_name}:2375"
     controller_docker_host = _resolve_dind_controller_endpoint(dind_name=dind_name, network=network)
+    dind_container_id = _resolve_container_id(dind_name)
+    if not dind_container_id:
+        stop_isolated_daemon(network=network, dind_name=dind_name)
+        raise IsolatedDockerError("isolated_docker_dind_id_unresolved", detail=dind_name)
     LOGGER.info(
-        "isolated_docker_started network=%s dind=%s worker_host=%s controller_host=%s",
+        "isolated_docker_started network=%s dind=%s worker_host=%s controller_host=%s container_id=%s",
         network,
         dind_name,
         worker_docker_host,
         controller_docker_host,
+        dind_container_id,
     )
-    return worker_docker_host, controller_docker_host, network, dind_name
+    return worker_docker_host, controller_docker_host, network, dind_name, dind_container_id
 
 
 def _resolve_dind_controller_endpoint(*, dind_name: str, network: str) -> str:
@@ -191,16 +197,103 @@ def _resolve_dind_controller_endpoint(*, dind_name: str, network: str) -> str:
     return f"tcp://{ip}:2375"
 
 
-def stop_isolated_daemon(*, network: str, dind_name: str) -> None:
-    stop = _run(["docker", "stop", "-t", "5", dind_name], timeout=30)
-    if stop.returncode != 0:
-        LOGGER.warning("isolated_docker_stop_failed name=%s detail=%s", dind_name, stop.stderr.strip())
-    rm = _run(["docker", "rm", dind_name], timeout=30)
-    if rm.returncode != 0 and "No such container" not in (rm.stderr or ""):
-        LOGGER.warning("isolated_docker_remove_failed name=%s detail=%s", dind_name, rm.stderr.strip())
+def stop_isolated_daemon(*, network: str, dind_name: str, dind_container_id: str | None = None) -> DaemonCleanupResult:
+    """Stop and remove the DinD container and its network, verifying identity before acting."""
+    failures: list[str] = []
+    identity_verified = True
+
+    actual_container_id = _resolve_container_id(dind_name)
+    if dind_container_id is not None:
+        if actual_container_id is None:
+            identity_verified = False
+            failures.append(f"dind_identity_missing name={dind_name} expected={dind_container_id}")
+        elif actual_container_id != dind_container_id:
+            identity_verified = False
+            failures.append(
+                f"dind_identity_mismatch name={dind_name} expected={dind_container_id} actual={actual_container_id}"
+            )
+            LOGGER.error(
+                "isolated_docker_identity_mismatch name=%s expected=%s actual=%s",
+                dind_name,
+                dind_container_id,
+                actual_container_id,
+            )
+
+    stop_ok = True
+    rm_ok = True
+    if identity_verified:
+        stop = _run(["docker", "stop", "-t", "5", dind_name], timeout=30)
+        stop_ok = stop.returncode == 0
+        if not stop_ok:
+            failures.append(f"stop_failed detail={(stop.stderr or stop.stdout or '').strip()}")
+            LOGGER.warning("isolated_docker_stop_failed name=%s detail=%s", dind_name, (stop.stderr or '').strip())
+        rm = _run(["docker", "rm", dind_name], timeout=30)
+        rm_ok = rm.returncode == 0 or "No such container" in (rm.stderr or "")
+        if not rm_ok:
+            failures.append(f"rm_failed detail={(rm.stderr or rm.stdout or '').strip()}")
+            LOGGER.warning("isolated_docker_remove_failed name=%s detail=%s", dind_name, (rm.stderr or '').strip())
+    else:
+        stop_ok = False
+        rm_ok = False
+
     net_rm = _run(["docker", "network", "rm", network], timeout=30)
-    if net_rm.returncode != 0 and "No such network" not in (net_rm.stderr or ""):
-        LOGGER.warning("isolated_docker_network_remove_failed name=%s detail=%s", network, net_rm.stderr.strip())
+    net_rm_ok = net_rm.returncode == 0 or "No such network" in (net_rm.stderr or "")
+    if not net_rm_ok:
+        failures.append(f"net_rm_failed detail={(net_rm.stderr or net_rm.stdout or '').strip()}")
+        LOGGER.warning("isolated_docker_network_remove_failed name=%s detail=%s", network, (net_rm.stderr or '').strip())
+
+    result = DaemonCleanupResult(
+        dind_name=dind_name,
+        network=network,
+        dind_container_id=dind_container_id,
+        identity_verified=identity_verified,
+        stop_ok=stop_ok,
+        rm_ok=rm_ok,
+        net_rm_ok=net_rm_ok,
+        failures=failures,
+    )
+    level = LOGGER.info if not failures else LOGGER.warning
+    level(
+        "isolated_docker_cleanup dind=%s network=%s identity_verified=%s stop=%s rm=%s net_rm=%s failures=%d",
+        dind_name,
+        network,
+        identity_verified,
+        stop_ok,
+        rm_ok,
+        net_rm_ok,
+        len(failures),
+    )
+    return result
+
+
+@dataclass(frozen=True)
+class DaemonCleanupResult:
+    dind_name: str
+    network: str
+    dind_container_id: str | None
+    identity_verified: bool
+    stop_ok: bool
+    rm_ok: bool
+    net_rm_ok: bool
+    failures: list[str]
+
+    @property
+    def ok(self) -> bool:
+        return self.identity_verified and self.stop_ok and self.rm_ok and self.net_rm_ok and not self.failures
+
+
+def _resolve_container_id(name: str) -> str | None:
+    inspect = _run(["docker", "inspect", "--type", "container", name], timeout=15)
+    if inspect.returncode != 0:
+        return None
+    try:
+        payload = json.loads(inspect.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, list) or not payload:
+        return None
+    raw = (payload[0] or {}).get("Id") or ""
+    return str(raw).strip() or None
 
 
 def _normalize_image_id(raw: str) -> str:

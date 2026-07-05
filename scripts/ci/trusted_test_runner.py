@@ -632,7 +632,27 @@ def main(argv: list[str] | None = None) -> int:
         raise
     finally:
         worker_sandbox = _load_module("bridle_worker_sandbox", script_dir / "worker_sandbox.py")
-        worker_sandbox.stop_isolated_docker(isolated)
+        cleanup_result = worker_sandbox.stop_isolated_docker(isolated)
+        if cleanup_result is not None and not cleanup_result.ok:
+            pending_exc = sys.exc_info()[1]
+            cleanup_error = (
+                f"daemon_cleanup_incomplete dind={cleanup_result.dind_name} "
+                f"identity_verified={cleanup_result.identity_verified} "
+                f"stop={cleanup_result.stop_ok} rm={cleanup_result.rm_ok} "
+                f"net_rm={cleanup_result.net_rm_ok} "
+                f"failures={';'.join(cleanup_result.failures)}"
+            )
+            LOGGER.error("daemon_cleanup_incomplete %s", cleanup_error)
+            if pending_exc is None:
+                emit_worker_streams(worker_stdout, worker_stderr)
+                write_controller_failure_transcript(
+                    error=cleanup_error,
+                    worker_stdout=worker_stdout,
+                    worker_stderr=worker_stderr,
+                    observation=observation,
+                )
+                raise RuntimeError(cleanup_error)
+            LOGGER.warning("daemon_cleanup_failure_masked_by_prior_error prior=%s", pending_exc)
 
 
 if __name__ == "__main__":
