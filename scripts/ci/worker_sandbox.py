@@ -29,6 +29,7 @@ class SandboxPaths:
 @dataclass(frozen=True)
 class IsolatedDockerContext:
     docker_host: str
+    controller_docker_host: str
     network: str
     dind_name: str
 
@@ -119,11 +120,16 @@ def build_request(
 
 def start_isolated_docker_for_worker(*, run_id: str | None = None, candidate_host_root: Path | None = None) -> IsolatedDockerContext:
     isolated = _load_module("bridle_isolated_docker", SCRIPT_DIR / "isolated_docker.py")
-    docker_host, network, dind_name = isolated.start_isolated_daemon(
+    docker_host, controller_docker_host, network, dind_name = isolated.start_isolated_daemon(
         run_id=run_id,
         candidate_host_root=candidate_host_root,
     )
-    return IsolatedDockerContext(docker_host=docker_host, network=network, dind_name=dind_name)
+    return IsolatedDockerContext(
+        docker_host=docker_host,
+        controller_docker_host=controller_docker_host,
+        network=network,
+        dind_name=dind_name,
+    )
 
 
 def stop_isolated_docker(context: IsolatedDockerContext | None) -> None:

@@ -270,7 +270,7 @@ def prepare_isolated_docker_context(
         candidate_host_root=candidate_root,
     )
     emit_ci_phase("isolated_dind_ready", detail=isolated.dind_name)
-    ctx.isolated_docker_host = isolated.docker_host
+    ctx.isolated_docker_host = isolated.controller_docker_host
     ctx.isolated_dind_name = isolated.dind_name
     ctx.isolated_network = isolated.network
     isolated_module = _load_module(

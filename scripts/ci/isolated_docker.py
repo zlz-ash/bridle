@@ -138,9 +138,42 @@ def start_isolated_daemon(
         raise IsolatedDockerError("isolated_docker_dind_not_ready", detail=dind_name)
     if candidate_host_root is not None:
         _ensure_candidate_mount_propagation(dind_name=dind_name)
-    docker_host = f"tcp://{dind_name}:2375"
-    LOGGER.info("isolated_docker_started network=%s dind=%s host=%s", network, dind_name, docker_host)
-    return docker_host, network, dind_name
+    worker_docker_host = f"tcp://{dind_name}:2375"
+    controller_docker_host = _resolve_dind_controller_endpoint(dind_name=dind_name, network=network)
+    LOGGER.info(
+        "isolated_docker_started network=%s dind=%s worker_host=%s controller_host=%s",
+        network,
+        dind_name,
+        worker_docker_host,
+        controller_docker_host,
+    )
+    return worker_docker_host, controller_docker_host, network, dind_name
+
+
+def _resolve_dind_controller_endpoint(*, dind_name: str, network: str) -> str:
+    """Resolve the DinD container IP on its network so the host controller can reach it without DNS."""
+    inspect = _run(
+        [
+            "docker",
+            "inspect",
+            "-f",
+            f"{{{{range .NetworkSettings.Networks}}{{{{if eq .NetworkName \"{network}\"}}}}{{{{.IPAddress}}{{{{end}}}}}}}}",
+            dind_name,
+        ],
+        timeout=30,
+    )
+    if inspect.returncode != 0:
+        raise IsolatedDockerError(
+            "isolated_docker_endpoint_resolve_failed",
+            detail=(inspect.stderr or inspect.stdout or "docker inspect failed").strip(),
+        )
+    ip = (inspect.stdout or "").strip()
+    if not ip:
+        raise IsolatedDockerError(
+            "isolated_docker_endpoint_resolve_failed",
+            detail=f"dind={dind_name} network={network} no ip",
+        )
+    return f"tcp://{ip}:2375"
 
 
 def stop_isolated_daemon(*, network: str, dind_name: str) -> None:
