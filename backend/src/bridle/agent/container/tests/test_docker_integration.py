@@ -300,9 +300,18 @@ def test_container_chmods_rw_mount_roots():
         results.append(_poison_mount_root(mount_path))
     report = {{"uid": os.getuid(), "gid": os.getgid(), "results": results}}
     print(REPORT_PREFIX + json.dumps(report), flush=True)
-    project = next(item for item in results if item["path"] == "/workspace/project")
-    assert project.get("rc") == 0, project
-    assert project.get("after_mode") == 0, project
+    try:
+        project = next(item for item in results if item["path"] == "/workspace/project")
+        assert project.get("rc") == 0, project
+        assert project.get("after_mode") == 0, project
+    finally:
+        for item in results:
+            before = item.get("before_mode")
+            if before is not None:
+                try:
+                    os.chmod(item["path"], int(before))
+                except OSError:
+                    pass
 """.strip()
         + "\n",
         encoding="utf-8",
