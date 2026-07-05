@@ -206,6 +206,13 @@ def _run_task_at_layout(
     cwd = project_dir if project_dir.is_dir() else layout.slot_root
     cwd.mkdir(parents=True, exist_ok=True)
 
+    cached_candidate_rel = candidate_rel
+    if cached_candidate_rel is None:
+        try:
+            cached_candidate_rel = read_lease(layout).candidate_rel
+        except (OSError, CandidatePathError):
+            cached_candidate_rel = None
+
     baseline_before = _scan_tree(baseline_dir)
     mocks_before = _scan_tree(mocks_dir)
     project_before = _scan_tree(project_dir)
@@ -304,9 +311,9 @@ def _run_task_at_layout(
         "baseline_hashes": baseline_before,
         "candidate_hashes": project_after,
         "out_of_scope_changes": out_of_scope,
-        "candidate_rel": candidate_rel or (read_lease(layout).candidate_rel if read_lease(layout) else None),
+        "candidate_rel": cached_candidate_rel,
     }
-    return _emit_task_result(layout, manifest, int(exit_code), candidate_rel=candidate_rel)
+    return _emit_task_result(layout, manifest, int(exit_code), candidate_rel=cached_candidate_rel)
 
 
 def _write_failure(
@@ -344,9 +351,6 @@ def _emit_task_result(
     candidate_rel: str | None = None,
 ) -> int:
     run_id = os.environ.get("BRIDLE_RUN_ID", "").strip()
-    if not candidate_rel:
-        lease = read_lease(layout)
-        candidate_rel = lease.candidate_rel if lease else None
     envelope = build_control_envelope(
         manifest=manifest,
         run_id=run_id,
