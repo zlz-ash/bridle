@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 CRITICAL_TEST_CLASS = "TestDockerCandidateIntegration"
 CRITICAL_TEST_SPEC: dict[str, str] = {
     "link_attack": "test_real_docker_recovers_after_link_attack_in_slot",
@@ -125,20 +127,28 @@ def pytest_runtest_setup(item: Any) -> None:
     _write_event("started", test_key, data={"test_node_id": node_id})
 
 
-def pytest_runtest_makereport(item: Any, report: Any) -> None:
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: Any, call: Any):
+    """Record finished event with outcome when the call phase completes.
+
+    Uses hookwrapper to obtain the TestReport produced by inner hookimpls,
+    since the hookspec only passes (item, call) — the report is the result.
+    """
+    outcome = yield
+    if getattr(call, "when", "") != "call":
+        return
     node_id = getattr(item, "nodeid", "")
     test_key = _match_test_key(node_id)
     if test_key is None:
         return
-    if getattr(report, "when", "") != "call":
-        return
-    outcome = getattr(report, "outcome", "unknown")
+    report = outcome.get_result()
+    result_outcome = getattr(report, "outcome", "unknown")
     _write_event(
         "finished",
         test_key,
         data={
             "test_node_id": node_id,
-            "outcome": outcome,
+            "outcome": result_outcome,
             "longrepr": str(getattr(report, "longrepr", ""))[:4000],
         },
     )
