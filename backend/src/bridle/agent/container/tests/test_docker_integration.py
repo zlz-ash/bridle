@@ -534,23 +534,36 @@ def _run_backend_case(
     write_set: list[str],
     replace_container: bool = False,
 ) -> dict:
-    return backend.run_tests_in_candidate(
-        candidate_root=candidate,
-        module_root=module_root,
-        candidate_rel=rel,
-        run_id=run_id,
-        node_id=f"node-{run_id}",
-        module_id=module_id,
-        boundary_fingerprint=boundary_fp,
-        test_commands=test_commands,
-        write_set=write_set,
-        test_entity_id=f"node-{run_id}",
-        map_seq=1,
-        image=image,
-        image_version=image_version,
-        timeout_seconds=180,
-        replace_container=replace_container,
-    )
+    from bridle.agent.container.backend import AgentContainerError
+    try:
+        return backend.run_tests_in_candidate(
+            candidate_root=candidate,
+            module_root=module_root,
+            candidate_rel=rel,
+            run_id=run_id,
+            node_id=f"node-{run_id}",
+            module_id=module_id,
+            boundary_fingerprint=boundary_fp,
+            test_commands=test_commands,
+            write_set=write_set,
+            test_entity_id=f"node-{run_id}",
+            map_seq=1,
+            image=image,
+            image_version=image_version,
+            timeout_seconds=180,
+            replace_container=replace_container,
+        )
+    except AgentContainerError as exc:
+        detail = exc.detail or {}
+        stdout = str(detail.get("stdout") or "")
+        stderr = str(detail.get("stderr") or "")
+        if stdout or stderr:
+            print(f"BRIDLE_BACKEND_DIAGNOSTICS:run_id={run_id} error={exc.error_code}")
+            for line in stdout.splitlines():
+                print(f"BRIDLE_BACKEND_STDOUT:{line}")
+            for line in stderr.splitlines():
+                print(f"BRIDLE_BACKEND_STDERR:{line}")
+        raise
 
 
 def _module_request(
