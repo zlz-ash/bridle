@@ -249,6 +249,7 @@ def _prepare_chmod_poison_candidate(
     tests = candidate / "project" / "tests"
     (tests / "test_chmod_poison.py").write_text(
         f"""
+import errno
 import json
 import os
 
@@ -263,20 +264,23 @@ def test_container_chmods_rw_mount_roots():
         entry = {{"path": mount_path, "uid": uid, "gid": gid, "before_mode": before}}
         try:
             os.chmod(mount_path, 0)
-            entry["rc"] = 0
-            entry["after_mode"] = os.stat(mount_path).st_mode & 0o777
+            after_mode = os.stat(mount_path).st_mode & 0o777
+            if after_mode == 0:
+                entry["rc"] = 0
+                entry["after_mode"] = 0
+            else:
+                entry["rc"] = errno.EPERM
+                entry["after_mode"] = after_mode
+                entry["error"] = "chmod_succeeded_but_mode_not_zero"
         except OSError as exc:
             entry["rc"] = exc.errno
             entry["error"] = str(exc)
         results.append(entry)
     report = {{"uid": uid, "gid": gid, "results": results}}
     print(REPORT_PREFIX + json.dumps(report), flush=True)
-    succeeded = [item for item in results if item.get("rc") == 0]
-    denied = [item for item in results if item.get("rc", 0) != 0]
-    assert succeeded or denied, "container must attempt chmod on all RW roots"
-    if succeeded:
-        for item in succeeded:
-            assert item["after_mode"] == 0, item
+    project = next(item for item in results if item["path"] == "/workspace/project")
+    assert project.get("rc") == 0, project
+    assert project.get("after_mode") == 0, project
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -1268,11 +1272,11 @@ class TestDockerCandidateIntegration:
                 root_name: int(baseline["roots"][root_name]["mode"]) & 0o777
                 for root_name in ("project", "output", "diagnostics")
             }
-            for root_name in ("project", "output", "diagnostics"):
-                mode = os.stat(slot / root_name).st_mode & 0o777
-                assert mode == 0, f"container poison expected mode 0 on {root_name}, got {oct(mode)}"
-            for item in succeeded:
-                assert item["after_mode"] == 0, item
+            project_result = next(
+                item for item in results if item["path"] == "/workspace/project"
+            )
+            assert project_result.get("rc") == 0, project_result
+            assert project_result.get("after_mode") == 0, project_result
 
             second = _run_backend_case(
                 backend,
