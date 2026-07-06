@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import fnmatch
 import os
-import shlex
 import time
 import urllib.parse
 import urllib.request
@@ -14,6 +13,7 @@ from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.agent.tools.executor import Executor
 from bridle.agent.tools.proposal_path_validator import ProposalPathValidator
 from bridle.agent.tools.tdd_paths import is_test_path
+from bridle.agent.tools.test_command_policy import parse_command_argv
 from bridle.agent.tools.unified_diff import ValidationResult
 from bridle.logging.jsonl import log_event
 from bridle.observability import get_observability
@@ -747,10 +747,11 @@ def sandbox_results_to_command_results(result: dict[str, Any]) -> list[dict[str,
 
 
 def _is_python_test_command(command: str) -> bool:
-    tokens = shlex.split(command.strip(), posix=False)
-    if not tokens:
+    try:
+        parsed = parse_command_argv(command)
+    except ValueError:
         return False
-    return tokens[0].lower() in {"python", "pytest"}
+    return parsed.argv[0].lower() in {"python", "pytest"}
 
 
 def _completed(payload: dict) -> dict[str, Any]:

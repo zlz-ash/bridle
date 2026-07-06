@@ -14,6 +14,8 @@ bridle serve --workspace D:\Bridle-workspace
 
 Default API: `http://127.0.0.1:8900/api/v1`.
 
+`bridle serve` binds to `127.0.0.1` only and runs with `reload=False`. The API has no auth/authorization/CORS/transport contract, so non-loopback binds (`0.0.0.0`, `::`, private IPs, public hostnames) are refused with a non-zero exit code. Front the API with a reverse proxy that enforces auth before exposing it on a network.
+
 Health check:
 
 ```powershell

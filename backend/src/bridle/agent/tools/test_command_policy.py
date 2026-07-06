@@ -1,7 +1,13 @@
-"""TestCommandPolicy — validate shell commands in plan tests."""
+"""TestCommandPolicy — validate shell commands in plan tests.
+
+The policy is the single source of truth for what argv shape is allowed.
+Both validation and execution go through :func:`parse_command_argv`, so the
+executor never re-interprets a raw string with shell semantics.
+"""
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 
 FORBIDDEN_COMMANDS = frozenset({
     "rm", "del", "rmdir", "remove-item",
@@ -11,7 +17,53 @@ FORBIDDEN_COMMANDS = frozenset({
 
 FORBIDDEN_GIT_SUBCOMMANDS = frozenset({"reset", "checkout", "clean"})
 
-SHELL_OPERATORS = (";", "&&", "||", "|", ">", ">>", "<", "$(", "`")
+# Substrings that — if present in the raw command string — would let a shell
+# run a second command, redirect I/O, or expand a subcommand. Validated
+# against the raw string *before* any argv parsing, so we never rely on shlex
+# quirks to neutralise them. ``&`` (single) and newlines are included because
+# they are real command separators in cmd.exe / POSIX shells.
+SHELL_META_SUBSTRINGS: tuple[str, ...] = (
+    ";", "&&", "||", "|", ">", ">>", "<", "$(", "`", "&", "\n", "\r",
+)
+
+
+@dataclass(frozen=True)
+class ParsedCommand:
+    """Structured argv shared by validation and execution."""
+
+    raw: str
+    argv: list[str]
+
+
+def parse_command_argv(command: str) -> ParsedCommand:
+    """Parse a command string into structured argv exactly once.
+
+    Raises ``ValueError`` if the command is empty or cannot be tokenised.
+    The same parser is used by :class:`TestCommandPolicy` and
+    :class:`bridle.agent.tools.executor.Executor`, so executor and validator
+    share one argv source of truth.
+
+    ``shlex`` is used with ``posix=False`` so Windows backslash paths are
+    preserved verbatim (``posix=True`` would treat ``\\`` as an escape and
+    mangle ``C:\\foo``). The trade-off is that ``posix=False`` keeps
+    surrounding quotes as literal characters in each token, so we strip one
+    layer of matching surrounding quotes here — both the policy and the
+    executor see clean argv.
+    """
+    cmd = str(command).strip()
+    if not cmd:
+        raise ValueError("Empty test command")
+    raw_argv = shlex.split(cmd, posix=False)
+    if not raw_argv:
+        raise ValueError("Empty test command")
+    argv = [_strip_surrounding_quotes(tok) for tok in raw_argv]
+    return ParsedCommand(raw=cmd, argv=argv)
+
+
+def _strip_surrounding_quotes(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ('"', "'"):
+        return token[1:-1]
+    return token
 
 
 class TestCommandPolicy:
@@ -22,7 +74,7 @@ class TestCommandPolicy:
         cmd = str(command).strip()
         errors: list[str] = []
 
-        for op in SHELL_OPERATORS:
+        for op in SHELL_META_SUBSTRINGS:
             if op in cmd:
                 errors.append(f"Shell operator '{op}' is not allowed")
                 break
@@ -34,14 +86,11 @@ class TestCommandPolicy:
         errors.extend(TestCommandPolicy._validate_paths(cmd))
 
         try:
-            tokens = shlex.split(cmd, posix=False)
+            parsed = parse_command_argv(cmd)
         except ValueError as exc:
             return errors + [f"Cannot parse command: {exc}"]
 
-        if not tokens:
-            return errors + ["Empty test command"]
-
-        errors.extend(TestCommandPolicy._validate_executable(tokens))
+        errors.extend(TestCommandPolicy._validate_executable(parsed.argv))
 
         if "requires_network" not in lowered and any(
             net in lowered for net in ("curl", "wget", "http://", "https://")
