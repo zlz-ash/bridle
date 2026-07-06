@@ -9,14 +9,15 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from bridle import __version__
 from bridle.api.errors import BridleError
+from bridle.events.bus import EventBus
+from bridle.features.project_map.controller import router as project_map_router
+from bridle.features.projects.controller import router as projects_router
+from bridle.features.sessions.controller import router as project_sessions_router
 from bridle.features.system.events_controller import router as events_router
 from bridle.features.system.health_controller import router as health_router
 from bridle.features.workspace.files_controller import router as workspace_files_router
-from bridle.features.projects.controller import router as projects_router
-from bridle.features.sessions.controller import router as project_sessions_router
-from bridle.features.project_map.controller import router as project_map_router
-from bridle.events.bus import EventBus
 
 logger = logging.getLogger("bridle")
 
@@ -47,7 +48,7 @@ def create_app(test_db=None, test_workspace: str | None = None, container_runner
         """Run the application lifetime."""
         yield
 
-    app = FastAPI(title="Bridle", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Bridle", version=__version__, lifespan=lifespan)
     app.state.started_at = time.time()
     EventBus._reset_instance()
 

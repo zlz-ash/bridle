@@ -3,13 +3,15 @@
 All test paths are derived from backend/.test-workspaces/<test-name>/.
 Default tests use SQLite :memory: to avoid file I/O issues.
 Only restart-recovery tests use file-based SQLite under the test workspace.
+
+Workspace creation, identity registration and ACL-baseline teardown are
+delegated to ``_workspace_lifecycle`` so the container conftest shares the
+same zero-leftover contract.
 """
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import logging
-import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
@@ -23,75 +25,14 @@ from sqlalchemy.pool import StaticPool
 import bridle.models  # noqa: F401 — register all ORM tables
 from bridle.config import set_workspace
 from bridle.models.base import Base
+from tests._workspace_lifecycle import (
+    create_workspace,
+    teardown_workspace,
+)
 
 TEST_WORKSPACES_ROOT = Path(__file__).resolve().parent.parent / ".test-workspaces"
 
 logger = logging.getLogger("bridle.test")
-
-
-class _SecurityAttributes(ctypes.Structure):
-    _fields_ = [
-        ("nLength", ctypes.wintypes.DWORD),
-        ("lpSecurityDescriptor", ctypes.wintypes.LPVOID),
-        ("bInheritHandle", ctypes.wintypes.BOOL),
-    ]
-
-
-def _mkdir_test_workspace(path: Path) -> None:
-    """Create a test workspace whose files can be deleted on Windows."""
-    if os.name != "nt":
-        path.mkdir(parents=True, exist_ok=True)
-        return
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        return
-
-    advapi32 = ctypes.WinDLL("Advapi32.dll", use_last_error=True)
-    kernel32 = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
-    security_descriptor = ctypes.wintypes.LPVOID()
-    descriptor_size = ctypes.wintypes.ULONG()
-
-    convert = advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW
-    convert.argtypes = [
-        ctypes.wintypes.LPCWSTR,
-        ctypes.wintypes.DWORD,
-        ctypes.POINTER(ctypes.wintypes.LPVOID),
-        ctypes.POINTER(ctypes.wintypes.ULONG),
-    ]
-    convert.restype = ctypes.wintypes.BOOL
-
-    create_directory = kernel32.CreateDirectoryW
-    create_directory.argtypes = [
-        ctypes.wintypes.LPCWSTR,
-        ctypes.POINTER(_SecurityAttributes),
-    ]
-    create_directory.restype = ctypes.wintypes.BOOL
-
-    local_free = kernel32.LocalFree
-    local_free.argtypes = [ctypes.wintypes.HLOCAL]
-    local_free.restype = ctypes.wintypes.HLOCAL
-
-    # Test workspaces live under a sandboxed project tree that can lack delete
-    # rights. Give this per-test directory an inheritable DACL so remove-patch
-    # tests exercise real deletion instead of being blocked by host ACLs.
-    sddl = "D:P(A;OICI;FA;;;WD)"
-    if not convert(sddl, 1, ctypes.byref(security_descriptor), ctypes.byref(descriptor_size)):
-        raise ctypes.WinError(ctypes.get_last_error())
-
-    try:
-        security_attributes = _SecurityAttributes(
-            ctypes.sizeof(_SecurityAttributes),
-            security_descriptor,
-            False,
-        )
-        if not create_directory(str(path), ctypes.byref(security_attributes)):
-            error = ctypes.get_last_error()
-            if not path.exists():
-                raise ctypes.WinError(error)
-    finally:
-        if security_descriptor:
-            local_free(security_descriptor)
 
 
 @pytest.fixture(scope="session")
@@ -114,24 +55,14 @@ def _reset_global_workspace() -> None:
 def test_workspace(request) -> Path:
     """Provide a unique workspace directory for each test function.
 
-    Located under backend/.test-workspaces/<sanitized-test-name>/.
-    Calls set_workspace() so that get_config() returns paths anchored here.
-    Sets up a minimal git repo for tests that exercise git-aware workspace code.
+    Located under backend/.test-workspaces/<sanitized-test-name>/. Calls
+    set_workspace() so that get_config() returns paths anchored here.
+    Sets up a minimal git repo for tests that exercise git-aware workspace
+    code. Teardown verifies identity, restores the ACL baseline and deletes
+    the directory; cleanup failure fails the test with a diagnostic while
+    preserving the main test result.
     """
     test_name = request.node.name
-    safe_name = test_name
-    for char in '<>:"|?*':
-        safe_name = safe_name.replace(char, "_")
-    safe_name = (
-        safe_name.replace("[", "_")
-        .replace("]", "_")
-        .replace("/", "_")
-        .replace("\\", "_")
-        .replace(":", "_")
-    )
-    ws = TEST_WORKSPACES_ROOT / f"{safe_name[:80]}-{uuid4().hex[:8]}"
-    _mkdir_test_workspace(ws)
-
     needs_custom_git = (
         request.node.path.name == "test_git_workspace_policy.py"
         or test_name in {
@@ -139,16 +70,19 @@ def test_workspace(request) -> Path:
             "test_refuses_non_git_workspace",
         }
     )
-    if not needs_custom_git:
-        git_dir = ws / ".git" / "refs" / "heads"
-        git_dir.mkdir(parents=True, exist_ok=True)
-        (ws / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-        (git_dir / "main").write_text("a" * 40 + "\n", encoding="utf-8")
-
+    ws, identity = create_workspace(
+        test_name,
+        TEST_WORKSPACES_ROOT,
+        with_git=not needs_custom_git,
+    )
     set_workspace(ws)
-
     logger.debug("Test workspace created: %s", ws)
-    return ws
+    yield ws
+    cleanup_error = teardown_workspace(ws, identity)
+    if cleanup_error:
+        raise AssertionError(
+            f"workspace cleanup failed for {ws}: {cleanup_error}"
+        )
 
 
 @pytest.fixture

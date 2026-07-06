@@ -1,14 +1,24 @@
-"""Shared pytest hooks for container integration tests."""
+"""Shared pytest hooks for container integration tests.
+
+The workspace fixture here is a twin of the one in ``backend/tests/
+conftest.py`` because pytest's ``confcutdir`` excludes the parent conftest
+from container tests. Both delegate to ``_workspace_lifecycle`` so they
+share the same creation, identity-registration and ACL-baseline teardown,
+and the same zero-leftover contract on Windows and POSIX.
+"""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
 from bridle.config import set_workspace
+from tests._workspace_lifecycle import (
+    create_workspace,
+    teardown_workspace,
+)
 
 from .docker_evidence import (
     begin_docker_evidence_session,
@@ -27,33 +37,25 @@ BOUNDARY_TEST_FILE = "test_dind_boundary_isolation.py"
 logger = logging.getLogger("bridle.test")
 
 
-def _mkdir_test_workspace(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
 @pytest.fixture
 def test_workspace(request: pytest.FixtureRequest) -> Path:
-    """Workspace fixture for docker integration tests when confcutdir excludes backend/conftest.py."""
+    """Workspace fixture for docker integration tests.
+
+    confcutdir excludes ``backend/tests/conftest.py``, so this fixture
+    re-creates the same lifecycle via ``_workspace_lifecycle``. Teardown
+    verifies identity, restores the ACL baseline and deletes; cleanup
+    failure fails the test with a diagnostic.
+    """
     test_name = request.node.name
-    safe_name = test_name
-    for char in '<>:"|?*':
-        safe_name = safe_name.replace(char, "_")
-    safe_name = (
-        safe_name.replace("[", "_")
-        .replace("]", "_")
-        .replace("/", "_")
-        .replace("\\", "_")
-        .replace(":", "_")
-    )
-    workspace = TEST_WORKSPACES_ROOT / f"{safe_name[:80]}-{uuid4().hex[:8]}"
-    _mkdir_test_workspace(workspace)
-    git_dir = workspace / ".git" / "refs" / "heads"
-    git_dir.mkdir(parents=True, exist_ok=True)
-    (workspace / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-    (git_dir / "main").write_text("a" * 40 + "\n", encoding="utf-8")
-    set_workspace(workspace)
-    logger.debug("container test workspace created: %s", workspace)
-    return workspace
+    ws, identity = create_workspace(test_name, TEST_WORKSPACES_ROOT, with_git=True)
+    set_workspace(ws)
+    logger.debug("container test workspace created: %s", ws)
+    yield ws
+    cleanup_error = teardown_workspace(ws, identity)
+    if cleanup_error:
+        raise AssertionError(
+            f"workspace cleanup failed for {ws}: {cleanup_error}"
+        )
 
 
 def _gate_active() -> bool:

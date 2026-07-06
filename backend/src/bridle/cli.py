@@ -3,14 +3,49 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import json
+import ipaddress
 import os
+import socket
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
 import typer
 from dotenv import load_dotenv
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _is_loopback_host(host: str) -> tuple[bool, str]:
+    """Classify a bind host. Returns ``(is_loopback, reason)``.
+
+    The API has no auth/authorization contract, so non-loopback binds are
+    fail-closed. ``0.0.0.0`` / ``::`` and any host that resolves to a
+    non-loopback address are rejected.
+    """
+    h = host.strip().lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h in _LOOPBACK_HOSTS:
+        return True, "loopback literal"
+    try:
+        ip = ipaddress.ip_address(h)
+        return ip.is_loopback, f"ip={ip} is_loopback={ip.is_loopback}"
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(h, None)
+    except socket.gaierror as exc:
+        return False, f"unresolvable host {host!r}: {exc}"
+    for _fam, _type, _proto, _canon, sockaddr in infos:
+        addr = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return False, f"non-IP resolved address {addr!r}"
+        if not ip.is_loopback:
+            return False, f"resolves to non-loopback {ip}"
+    return True, "resolved to loopback only"
 
 
 def _load_env_files(workspace: Path) -> list[Path]:
@@ -65,26 +100,43 @@ def _run_asyncio_blocking(coro_factory: Callable[[], Coroutine[Any, Any, None]])
 
 @app.command()
 def serve(
-    workspace: Path = typer.Option(
+    workspace: Path = typer.Option(  # noqa: B008
         ..., "--workspace", "-w",
         help="Path to the workspace directory (required)",
         exists=True, file_okay=False, resolve_path=True,
     ),
-    host: str = "0.0.0.0",
-    port: int = 8900,
+    host: str = typer.Option(  # noqa: B008
+        "127.0.0.1",
+        "--host",
+        help="Bind host. Defaults to loopback; non-loopback is rejected without a complete auth contract.",
+    ),
+    port: int = typer.Option(8900, "--port", help="Bind port."),  # noqa: B008
     no_auto_git_init: bool = typer.Option(
         False,
         "--no-auto-git-init",
-        help="涓嶈嚜鍔ㄦ妸 workspace 鍒濆鍖栦负 git 浠撳簱锛堥珮绾х敤鎴凤級",
+        help="不自动把 workspace 初始化为 git 仓库（高级用户）",
     ),
-    reload: bool = typer.Option(
-        True,
+    reload: bool = typer.Option(  # noqa: B008
+        False,
         "--reload/--no-reload",
-        help="Enable uvicorn reload watcher for dev runs.",
+        help="Enable uvicorn reload watcher. Defaults to False; reload forks a worker with no module globals.",
     ),
 ) -> None:
     """Start the API server anchored to a workspace."""
     from bridle.config import set_workspace
+
+    is_loopback, reason = _is_loopback_host(host)
+    typer.echo(f"Bind decision: host={host!r} loopback={is_loopback} reason={reason}")
+    if not is_loopback:
+        typer.echo(
+            f"Refusing non-loopback bind {host!r}: {reason}. "
+            "Bridle API has no auth/authorization/CORS/transport contract; "
+            "exposing it would let any network peer read the workspace and "
+            "trigger state changes. Bind to 127.0.0.1 / ::1 / localhost, or "
+            "front the API with a reverse proxy that enforces auth.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
 
     set_workspace(workspace)
     # uvicorn reload mode forks a worker that does NOT inherit our module globals;
@@ -101,7 +153,7 @@ def serve(
         try:
             GitWorkspaceInitializer(workspace, log=typer.echo).ensure_repo()
         except GitWorkspaceInitError as exc:
-            typer.echo(f"鍚姩澶辫触 [{exc.code}]: {exc}", err=True)
+            typer.echo(f"启动失败 [{exc.code}]: {exc}", err=True)
             raise typer.Exit(code=2) from exc
 
     loaded = _load_env_files(workspace)
@@ -109,10 +161,10 @@ def serve(
         typer.echo(f"Loaded env: {env_path}")
 
     # Ensure tables exist in the workspace SQLite DB (no alembic in repo yet).
+    import bridle.database as _db_mod
     import bridle.models  # noqa: F401 -register all ORM tables
     from bridle.database import _ensure_engine
     from bridle.models.base import Base
-    import bridle.database as _db_mod
 
     async def _create_tables() -> None:
         _ensure_engine()
@@ -125,6 +177,7 @@ def serve(
     if os.getenv("BRIDLE_AGENT_PROVIDER", "fake") != "fake":
         typer.echo(f"Provider: {os.getenv('BRIDLE_AGENT_PROVIDER')}  Model: {os.getenv('BRIDLE_AGENT_MODEL', '?')}")
 
+    typer.echo(f"Listening on {host}:{port} (loopback only, reload={reload})")
     import uvicorn
 
     uvicorn.run("bridle.app:create_app", host=host, port=port, reload=reload, factory=True)
