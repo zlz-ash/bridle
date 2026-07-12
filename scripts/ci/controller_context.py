@@ -49,6 +49,8 @@ class ControllerExecutionContext:
     controller_ipc_dir: Path | None = None
     issued_it_run_id: str | None = None
     sentinel_by_handle: dict[str, Any] = field(default_factory=dict)
+    verified_sentinel_by_request: dict[str, Any] = field(default_factory=dict)
+    consumed_sentinel_verification_requests: set[str] = field(default_factory=set)
     handled_request_ids: set[str] = field(default_factory=set)
     lease_registry: Any = field(default_factory=_new_lease_registry)
     isolated_docker_host: str | None = None

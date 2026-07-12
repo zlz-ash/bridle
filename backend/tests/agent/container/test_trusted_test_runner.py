@@ -283,6 +283,8 @@ class _StubContext:
     candidate_root: Path
     controller_ipc_dir: Path | None = None
     sentinel_by_handle: dict[str, Any] = field(default_factory=dict)
+    verified_sentinel_by_request: dict[str, Any] = field(default_factory=dict)
+    consumed_sentinel_verification_requests: set[str] = field(default_factory=set)
     handled_request_ids: set[str] = field(default_factory=set)
     lease_id: str | None = None
     issued_it_run_id: str | None = None
@@ -307,12 +309,12 @@ def test_register_sentinel_request_rejects_replayed_nonce(tmp_path: Path) -> Non
     target.write_text("secret\n", encoding="utf-8")
     ipc_dir = tmp_path / "ipc"
     ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
-    payload = {"request_id": "req-fixed-001", "candidate_relative": "outside.txt"}
+    payload = {"request_id": "1111111111111111", "candidate_relative": "outside.txt"}
     handle = controller.register_sentinel_request(
         payload, ctx=ctx, trusted_scripts=REPO_ROOT / "scripts/ci"
     )
     assert handle.startswith("sent-")
-    assert "req-fixed-001" in ctx.handled_request_ids
+    assert "1111111111111111" in ctx.handled_request_ids
     with pytest.raises(RuntimeError, match="sentinel_request_replayed"):
         controller.register_sentinel_request(
             payload, ctx=ctx, trusted_scripts=REPO_ROOT / "scripts/ci"
@@ -327,7 +329,7 @@ def test_register_sentinel_request_accepts_container_path(tmp_path: Path) -> Non
     target.write_text("secret\n", encoding="utf-8")
     ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=None)
     payload = {
-        "request_id": "req-container-001",
+        "request_id": "2222222222222222",
         "container_path": "/bridle-candidate/outside.txt",
     }
     handle = controller.register_sentinel_request(
@@ -346,21 +348,200 @@ def test_sentinel_ack_is_scoped_to_request_id(tmp_path: Path) -> None:
     ipc_dir = tmp_path / "ipc"
     ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
     controller.register_sentinel_request(
-        {"request_id": "req-ack-001", "candidate_relative": "outside.txt"},
+        {"request_id": "3333333333333333", "candidate_relative": "outside.txt"},
         ctx=ctx,
         trusted_scripts=REPO_ROOT / "scripts/ci",
     )
     ack_dir = ipc_dir / "sentinel-acks"
-    assert (ack_dir / "req-ack-001.json").is_file()
-    stale_ack = ack_dir / "req-stale-999.json"
+    assert (ack_dir / "3333333333333333.json").is_file()
+    stale_ack = ack_dir / "4444444444444444.json"
     stale_ack.write_text(
         json.dumps(
-            {"status": "registered", "handle": "sent-stale", "request_id": "req-stale-999"},
+            {"status": "registered", "handle": "sent-stale", "request_id": "4444444444444444"},
             sort_keys=True,
         ),
         encoding="utf-8",
     )
-    fresh = controller.wait_for_sentinel_ack(ipc_dir, "req-ack-001", timeout=1.0)
-    assert fresh["request_id"] == "req-ack-001"
+    fresh = controller.wait_for_sentinel_ack(ipc_dir, "3333333333333333", timeout=1.0)
+    assert fresh["request_id"] == "3333333333333333"
     with pytest.raises(TimeoutError, match="sentinel_ack_timeout"):
-        controller.wait_for_sentinel_ack(ipc_dir, "req-new-002", timeout=0.5)
+        controller.wait_for_sentinel_ack(ipc_dir, "5555555555555555", timeout=0.5)
+
+
+def test_live_sentinel_verification_survives_fixture_cleanup(tmp_path: Path) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_live_verify")
+    candidate = tmp_path / "candidate"
+    target = candidate / "backend/.test-workspaces/ws/outside-link-secret.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret\n", encoding="utf-8")
+    ipc_dir = tmp_path / "ipc"
+    ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
+    handle = controller.register_sentinel_request(
+        {
+            "request_id": "6666666666666666",
+            "candidate_relative": "backend/.test-workspaces/ws/outside-link-secret.txt",
+        },
+        ctx=ctx,
+        trusted_scripts=REPO_ROOT / "scripts/ci",
+    )
+    payload = {
+        "controller_request_id": "7777777777777777",
+        "test_key": "link_attack",
+        "status": "passed",
+        "primary": {"sentinel_handle": handle},
+    }
+
+    controller.handle_controller_line(
+        "pytest-node " + controller.CRITICAL_EVIDENCE_PREFIX + json.dumps(payload),
+        ctx=ctx,
+        trusted_scripts=REPO_ROOT / "scripts/ci",
+    )
+
+    ack_path = ipc_dir / "critical-evidence-acks/7777777777777777.json"
+    ack = json.loads(ack_path.read_text(encoding="utf-8"))
+    assert ack == {
+        "request_id": "7777777777777777",
+        "sentinel_handle": handle,
+        "status": "verified",
+    }
+    target.unlink()
+    proof = controller.consume_live_sentinel_verification(payload, ctx=ctx)
+    assert proof["before"]["canonical_path"] == str(target.resolve())
+    assert proof["after"]["content_digest"] == proof["before"]["content_digest"]
+
+
+def test_live_sentinel_verification_is_fail_closed(tmp_path: Path) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_live_missing")
+    ctx = _StubContext(candidate_root=tmp_path, controller_ipc_dir=tmp_path / "ipc")
+    payload = {
+        "controller_request_id": "8888888888888888",
+        "test_key": "link_attack",
+        "status": "passed",
+        "primary": {"sentinel_handle": "sent-missing"},
+    }
+
+    with pytest.raises(RuntimeError, match="sentinel_live_verification_missing"):
+        controller.consume_live_sentinel_verification(payload, ctx=ctx)
+
+
+def test_live_sentinel_verification_rejects_mutation(tmp_path: Path) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_live_mutation")
+    candidate = tmp_path / "candidate"
+    target = candidate / "outside-link-secret.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret\n", encoding="utf-8")
+    ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=tmp_path / "ipc")
+    handle = controller.register_sentinel_request(
+        {"request_id": "9999999999999999", "candidate_relative": target.name},
+        ctx=ctx,
+        trusted_scripts=REPO_ROOT / "scripts/ci",
+    )
+    target.write_text("tampered\n", encoding="utf-8")
+    payload = {
+        "controller_request_id": "aaaaaaaaaaaaaaaa",
+        "test_key": "link_attack",
+        "status": "passed",
+        "primary": {"sentinel_handle": handle},
+    }
+
+    with pytest.raises(Exception) as caught:
+        controller.handle_controller_line(
+            controller.CRITICAL_EVIDENCE_PREFIX + json.dumps(payload),
+            ctx=ctx,
+            trusted_scripts=REPO_ROOT / "scripts/ci",
+        )
+    assert getattr(caught.value, "error_code", None) == "sentinel_content_mismatch"
+    assert "aaaaaaaaaaaaaaaa" not in ctx.verified_sentinel_by_request
+
+
+def test_live_handler_ignores_embedded_observation_replay(tmp_path: Path) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_embedded_replay")
+    ctx = _StubContext(candidate_root=tmp_path, controller_ipc_dir=tmp_path / "ipc")
+    payload = {
+        "controller_request_id": "bbbbbbbbbbbbbbbb",
+        "test_key": "link_attack",
+        "status": "passed",
+        "primary": {"sentinel_handle": "sent-embedded"},
+    }
+    observation_line = json.dumps(
+        {"stdout": controller.CRITICAL_EVIDENCE_PREFIX + json.dumps(payload)},
+        sort_keys=True,
+    )
+
+    controller.handle_controller_line(
+        observation_line,
+        ctx=ctx,
+        trusted_scripts=REPO_ROOT / "scripts/ci",
+    )
+
+    assert ctx.verified_sentinel_by_request == {}
+
+
+@pytest.mark.parametrize(
+    "request_id",
+    ["../escaped", "..\\escaped", "nested/escaped", "<absolute>"],
+)
+def test_sentinel_registration_rejects_unsafe_request_id(
+    tmp_path: Path,
+    request_id: str,
+) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_registration_path")
+    candidate = tmp_path / "candidate"
+    target = candidate / "outside.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret", encoding="utf-8")
+    ipc_dir = tmp_path / "ipc"
+    ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
+    if request_id == "<absolute>":
+        request_id = str(tmp_path / "escaped-absolute")
+
+    with pytest.raises(RuntimeError, match="sentinel_request_invalid_id"):
+        controller.register_sentinel_request(
+            {"request_id": request_id, "candidate_relative": "outside.txt"},
+            ctx=ctx,
+            trusted_scripts=REPO_ROOT / "scripts/ci",
+        )
+
+    assert not (ipc_dir / "escaped.json").exists()
+    assert not (ipc_dir / "sentinel-acks/nested/escaped.json").exists()
+    assert ctx.sentinel_by_handle == {}
+
+
+@pytest.mark.parametrize(
+    "request_id",
+    ["../escaped", "..\\escaped", "nested/escaped", "<absolute>"],
+)
+def test_live_sentinel_verification_rejects_unsafe_request_id(
+    tmp_path: Path,
+    request_id: str,
+) -> None:
+    controller = _load_controller("bridle_trusted_evidence_controller_live_path")
+    candidate = tmp_path / "candidate"
+    target = candidate / "outside.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret", encoding="utf-8")
+    ipc_dir = tmp_path / "ipc"
+    ctx = _StubContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
+    if request_id == "<absolute>":
+        request_id = str(tmp_path / "escaped-absolute")
+    handle = controller.register_sentinel_request(
+        {"request_id": "cccccccccccccccc", "candidate_relative": "outside.txt"},
+        ctx=ctx,
+        trusted_scripts=REPO_ROOT / "scripts/ci",
+    )
+
+    with pytest.raises(RuntimeError, match="sentinel_live_verification_request_invalid"):
+        controller.verify_live_sentinel_evidence(
+            {
+                "controller_request_id": request_id,
+                "test_key": "link_attack",
+                "status": "passed",
+                "primary": {"sentinel_handle": handle},
+            },
+            ctx=ctx,
+            trusted_scripts=REPO_ROOT / "scripts/ci",
+        )
+
+    assert not (ipc_dir / "escaped.json").exists()
+    assert not (ipc_dir / "critical-evidence-acks/nested/escaped.json").exists()
+    assert ctx.verified_sentinel_by_request == {}

@@ -164,6 +164,74 @@ def test_worker_sandbox_uses_docker_for_main_and_probe(monkeypatch: pytest.Monke
     assert worker_sandbox.use_docker_sandbox(public_env={"BRIDLE_ISOLATION_PROBE": "1"}) is True
 
 
+def test_worker_sandbox_mounts_critical_evidence_acks_read_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_sandbox = _load("bridle_worker_sandbox_critical_ack", "worker_sandbox.py")
+    captured: dict[str, list[str]] = {}
+
+    class _Input:
+        def write(self, _payload: bytes) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class _Process:
+        stdin = _Input()
+
+    def _popen(command: list[str], **_kwargs: object) -> _Process:
+        captured["command"] = command
+        return _Process()
+
+    capture = type(
+        "Capture",
+        (),
+        {
+            "returncode": 0,
+            "stdout": b"",
+            "stderr": b"",
+            "timed_out": False,
+        },
+    )()
+    sandbox_subprocess = type(
+        "SandboxSubprocess",
+        (),
+        {
+            "PIPE": subprocess.PIPE,
+            "Popen": staticmethod(_popen),
+        },
+    )()
+    monkeypatch.setattr(worker_sandbox, "subprocess", sandbox_subprocess)
+    monkeypatch.setattr(worker_sandbox, "_capture_process", lambda *_args, **_kwargs: capture)
+    paths = worker_sandbox.SandboxPaths(
+        candidate_root=tmp_path / "candidate",
+        trusted_config=tmp_path / "trusted-config/pyproject.toml",
+        trusted_scripts=tmp_path / "trusted-scripts",
+        controller_ipc=tmp_path / "controller-ipc",
+    )
+
+    worker_sandbox._spawn_docker_worker(
+        request_payload="{}",
+        paths=paths,
+        timeout=1,
+        public_env={},
+        on_stdout_line=None,
+        isolated=None,
+    )
+
+    command = captured["command"]
+    assert any(
+        item.endswith(":/controller-ipc/critical-evidence-acks:ro")
+        for item in command
+    )
+    assert not any(
+        item.endswith(":/controller-ipc/critical-evidence-acks:rw")
+        for item in command
+    )
+
+
 def test_map_public_env_for_docker_worker_uses_host_candidate_root() -> None:
     worker_sandbox = _load("bridle_worker_sandbox_env", "worker_sandbox.py")
     host = "/home/runner/work/bridle/bridle/candidate"
@@ -381,7 +449,7 @@ def test_handle_controller_line_accepts_embedded_sentinel_request(tmp_path: Path
     ipc_dir = tmp_path / "ipc"
     ipc_dir.mkdir()
     ctx = ctx_module.ControllerExecutionContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
-    request_id = "a3238f9e5ace"
+    request_id = "a3238f9e5ace0000"
     relative = "backend/.test-workspaces/ws/outside.txt"
     line = (
         "backend/tests/agent/container/test_docker_integration.py::"
@@ -410,7 +478,7 @@ def test_poll_sentinel_request_files_writes_ack(tmp_path: Path) -> None:
     requests_dir.mkdir(parents=True)
     acks_dir.mkdir(parents=True)
     ctx = ctx_module.ControllerExecutionContext(candidate_root=candidate, controller_ipc_dir=ipc_dir)
-    request_id = "e960bbcd5c16"
+    request_id = "e960bbcd5c160000"
     relative = "backend/.test-workspaces/ws/outside.txt"
     (requests_dir / f"{request_id}.json").write_text(
         json.dumps({"request_id": request_id, "candidate_relative": relative}, sort_keys=True),
