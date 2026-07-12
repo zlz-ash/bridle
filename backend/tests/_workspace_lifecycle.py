@@ -178,6 +178,21 @@ def _restore_acl_baseline(path: Path) -> str | None:
     return None
 
 
+def _restore_delete_attributes(path: Path) -> str | None:
+    """Clear file mode/attribute bits that can block recursive deletion."""
+    try:
+        if _IS_WINDOWS:
+            mode = stat.S_IREAD | stat.S_IWRITE
+            if path.is_dir():
+                mode |= stat.S_IEXEC
+            os.chmod(path, mode)
+        else:
+            os.chmod(path, _POSIX_BASELINE_MODE)
+    except OSError as exc:
+        return f"chmod delete baseline failed at {path}: {type(exc).__name__}: {exc}"
+    return None
+
+
 def _verify_identity(path: Path, baseline: WorkspaceIdentity) -> str | None:
     """Verify the path is still the same trusted object we created.
 
@@ -219,6 +234,11 @@ def _rmtree_with_acl_restore(path: Path) -> str | None:
             if isinstance(exc_obj, BaseException):
                 raise RuntimeError(f"ACL restore failed at {target}: {restore_err}") from exc_obj
             raise RuntimeError(f"ACL restore failed at {target}: {restore_err}")
+        attribute_err = _restore_delete_attributes(target_path)
+        if attribute_err:
+            if isinstance(exc_obj, BaseException):
+                raise RuntimeError(attribute_err) from exc_obj
+            raise RuntimeError(attribute_err)
         try:
             func(target)
         except OSError as retry_exc:

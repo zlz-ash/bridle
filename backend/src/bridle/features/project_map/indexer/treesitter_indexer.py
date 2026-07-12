@@ -99,6 +99,22 @@ def _unwrap_python_definition(node):
     return node
 
 
+def _is_python_overload_definition(node) -> bool:
+    """Return True for typing overload stubs; the real implementation owns the map symbol."""
+    if node.type != "decorated_definition":
+        return False
+    for child in node.children:
+        if child.type != "decorator":
+            continue
+        decorator = _text(child).strip()
+        if not decorator.startswith("@"):
+            continue
+        decorator_name = decorator[1:].split("(", 1)[0].strip()
+        if decorator_name == "overload" or decorator_name.endswith(".overload"):
+            return True
+    return False
+
+
 def _range_payload(node, language: str, qualified_name: str) -> dict[str, Any]:
     """Build the deterministic payload for one symbol entity."""
     return {
@@ -224,6 +240,8 @@ class TreeSitterIndexer:
         relations: list[dict] = []
 
         for child in root_node.children:
+            if _is_python_overload_definition(child):
+                continue
             node = _unwrap_python_definition(child)
             if node is None:
                 continue
@@ -239,6 +257,8 @@ class TreeSitterIndexer:
                 if body is None:
                     continue
                 for member in body.children:
+                    if _is_python_overload_definition(member):
+                        continue
                     member_node = _unwrap_python_definition(member)
                     if member_node is not None and member_node.type == "function_definition":
                         self._append_symbol(

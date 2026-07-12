@@ -6,6 +6,9 @@ import type {
   BoundaryOverview,
   CodeEntity,
   CodeRelation,
+  InterfaceMockArtifact,
+  ModuleCandidate,
+  ModuleInterfaceCandidate,
   SemanticAnnotation,
 } from '../api/types';
 import {
@@ -14,7 +17,7 @@ import {
   MAP_LAYER_QUERY_KEYS,
 } from './mapLayerSync';
 import { isSyncAbortError } from './mapSyncAbort';
-import { logMapSyncEvent } from './mapSyncLogger';
+import { clearMapSyncLogLifecycles, logMapSyncEvent } from './mapSyncLogger';
 import {
   computeMapSyncRetryDelay,
   createMapSyncRetryHandle,
@@ -51,6 +54,7 @@ export function useProjectMapLayers(projectId: string | null) {
     const pid = targetProjectId ?? projectIdRef.current;
     if (pid) {
       void cancelMapLayerQueries(pid);
+      clearMapSyncLogLifecycles(pid);
     }
     syncAbortRef.current?.abort();
     syncAbortRef.current = null;
@@ -315,6 +319,27 @@ export function useProjectMapLayers(projectId: string | null) {
     retry: false,
   });
 
+  const moduleCandidatesQuery = useQuery({
+    queryKey: ['project-map-module-candidates', projectId],
+    queryFn: () => projectMapApi.moduleCandidates(projectId!),
+    enabled: projectId !== null,
+    retry: false,
+  });
+
+  const moduleInterfaceCandidatesQuery = useQuery({
+    queryKey: ['project-map-module-interface-candidates', projectId],
+    queryFn: () => projectMapApi.moduleInterfaceCandidates(projectId!),
+    enabled: projectId !== null,
+    retry: false,
+  });
+
+  const interfaceMocksQuery = useQuery({
+    queryKey: ['project-map-interface-mocks', projectId],
+    queryFn: () => projectMapApi.interfaceMocks(projectId!),
+    enabled: projectId !== null,
+    retry: false,
+  });
+
   const arbitrationQuery = useQuery({
     queryKey: ['project-map-arbitration', projectId],
     queryFn: () => projectMapApi.arbitration(projectId!),
@@ -325,6 +350,9 @@ export function useProjectMapLayers(projectId: string | null) {
   const entities = entitiesQuery.data?.items ?? [];
   const blindSpots: BlindSpot[] = blindSpotsQuery.data?.items ?? [];
   const boundaries: BoundaryOverview | null = boundariesQuery.data ?? null;
+  const moduleCandidates: ModuleCandidate[] = moduleCandidatesQuery.data?.items ?? [];
+  const moduleInterfaceCandidates: ModuleInterfaceCandidate[] = moduleInterfaceCandidatesQuery.data?.items ?? [];
+  const interfaceMocks: InterfaceMockArtifact[] = interfaceMocksQuery.data?.items ?? [];
   const pendingArbitration = (arbitrationQuery.data?.items ?? []).filter((item) => item.status === 'pending');
   const activeAnnotations = (annotationsQuery.data?.items ?? []).filter((item) => item.status === 'active');
 
@@ -336,6 +364,10 @@ export function useProjectMapLayers(projectId: string | null) {
     activeAnnotations,
     blindSpots,
     boundaries,
+    moduleCandidates,
+    confirmedModuleCandidates: moduleCandidates.filter((item) => item.status === 'confirmed'),
+    moduleInterfaceCandidates,
+    interfaceMocks,
     debtNodes: boundaries?.debt_nodes ?? [],
     pendingArbitration,
     scanStatus: overviewQuery.data?.scan_status ?? null,
@@ -351,6 +383,9 @@ export function useProjectMapLayers(projectId: string | null) {
     annotationsQuery,
     blindSpotsQuery,
     boundariesQuery,
+    moduleCandidatesQuery,
+    moduleInterfaceCandidatesQuery,
+    interfaceMocksQuery,
     arbitrationQuery,
   };
 }

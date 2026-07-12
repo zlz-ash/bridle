@@ -13,7 +13,12 @@ import type {
   SemanticAnnotationPage,
   BlindSpotPage,
   BoundaryOverview,
+  InterfaceMockArtifactPage,
   MapArbitrationPage,
+  ModuleCandidate,
+  ModuleCandidatePage,
+  ModuleInterfaceCandidate,
+  ModuleInterfaceCandidatePage,
 } from './types';
 
 export type HealthResponse = {
@@ -98,6 +103,40 @@ export const projectMapApi = {
   boundaries: (projectId: string, limit = 10) =>
     apiClient.get<BoundaryOverview>(`/projects/${projectId}/map/boundaries`, {
       params: { limit },
+    }).then((response) => response.data),
+  refreshSemanticMap: (projectId: string) =>
+    apiClient.post<{
+      run_id: string;
+      status: string;
+      module_candidates: number;
+      module_interface_candidates: number;
+    }>(`/projects/${projectId}/map/semantic-map/refresh`)
+      .then((response) => response.data),
+  moduleCandidates: (projectId: string, status?: ModuleCandidate['status'], includeFiles = true) =>
+    apiClient.get<ModuleCandidatePage>(`/projects/${projectId}/map/module-candidates`, {
+      params: { status, include_files: includeFiles },
+    }).then((response) => response.data),
+  setModuleCandidateStatus: (projectId: string, candidateId: string, status: 'confirmed' | 'rejected') =>
+    apiClient.post<ModuleCandidate>(`/projects/${projectId}/map/module-candidates/${candidateId}/status`, {
+      status,
+      actor: 'human',
+    }).then((response) => response.data),
+  moduleInterfaceCandidates: (projectId: string, status?: ModuleInterfaceCandidate['status']) =>
+    apiClient.get<ModuleInterfaceCandidatePage>(`/projects/${projectId}/map/module-interface-candidates`, {
+      params: { status },
+    }).then((response) => response.data),
+  setModuleInterfaceCandidateStatus: (
+    projectId: string,
+    candidateId: string,
+    status: 'confirmed' | 'rejected',
+  ) =>
+    apiClient.post<ModuleInterfaceCandidate>(
+      `/projects/${projectId}/map/module-interface-candidates/${candidateId}/status`,
+      { status, actor: 'human' },
+    ).then((response) => response.data),
+  interfaceMocks: (projectId: string, status?: InterfaceMockArtifactPage['items'][number]['status']) =>
+    apiClient.get<InterfaceMockArtifactPage>(`/projects/${projectId}/map/interface-mocks`, {
+      params: { status },
     }).then((response) => response.data),
   arbitration: (projectId: string) =>
     apiClient.get<MapArbitrationPage>(`/projects/${projectId}/map/arbitration`)

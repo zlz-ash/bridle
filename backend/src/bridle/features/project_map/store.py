@@ -22,10 +22,11 @@ from bridle.features.project_map.map_query_service import SUPPORTED_RISKS, MapQu
 from bridle.features.project_map.modify_loop_service import ModifyLoopService
 from bridle.features.project_map.patch_schemas import PlanPatchSchema
 from bridle.features.project_map.runtime_feedback import RuntimeFeedbackService
+from bridle.features.project_map.semantic_synthesis_service import SemanticSynthesisService
 from bridle.features.workspace.overview_service import WorkspaceOverviewService
 from bridle.logging.facade import LoggingFacade, get_logging_facade
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 MAX_PAGE_LIMIT = 200
 MAX_SUBGRAPH_DEPTH = 5
 NODE_STATUSES = {
@@ -207,6 +208,85 @@ CREATE TABLE IF NOT EXISTS module_interfaces (
     status      TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS semantic_map_runs (
+    id           TEXT PRIMARY KEY,
+    status       TEXT NOT NULL,
+    reason       TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS semantic_evidence_bundles (
+    id         TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    payload    TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS module_candidates (
+    id               TEXT PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    module_id        TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    confidence       REAL NOT NULL,
+    evidence_id      TEXT NOT NULL,
+    metrics          TEXT NOT NULL DEFAULT '{}',
+    file_fingerprint TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_module_candidates_status
+    ON module_candidates(status, module_id);
+CREATE TABLE IF NOT EXISTS module_candidate_files (
+    candidate_id TEXT NOT NULL,
+    file_path    TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    file_hash    TEXT NOT NULL,
+    evidence     TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (candidate_id, file_path)
+);
+CREATE INDEX IF NOT EXISTS ix_module_candidate_files_path
+    ON module_candidate_files(file_path);
+CREATE TABLE IF NOT EXISTS module_edges (
+    id                  TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL,
+    source_candidate_id TEXT NOT NULL,
+    target_candidate_id TEXT NOT NULL,
+    source_module       TEXT NOT NULL,
+    target_module       TEXT NOT NULL,
+    kind                TEXT NOT NULL,
+    weight              REAL NOT NULL,
+    evidence            TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS module_interface_candidates (
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL,
+    from_module       TEXT NOT NULL,
+    to_module         TEXT NOT NULL,
+    from_candidate_id TEXT NOT NULL,
+    to_candidate_id   TEXT NOT NULL,
+    symbol            TEXT NOT NULL,
+    signature         TEXT NOT NULL DEFAULT '{}',
+    evidence          TEXT NOT NULL DEFAULT '{}',
+    mock_file_path    TEXT NOT NULL DEFAULT '',
+    mock_hash         TEXT NOT NULL DEFAULT '',
+    confidence        REAL NOT NULL,
+    status            TEXT NOT NULL,
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_module_interface_candidates_status
+    ON module_interface_candidates(status, from_module, to_module);
+CREATE TABLE IF NOT EXISTS interface_mock_artifacts (
+    id                     TEXT PRIMARY KEY,
+    interface_candidate_id TEXT NOT NULL,
+    file_path              TEXT NOT NULL,
+    file_hash              TEXT NOT NULL,
+    status                 TEXT NOT NULL,
+    payload                TEXT NOT NULL DEFAULT '{}',
+    created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -230,6 +310,7 @@ class ProjectPlanStore:
         self._blind_spots = BlindSpotDetector()
         self._map_query = MapQueryService(self.project_root)
         self._boundary = BoundaryService(self.project_root)
+        self._synthesis = SemanticSynthesisService(self.project_root)
         self._runtime_feedback = RuntimeFeedbackService()
         self._active_semantic_run_id: str | None = None
         self._semantic_continuing_from_failure = False
@@ -347,6 +428,7 @@ class ProjectPlanStore:
                 self._replace_static_blind_spots(connection, blind_rows)
                 self._boundary.refresh_cochange(connection)
                 self._boundary.compute_metrics(connection, change_seq=self._latest_change_seq(connection))
+                self._refresh_semantic_map_candidates(connection, reason="structure_scan")
                 self._set_map_status(
                     connection,
                     "structure_ready",
@@ -444,6 +526,7 @@ class ProjectPlanStore:
 
             self._reconcile_annotations_after_refresh(connection, annotation_snapshots)
             self._boundary.compute_metrics(connection, change_seq=self._latest_change_seq(connection))
+            self._refresh_semantic_map_candidates(connection, reason="incremental_refresh")
             divergent = ModifyLoopService.list_divergent_nodes(connection)
             if divergent:
                 ModifyLoopService.mark_drifted(connection, divergent)
@@ -2074,6 +2157,149 @@ class ProjectPlanStore:
         with self._connect() as connection:
             return {"modules": self._boundary.cluster_modules(connection)}
 
+    def refresh_semantic_map_candidates(self) -> dict[str, Any]:
+        """Regenerate deterministic semantic-map candidates from the current structure map."""
+        with self._connect() as connection:
+            return self._refresh_semantic_map_candidates(connection, reason="manual_refresh")
+
+    def list_module_candidates(self, *, status: str | None = None, include_files: bool = True) -> dict[str, Any]:
+        """List module candidates; confirmed rows are eligible execution boundaries."""
+        with self._connect() as connection:
+            params: list[Any] = []
+            where = ""
+            if status:
+                where = "WHERE status = ?"
+                params.append(status)
+            rows = connection.execute(
+                "SELECT * FROM module_candidates "
+                f"{where} ORDER BY CASE status WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END, module_id",
+                params,
+            ).fetchall()
+            items = [self._module_candidate_from_row(row) for row in rows]
+            if include_files:
+                for item in items:
+                    item["files"] = self._module_candidate_files(connection, item["id"])
+            return {"items": items}
+
+    def set_module_candidate_status(self, candidate_id: str, *, status: str, actor: str = "human") -> dict[str, Any]:
+        """Confirm or reject one module candidate; only confirmed candidates can drive execution boundaries."""
+        if status not in ("confirmed", "rejected"):
+            raise ValidationError(
+                resource="module_candidate",
+                message="Unsupported module candidate status",
+                details={"status": status},
+            )
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM module_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(resource="module_candidate", message="Module candidate not found")
+            confirmed_at = "CURRENT_TIMESTAMP" if status == "confirmed" else "NULL"
+            connection.execute(
+                f"UPDATE module_candidates SET status = ?, confirmed_at = {confirmed_at} WHERE id = ?",
+                (status, candidate_id),
+            )
+            self._record_change(
+                connection,
+                "module_candidate",
+                candidate_id,
+                status,
+                {"actor": actor, "module_id": row["module_id"]},
+            )
+            updated = connection.execute("SELECT * FROM module_candidates WHERE id = ?", (candidate_id,)).fetchone()
+            item = self._module_candidate_from_row(updated)
+            item["files"] = self._module_candidate_files(connection, candidate_id)
+            return item
+
+    def list_module_interface_candidates(self, *, status: str | None = None) -> dict[str, Any]:
+        """List interface candidates and their generated mock files."""
+        with self._connect() as connection:
+            params: list[Any] = []
+            where = ""
+            if status:
+                where = "WHERE status = ?"
+                params.append(status)
+            rows = connection.execute(
+                "SELECT * FROM module_interface_candidates "
+                f"{where} ORDER BY CASE status WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END, "
+                "from_module, to_module, symbol",
+                params,
+            ).fetchall()
+            return {"items": [self._interface_candidate_from_row(row) for row in rows]}
+
+    def set_module_interface_candidate_status(
+        self,
+        candidate_id: str,
+        *,
+        status: str,
+        actor: str = "human",
+    ) -> dict[str, Any]:
+        """Confirm or reject one interface candidate; confirmation publishes module_interfaces."""
+        if status not in ("confirmed", "rejected"):
+            raise ValidationError(
+                resource="module_interface_candidate",
+                message="Unsupported interface candidate status",
+                details={"status": status},
+            )
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM module_interface_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(resource="module_interface_candidate", message="Interface candidate not found")
+            item = self._interface_candidate_from_row(row)
+            if status == "confirmed":
+                mock_hash = self._file_content_hash(item["mock_file_path"])
+                if not mock_hash or mock_hash != item["mock_hash"]:
+                    raise ConflictError(
+                        resource="module_interface_candidate",
+                        message="Interface mock artifact is stale",
+                        error_code="interface_mock_stale",
+                        details={"candidate_id": candidate_id, "mock_file_path": item["mock_file_path"]},
+                    )
+            confirmed_at = "CURRENT_TIMESTAMP" if status == "confirmed" else "NULL"
+            connection.execute(
+                f"UPDATE module_interface_candidates SET status = ?, confirmed_at = {confirmed_at} WHERE id = ?",
+                (status, candidate_id),
+            )
+            connection.execute(
+                "UPDATE interface_mock_artifacts SET status = ? WHERE interface_candidate_id = ?",
+                ("confirmed" if status == "confirmed" else "rejected", candidate_id),
+            )
+            if status == "confirmed":
+                self._publish_confirmed_interface(connection, candidate_id)
+            else:
+                self._revoke_candidate_interface(connection, candidate_id)
+            self._record_change(
+                connection,
+                "module_interface_candidate",
+                candidate_id,
+                status,
+                {"actor": actor, "from_module": item["from_module"], "to_module": item["to_module"]},
+            )
+            updated = connection.execute(
+                "SELECT * FROM module_interface_candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            return self._interface_candidate_from_row(updated)
+
+    def list_interface_mock_artifacts(self, *, status: str | None = None) -> dict[str, Any]:
+        """List generated interface mock artifacts."""
+        with self._connect() as connection:
+            params: list[Any] = []
+            where = ""
+            if status:
+                where = "WHERE status = ?"
+                params.append(status)
+            rows = connection.execute(
+                f"SELECT * FROM interface_mock_artifacts {where} ORDER BY file_path",
+                params,
+            ).fetchall()
+            return {"items": [self._mock_artifact_from_row(row) for row in rows]}
+
     def refresh_boundaries(self) -> dict[str, Any]:
         """Recompute co-change and metrics without changing ratified boundaries."""
         with self._connect() as connection:
@@ -2081,7 +2307,8 @@ class ProjectPlanStore:
             metric_count = self._boundary.compute_metrics(
                 connection, change_seq=self._latest_change_seq(connection)
             )
-        return {"cochange_pairs": co_count, "metric_rows": metric_count}
+            semantic = self._refresh_semantic_map_candidates(connection, reason="boundary_refresh")
+        return {"cochange_pairs": co_count, "metric_rows": metric_count, "semantic_map": semantic}
 
     def list_divergent_nodes(self) -> dict[str, Any]:
         with self._connect() as connection:
@@ -2195,6 +2422,343 @@ class ProjectPlanStore:
                 result.append(item)
             return result
 
+    def _refresh_semantic_map_candidates(self, connection: sqlite3.Connection, *, reason: str) -> dict[str, Any]:
+        """Regenerate deterministic module/interface candidates from current structure rows."""
+        run_id = f"semmap-{uuid.uuid4().hex}"
+        connection.execute(
+            "INSERT INTO semantic_map_runs(id, status, reason, payload) VALUES (?, 'running', ?, '{}')",
+            (run_id, reason),
+        )
+        previous_modules = {
+            (str(row["id"]), str(row["file_fingerprint"])): {
+                "status": str(row["status"]),
+                "confirmed_at": row["confirmed_at"],
+            }
+            for row in connection.execute(
+                "SELECT id, file_fingerprint, status, confirmed_at FROM module_candidates"
+            ).fetchall()
+        }
+        previous_interfaces = {
+            self._interface_candidate_status_key(dict(row)): {
+                "status": str(row["status"]),
+                "confirmed_at": row["confirmed_at"],
+            }
+            for row in connection.execute(
+                "SELECT id, from_module, to_module, from_candidate_id, to_candidate_id, "
+                "symbol, signature, mock_hash, status, confirmed_at FROM module_interface_candidates"
+            ).fetchall()
+        }
+        generated = self._synthesis.synthesize(connection, run_id=run_id)
+        now = "CURRENT_TIMESTAMP"
+
+        connection.execute(
+            "UPDATE module_candidates SET status = 'stale' WHERE status IN ('candidate', 'confirmed')"
+        )
+        connection.execute(
+            "UPDATE module_interface_candidates SET status = 'stale' WHERE status IN ('candidate', 'confirmed')"
+        )
+        self._revoke_stale_candidate_interfaces(connection)
+        connection.execute(
+            "UPDATE interface_mock_artifacts SET status = 'stale' WHERE status IN ('generated', 'confirmed')"
+        )
+        connection.execute("DELETE FROM module_edges")
+
+        evidence = generated["evidence"]
+        connection.execute(
+            "INSERT OR REPLACE INTO semantic_evidence_bundles(id, run_id, kind, payload) VALUES (?, ?, ?, ?)",
+            (
+                evidence["id"],
+                evidence["run_id"],
+                evidence["kind"],
+                json.dumps(evidence["payload"], ensure_ascii=False),
+            ),
+        )
+
+        for candidate in generated["module_candidates"]:
+            prior = previous_modules.get((candidate["id"], candidate["file_fingerprint"]), {})
+            status = prior.get("status") if prior.get("status") in ("confirmed", "rejected") else candidate["status"]
+            confirmed_at = prior.get("confirmed_at") if status == "confirmed" else None
+            connection.execute(
+                "INSERT OR REPLACE INTO module_candidates("
+                "id, run_id, module_id, name, status, confidence, evidence_id, metrics, "
+                "file_fingerprint, created_at, confirmed_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    candidate["id"],
+                    candidate["run_id"],
+                    candidate["module_id"],
+                    candidate["name"],
+                    status,
+                    float(candidate["confidence"]),
+                    candidate["evidence_id"],
+                    json.dumps(candidate["metrics"], ensure_ascii=False),
+                    candidate["file_fingerprint"],
+                    candidate["created_at"],
+                    confirmed_at,
+                ),
+            )
+            connection.execute("DELETE FROM module_candidate_files WHERE candidate_id = ?", (candidate["id"],))
+
+        for item in generated["module_candidate_files"]:
+            connection.execute(
+                "INSERT OR REPLACE INTO module_candidate_files("
+                "candidate_id, file_path, role, file_hash, evidence"
+                ") VALUES (?, ?, ?, ?, ?)",
+                (
+                    item["candidate_id"],
+                    item["file_path"],
+                    item["role"],
+                    item["file_hash"],
+                    json.dumps(item["evidence"], ensure_ascii=False),
+                ),
+            )
+
+        for edge in generated["module_edges"]:
+            connection.execute(
+                "INSERT OR REPLACE INTO module_edges("
+                "id, run_id, source_candidate_id, target_candidate_id, source_module, "
+                "target_module, kind, weight, evidence"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    edge["id"],
+                    edge["run_id"],
+                    edge["source_candidate_id"],
+                    edge["target_candidate_id"],
+                    edge["source_module"],
+                    edge["target_module"],
+                    edge["kind"],
+                    float(edge["weight"]),
+                    json.dumps(edge["evidence"], ensure_ascii=False),
+                ),
+            )
+
+        for candidate in generated["module_interface_candidates"]:
+            prior = previous_interfaces.get(self._interface_candidate_status_key(candidate), {})
+            status = prior.get("status") if prior.get("status") in ("confirmed", "rejected") else candidate["status"]
+            confirmed_at = prior.get("confirmed_at") if status == "confirmed" else None
+            connection.execute(
+                "INSERT OR REPLACE INTO module_interface_candidates("
+                "id, run_id, from_module, to_module, from_candidate_id, to_candidate_id, symbol, "
+                "signature, evidence, mock_file_path, mock_hash, confidence, status, created_at, confirmed_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    candidate["id"],
+                    candidate["run_id"],
+                    candidate["from_module"],
+                    candidate["to_module"],
+                    candidate["from_candidate_id"],
+                    candidate["to_candidate_id"],
+                    candidate["symbol"],
+                    json.dumps(candidate["signature"], ensure_ascii=False),
+                    json.dumps(candidate["evidence"], ensure_ascii=False),
+                    candidate["mock_file_path"],
+                    candidate["mock_hash"],
+                    float(candidate["confidence"]),
+                    status,
+                    candidate["created_at"],
+                    confirmed_at,
+                ),
+            )
+            if status == "confirmed":
+                self._publish_confirmed_interface(connection, candidate["id"])
+
+        for artifact in generated["interface_mock_artifacts"]:
+            candidate_status = connection.execute(
+                "SELECT status FROM module_interface_candidates WHERE id = ?",
+                (artifact["interface_candidate_id"],),
+            ).fetchone()["status"]
+            status = {
+                "confirmed": "confirmed",
+                "rejected": "rejected",
+            }.get(str(candidate_status), artifact["status"])
+            connection.execute(
+                "INSERT OR REPLACE INTO interface_mock_artifacts("
+                "id, interface_candidate_id, file_path, file_hash, status, payload, created_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    artifact["id"],
+                    artifact["interface_candidate_id"],
+                    artifact["file_path"],
+                    artifact["file_hash"],
+                    status,
+                    json.dumps(artifact["payload"], ensure_ascii=False),
+                    artifact["created_at"],
+                ),
+            )
+
+        module_count = len(generated["module_candidates"])
+        interface_count = len(generated["module_interface_candidates"])
+        connection.execute(
+            f"UPDATE semantic_map_runs SET status = 'ready', completed_at = {now}, payload = ? WHERE id = ?",
+            (
+                json.dumps(
+                    {
+                        "module_candidates": module_count,
+                        "module_interface_candidates": interface_count,
+                        "reason": reason,
+                    },
+                    ensure_ascii=False,
+                ),
+                run_id,
+            ),
+        )
+        self._record_change(
+            connection,
+            "semantic_map_run",
+            run_id,
+            "ready",
+            {"module_candidates": module_count, "module_interface_candidates": interface_count, "reason": reason},
+        )
+        self._log(
+            "semantic_map_candidates",
+            "completed",
+            detail={"run_id": run_id, "module_candidates": module_count, "interface_candidates": interface_count},
+        )
+        return {
+            "run_id": run_id,
+            "status": "ready",
+            "module_candidates": module_count,
+            "module_interface_candidates": interface_count,
+        }
+
+    @staticmethod
+    def _module_candidate_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "module_id": row["module_id"],
+            "name": row["name"],
+            "status": row["status"],
+            "confidence": row["confidence"],
+            "evidence_id": row["evidence_id"],
+            "metrics": json.loads(row["metrics"] or "{}"),
+            "file_fingerprint": row["file_fingerprint"],
+            "is_execution_boundary": row["status"] == "confirmed",
+            "created_at": row["created_at"],
+            "confirmed_at": row["confirmed_at"],
+        }
+
+    @staticmethod
+    def _interface_candidate_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "from_module": row["from_module"],
+            "to_module": row["to_module"],
+            "from_candidate_id": row["from_candidate_id"],
+            "to_candidate_id": row["to_candidate_id"],
+            "symbol": row["symbol"],
+            "signature": json.loads(row["signature"] or "{}"),
+            "evidence": json.loads(row["evidence"] or "{}"),
+            "mock_file_path": row["mock_file_path"],
+            "mock_hash": row["mock_hash"],
+            "confidence": row["confidence"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "confirmed_at": row["confirmed_at"],
+        }
+
+    @staticmethod
+    def _mock_artifact_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "interface_candidate_id": row["interface_candidate_id"],
+            "file_path": row["file_path"],
+            "file_hash": row["file_hash"],
+            "status": row["status"],
+            "payload": json.loads(row["payload"] or "{}"),
+            "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _module_candidate_files(connection: sqlite3.Connection, candidate_id: str) -> list[dict[str, Any]]:
+        rows = connection.execute(
+            "SELECT file_path, role, file_hash, evidence FROM module_candidate_files "
+            "WHERE candidate_id = ? ORDER BY file_path",
+            (candidate_id,),
+        ).fetchall()
+        return [
+            {
+                "file_path": row["file_path"],
+                "role": row["role"],
+                "file_hash": row["file_hash"],
+                "evidence": json.loads(row["evidence"] or "{}"),
+            }
+            for row in rows
+        ]
+
+    def _confirmed_candidate_boundary(self, candidate_or_module_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM module_candidates WHERE status = 'confirmed' "
+                "AND (id = ? OR module_id = ?) ORDER BY confirmed_at DESC, module_id LIMIT 1",
+                (candidate_or_module_id, candidate_or_module_id),
+            ).fetchone()
+            if row is None:
+                return None
+            item = self._module_candidate_from_row(row)
+            item["files"] = self._module_candidate_files(connection, item["id"])
+            return item
+
+    @staticmethod
+    def _interface_candidate_status_key(item: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str]:
+        signature = item.get("signature")
+        if isinstance(signature, str):
+            try:
+                signature = json.loads(signature) if signature else {}
+            except json.JSONDecodeError:
+                signature = {}
+        return (
+            str(item.get("id", "")),
+            str(item.get("from_module", "")),
+            str(item.get("to_module", "")),
+            str(item.get("from_candidate_id", "")),
+            str(item.get("to_candidate_id", "")),
+            str(item.get("symbol", "")),
+            json.dumps(signature if isinstance(signature, dict) else {}, ensure_ascii=False, sort_keys=True),
+            str(item.get("mock_hash", "")),
+        )
+
+    @staticmethod
+    def _revoke_candidate_interface(connection: sqlite3.Connection, candidate_id: str) -> None:
+        connection.execute("DELETE FROM module_interfaces WHERE id = ?", (f"iface-{candidate_id}",))
+
+    @staticmethod
+    def _revoke_stale_candidate_interfaces(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "DELETE FROM module_interfaces "
+            "WHERE id IN (SELECT 'iface-' || id FROM module_interface_candidates WHERE status = 'stale')"
+        )
+
+    def _publish_confirmed_interface(self, connection: sqlite3.Connection, candidate_id: str) -> None:
+        row = connection.execute(
+            "SELECT * FROM module_interface_candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()
+        if row is None:
+            return
+        item = self._interface_candidate_from_row(row)
+        interface_id = f"iface-{candidate_id}"
+        mock = {
+            "file_path": item["mock_file_path"],
+            "mock_hash": item["mock_hash"],
+            "interface_candidate_id": candidate_id,
+        }
+        connection.execute(
+            "INSERT OR REPLACE INTO module_interfaces("
+            "id, from_module, to_module, symbol, signature, mock, confidence, status"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, 'declared')",
+            (
+                interface_id,
+                item["from_module"],
+                item["to_module"],
+                item["symbol"],
+                json.dumps(item["signature"], ensure_ascii=False),
+                json.dumps(mock, ensure_ascii=False),
+                float(item["confidence"]),
+            ),
+        )
+
     @staticmethod
     def _module_search_prefixes(declared_files: list[str]) -> set[str]:
         prefixes: set[str] = set()
@@ -2213,12 +2777,26 @@ class ProjectPlanStore:
         from bridle.features.project_map.indexer.treesitter_indexer import classify_is_test
 
         node = self.get_node(node_id)
-        module_id = str(node.get("module_id") or node_id)
+        explicit_candidate_id = str(node.get("module_candidate_id") or "").strip()
+        module_id = str(node.get("module_id") or explicit_candidate_id or node_id)
         declared_files = [
             str(path).replace("\\", "/").strip()
             for path in node.get("files") or []
             if str(path).strip()
         ]
+        if not declared_files and (node.get("module_id") or explicit_candidate_id):
+            candidate = self._confirmed_candidate_boundary(explicit_candidate_id or module_id)
+            if candidate is None:
+                return {
+                    "error_code": "module_boundary_unconfirmed",
+                    "detail": {"module_id": module_id, "reason": "confirmed_module_candidate_required"},
+                }
+            module_id = str(candidate["module_id"])
+            declared_files = [
+                str(item["file_path"])
+                for item in candidate.get("files", [])
+                if item.get("role") == "implementation"
+            ]
         test_dir_raw = node.get("test_dir")
         test_dir = (
             str(test_dir_raw).replace("\\", "/").strip("/")

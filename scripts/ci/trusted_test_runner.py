@@ -163,20 +163,63 @@ def write_controller_failure_transcript(
     worker_stdout: str,
     worker_stderr: str,
     observation: Any | None = None,
+    phase: str = "controller",
+    final_evidence_exit_code: int | None = None,
 ) -> None:
     evidence_dir = os.environ.get("BRIDLE_DOCKER_EVIDENCE_DIR", "").strip()
     if not evidence_dir:
         return
     payload = {
         "error": error,
+        "phase": phase,
         "worker_state": getattr(observation, "worker_state", None) if observation else None,
         "exit_code": getattr(observation, "exit_code", None) if observation else None,
+        "final_evidence_exit_code": final_evidence_exit_code,
         "worker_stdout_tail": worker_stdout[-8000:],
         "worker_stderr_tail": worker_stderr[-8000:],
     }
     path = Path(evidence_dir) / "controller-failure.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    if phase == "controller" and path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and existing.get("phase") not in {None, "controller"}:
+            existing["secondary_error"] = error
+            existing["secondary_phase"] = phase
+            existing["secondary_worker_stdout_tail"] = worker_stdout[-8000:]
+            existing["secondary_worker_stderr_tail"] = worker_stderr[-8000:]
+            path.write_text(json.dumps(existing, indent=2, sort_keys=True), encoding="utf-8")
+            return
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def build_ipc_transcript(
+    *,
+    observation: Any,
+    probe_report: dict[str, Any] | None,
+    worker_stdout: str,
+    worker_stderr: str,
+    controller_precheck_verified: bool,
+    final_evidence_exit_code: int | None = None,
+    final_evidence_error: str | None = None,
+) -> dict[str, Any]:
+    script_dir = Path(__file__).resolve().parent
+    ipc_module = _load_module("bridle_trusted_ipc_transcript", script_dir / "trusted_ipc.py")
+    final_evidence_verified = (
+        None if final_evidence_exit_code is None else final_evidence_exit_code == 0
+    )
+    return {
+        "observation": json.loads(ipc_module.encode_observation(observation)),
+        "probe_report_untrusted": probe_report,
+        "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
+        "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
+        "controller_precheck_verified": controller_precheck_verified,
+        "final_evidence_exit_code": final_evidence_exit_code,
+        "final_evidence_verified": final_evidence_verified,
+        "final_evidence_error": final_evidence_error,
+    }
 
 
 def controller_ipc_dir(source_env: Mapping[str, str]) -> Path | None:
@@ -520,14 +563,13 @@ def main(argv: list[str] | None = None) -> int:
         probe_report = worker_sandbox.parse_probe_report(worker_stdout) if args.probe_isolation else None
 
         if args.ipc_transcript is not None:
-            partial_transcript = {
-                "observation": json.loads(
-                    _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
-                ),
-                "probe_report_untrusted": probe_report,
-                "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
-                "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
-            }
+            partial_transcript = build_ipc_transcript(
+                observation=observation,
+                probe_report=probe_report,
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                controller_precheck_verified=False,
+            )
             args.ipc_transcript.parent.mkdir(parents=True, exist_ok=True)
             args.ipc_transcript.write_text(
                 json.dumps(partial_transcript, indent=2, sort_keys=True),
@@ -567,15 +609,13 @@ def main(argv: list[str] | None = None) -> int:
             ) is False:
                 LOGGER.warning("worker_uid_matches_controller subprocess_mode_only")
 
-        transcript = {
-            "observation": json.loads(
-                _load_module("bridle_trusted_ipc", script_dir / "trusted_ipc.py").encode_observation(observation)
-            ),
-            "probe_report_untrusted": probe_report,
-            "worker_stdout_sha256": hashlib.sha256(worker_stdout.encode("utf-8")).hexdigest(),
-            "worker_stderr_sha256": hashlib.sha256(worker_stderr.encode("utf-8")).hexdigest(),
-            "verified": True,
-        }
+        transcript = build_ipc_transcript(
+            observation=observation,
+            probe_report=probe_report,
+            worker_stdout=worker_stdout,
+            worker_stderr=worker_stderr,
+            controller_precheck_verified=True,
+        )
         if args.ipc_transcript is not None:
             args.ipc_transcript.write_text(json.dumps(transcript, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -618,16 +658,53 @@ def main(argv: list[str] | None = None) -> int:
             )
             raise
 
-        exit_code = finalize_controller_evidence(
-            observation=observation,
-            worker_stdout=worker_stdout,
-            trusted_root=trusted_root,
-            ctx=ctx,
-        )
+        try:
+            exit_code = finalize_controller_evidence(
+                observation=observation,
+                worker_stdout=worker_stdout,
+                trusted_root=trusted_root,
+                ctx=ctx,
+            )
+        except Exception as final_exc:
+            if args.ipc_transcript is not None:
+                transcript = build_ipc_transcript(
+                    observation=observation,
+                    probe_report=probe_report,
+                    worker_stdout=worker_stdout,
+                    worker_stderr=worker_stderr,
+                    controller_precheck_verified=True,
+                    final_evidence_exit_code=1,
+                    final_evidence_error=str(final_exc),
+                )
+                args.ipc_transcript.write_text(
+                    json.dumps(transcript, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+            write_controller_failure_transcript(
+                error=str(final_exc),
+                phase="final_evidence",
+                final_evidence_exit_code=1,
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                observation=observation,
+            )
+            raise
+        if args.ipc_transcript is not None:
+            transcript = build_ipc_transcript(
+                observation=observation,
+                probe_report=probe_report,
+                worker_stdout=worker_stdout,
+                worker_stderr=worker_stderr,
+                controller_precheck_verified=True,
+                final_evidence_exit_code=exit_code,
+            )
+            args.ipc_transcript.write_text(json.dumps(transcript, indent=2, sort_keys=True), encoding="utf-8")
         if exit_code != 0:
             emit_worker_streams(worker_stdout, worker_stderr)
             write_controller_failure_transcript(
-                error=f"pytest_exit_code={exit_code}",
+                error=f"final_evidence_exit_code={exit_code}",
+                phase="final_evidence",
+                final_evidence_exit_code=exit_code,
                 worker_stdout=worker_stdout,
                 worker_stderr=worker_stderr,
                 observation=observation,

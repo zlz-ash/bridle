@@ -52,21 +52,38 @@ def _terminate_process_tree(proc: subprocess.Popen[bytes], *, force: bool = True
             pass
     elif os.name == "nt":
         try:
-            flag = "/F" if force else ""
+            command = ["taskkill", "/T", "/PID", str(pid)]
+            if force:
+                command.insert(1, "/F")
             subprocess.run(
-                ["taskkill", "/T", flag, "/PID", str(pid)],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=10,
                 check=False,
             )
-            return
         except (OSError, subprocess.TimeoutExpired):
             pass
+        if proc.poll() is not None:
+            return
     try:
         proc.kill()
     except OSError:
         pass
+
+
+def _wait_after_termination(proc: subprocess.Popen[bytes], *, timeout: float = 5.0) -> None:
+    """Best-effort wait after a forced termination request."""
+    if proc.poll() is not None:
+        return
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(proc)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def capture_with_deadline(
@@ -108,6 +125,12 @@ def capture_with_deadline(
                 else:
                     truncated_stderr = True
 
+    def _read_available(pipe) -> bytes:
+        read1 = getattr(pipe, "read1", None)
+        if read1 is not None:
+            return read1(4096)
+        return pipe.read(4096)
+
     def _drain_stdout() -> None:
         nonlocal truncated_stdout, callback_error
         assert proc.stdout is not None
@@ -116,7 +139,7 @@ def capture_with_deadline(
             if time.monotonic() > deadline:
                 return
             try:
-                chunk = proc.stdout.read(4096)
+                chunk = _read_available(proc.stdout)
             except (OSError, ValueError):
                 return
             if not chunk:
@@ -154,7 +177,7 @@ def capture_with_deadline(
             if time.monotonic() > deadline:
                 return
             try:
-                chunk = proc.stderr.read(4096)
+                chunk = _read_available(proc.stderr)
             except (OSError, ValueError):
                 return
             if not chunk:
@@ -170,9 +193,11 @@ def capture_with_deadline(
         if remaining <= 0:
             timed_out = True
             _terminate_process_tree(proc)
+            _wait_after_termination(proc)
             break
         if callback_error_event.is_set():
             _terminate_process_tree(proc)
+            _wait_after_termination(proc)
             break
         if on_poll is not None:
             try:
@@ -181,6 +206,7 @@ def capture_with_deadline(
                 callback_error = f"poll_error:{type(exc).__name__}:{exc}"
                 callback_error_event.set()
                 _terminate_process_tree(proc)
+                _wait_after_termination(proc)
                 break
         if proc.poll() is not None:
             break

@@ -48,3 +48,25 @@ async def test_code_entities_blind_spots_and_boundaries_endpoints(client, test_w
     )
     assert annotations.status_code == 200
     assert "items" in annotations.json()
+
+    modules = await client.get(f"/api/v1/projects/{project['id']}/map/module-candidates")
+    assert modules.status_code == 200
+    module_items = modules.json()["items"]
+    assert any(item["module_id"] == "pkg" for item in module_items)
+    pkg = next(item for item in module_items if item["module_id"] == "pkg")
+    assert pkg["is_execution_boundary"] is False
+
+    confirmed = await client.post(
+        f"/api/v1/projects/{project['id']}/map/module-candidates/{pkg['id']}/status",
+        json={"status": "confirmed", "actor": "human"},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["is_execution_boundary"] is True
+
+    interfaces = await client.get(f"/api/v1/projects/{project['id']}/map/module-interface-candidates")
+    assert interfaces.status_code == 200
+    assert "items" in interfaces.json()
+
+    mocks = await client.get(f"/api/v1/projects/{project['id']}/map/interface-mocks")
+    assert mocks.status_code == 200
+    assert "items" in mocks.json()

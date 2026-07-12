@@ -60,10 +60,17 @@ def pytest_arguments(
             str(probe_root),
             *extra_args,
         ]
-    test_file = candidate / "backend/tests/agent/container/test_docker_integration.py"
+    docker_gate = os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1"
+    trusted_backend = trusted_config.resolve().parent
+    test_file = (
+        trusted_backend / "tests/agent/container/test_docker_integration.py"
+        if docker_gate
+        else candidate / "backend/tests/agent/container/test_docker_integration.py"
+    )
+    rootdir = trusted_backend if docker_gate else candidate / "backend"
     capture_args: list[str] = []
     plugin_args: list[str] = []
-    if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1":
+    if docker_gate:
         # Sentinel REQUEST and CRITICAL_EVIDENCE must reach the controller stream in real time.
         capture_args = ["-s", "--capture=no"]
         # Load the trusted test observer from the trusted scripts tree so the
@@ -86,7 +93,7 @@ def pytest_arguments(
         "-c",
         str(trusted_config.resolve()),
         "--rootdir",
-        str(candidate / "backend"),
+        str(rootdir),
         "--confcutdir",
         str(test_file.parent),
         *plugin_args,
@@ -94,6 +101,14 @@ def pytest_arguments(
         str(test_file),
         *extra_args,
     ]
+
+
+def _prepend_pythonpath(path: Path) -> None:
+    path_text = str(path)
+    current_pythonpath = os.environ.get("PYTHONPATH", "")
+    current_entries = [entry for entry in current_pythonpath.split(os.pathsep) if entry]
+    if path_text not in current_entries:
+        os.environ["PYTHONPATH"] = os.pathsep.join([path_text, *current_entries])
 
 
 def _load_stream_module():
@@ -123,12 +138,15 @@ def run_worker_request(request_raw: str) -> str:
     os.environ["BRIDLE_CANDIDATE_WORKER"] = "1"
 
     candidate_source = candidate_root / "backend/src"
+    _prepend_pythonpath(candidate_source)
     if os.environ.get("BRIDLE_RUN_DOCKER_TESTS") == "1":
-        integration_test = (
-            candidate_root / "backend/tests/agent/container/test_docker_integration.py"
-        )
+        integration_test = trusted_config.parent / "tests/agent/container/test_docker_integration.py"
         if not integration_test.is_file():
             raise RuntimeError(f"candidate_worker_test_file_missing path={integration_test}")
+        os.environ.setdefault(
+            "BRIDLE_TEST_WORKSPACES_ROOT",
+            str(candidate_root / "backend/.test-workspaces"),
+        )
         if os.environ.get("DOCKER_HOST", "").strip():
             docker_probe = subprocess.run(
                 ["docker", "info"],

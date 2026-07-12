@@ -32,7 +32,16 @@ from .docker_gate_paths import (
 
 _skipped_critical: list[str] = []
 _skipped_boundary: list[str] = []
-TEST_WORKSPACES_ROOT = Path(__file__).resolve().parents[3] / ".test-workspaces"
+
+
+def _test_workspaces_root() -> Path:
+    raw = os.environ.get("BRIDLE_TEST_WORKSPACES_ROOT", "").strip()
+    if raw:
+        return Path(raw).resolve()
+    return Path(__file__).resolve().parents[3] / ".test-workspaces"
+
+
+TEST_WORKSPACES_ROOT = _test_workspaces_root()
 BOUNDARY_TEST_FILE = "test_dind_boundary_isolation.py"
 logger = logging.getLogger("bridle.test")
 

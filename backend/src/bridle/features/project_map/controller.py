@@ -6,8 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.api.deps import get_db
 from bridle.features.project_map.patch_schemas import PlanPatchSchema
-from bridle.features.project_map.schemas import ArbitrationResolveSchema, ExecutionRefreshSchema
 from bridle.features.project_map.plan_service import PlanService
+from bridle.features.project_map.schemas import (
+    ArbitrationResolveSchema,
+    ExecutionRefreshSchema,
+    InterfaceCandidateStatusSchema,
+    ModuleCandidateStatusSchema,
+)
 from bridle.features.project_map.service import ProjectMapService
 
 router = APIRouter(prefix="/projects/{project_id}/map", tags=["project-map"])
@@ -162,6 +167,71 @@ async def list_boundaries(
     """Top-N directory vs co-change conflicts and debt node hints."""
     store = await ProjectMapService.store_for(db, project_id)
     return store.list_boundary_conflicts(limit=limit)
+
+
+@router.post("/semantic-map/refresh")
+async def refresh_semantic_map(project_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """Regenerate module/interface candidates from deterministic structure evidence."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.refresh_semantic_map_candidates()
+
+
+@router.get("/module-candidates")
+async def list_module_candidates(
+    project_id: str,
+    status: str | None = None,
+    include_files: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List module candidates; confirmed entries are execution-boundary eligible."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.list_module_candidates(status=status, include_files=include_files)
+
+
+@router.post("/module-candidates/{candidate_id}/status")
+async def set_module_candidate_status(
+    project_id: str,
+    candidate_id: str,
+    data: ModuleCandidateStatusSchema,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Confirm/reject one module candidate; only confirmed candidates can become execution boundaries."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.set_module_candidate_status(candidate_id, status=data.status, actor=data.actor)
+
+
+@router.get("/module-interface-candidates")
+async def list_module_interface_candidates(
+    project_id: str,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List interface candidates and generated mock metadata."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.list_module_interface_candidates(status=status)
+
+
+@router.post("/module-interface-candidates/{candidate_id}/status")
+async def set_module_interface_candidate_status(
+    project_id: str,
+    candidate_id: str,
+    data: InterfaceCandidateStatusSchema,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Confirm/reject one interface candidate; confirmation publishes a declared module interface."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.set_module_interface_candidate_status(candidate_id, status=data.status, actor=data.actor)
+
+
+@router.get("/interface-mocks")
+async def list_interface_mock_artifacts(
+    project_id: str,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List generated interface mock artifacts for container boundary checks."""
+    store = await ProjectMapService.store_for(db, project_id)
+    return store.list_interface_mock_artifacts(status=status)
 
 
 @router.get("/arbitration")

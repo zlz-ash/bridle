@@ -9,9 +9,16 @@
 # Documentation publishing scope
 *.md
 !/README.md
+!/plan.md
+!/docs/
+!/docs/**/*.md
+!/tests/
+!/tests/README.md
 
 # Runtime artifacts
 .bridle/runtime/
+.ai-dev/evidence/final-audit.json
+.ai-dev/ci/runs/release-full-local/
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal
@@ -70,6 +77,8 @@ Desktop.ini
 .test-tmp/
 .pytest-tmp/
 .pytest-tmp-manual/
+tests/manual/results/*
+!tests/manual/results/.gitkeep
 
 # Local runtime artifacts from launcher scripts
 scripts/.app-logs/

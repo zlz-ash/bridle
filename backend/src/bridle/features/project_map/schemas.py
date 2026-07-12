@@ -23,3 +23,19 @@ class ExecutionRefreshSchema(BaseModel):
     changed_paths: list[str] = Field(min_length=1)
     execution_summary: str = Field(min_length=1, max_length=10_000)
     test_summary: str = Field(min_length=1, max_length=10_000)
+
+
+class ModuleCandidateStatusSchema(BaseModel):
+    """Validate a human module-candidate decision."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["confirmed", "rejected"]
+    actor: Literal["human"] = "human"
+
+
+class InterfaceCandidateStatusSchema(BaseModel):
+    """Validate a human interface-candidate decision."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["confirmed", "rejected"]
+    actor: Literal["human"] = "human"

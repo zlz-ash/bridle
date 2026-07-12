@@ -10,6 +10,9 @@ export const MAP_LAYER_QUERY_KEYS = [
   'project-map-semantic-annotations',
   'project-map-blind-spots',
   'project-map-boundaries',
+  'project-map-module-candidates',
+  'project-map-module-interface-candidates',
+  'project-map-interface-mocks',
   'project-map-arbitration',
 ] as const;
 
