@@ -15,6 +15,7 @@ from typing import Any
 
 from bridle.features.project_map.indexer.treesitter_indexer import (
     TreeSitterIndexer,
+    _is_python_overload_definition,
     _parser_for,
     _text,
     _unwrap_python_definition,
@@ -194,6 +195,8 @@ class ScipIndexer:
 
         def walk(node, fn: str | None, cls: str | None) -> None:
             nonlocal current_fn, current_class
+            if _is_python_overload_definition(node):
+                return
             node_fn, node_cls = fn, cls
             unwrapped = _unwrap_python_definition(node)
             if unwrapped is not None:

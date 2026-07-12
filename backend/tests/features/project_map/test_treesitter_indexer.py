@@ -80,6 +80,36 @@ def test_extracts_python_symbols_and_literal_import_edge(test_workspace: Path) -
     )
 
 
+def test_python_overload_stubs_do_not_duplicate_method_symbols(test_workspace: Path) -> None:
+    """Issue #11 fixture safety: overload signatures are declarations, not separate map nodes."""
+    _write(
+        test_workspace,
+        "serializer.py",
+        "from typing import overload\n"
+        "import typing as t\n"
+        "\n"
+        "class Serializer:\n"
+        "    @overload\n"
+        "    def dumps(self, value: str) -> str: ...\n"
+        "\n"
+        "    @t.overload\n"
+        "    def dumps(self, value: bytes) -> bytes: ...\n"
+        "\n"
+        "    def dumps(self, value):\n"
+        "        return value\n",
+    )
+
+    result = TreeSitterIndexer().index_workspace(test_workspace, test_dirs=set())
+
+    dumps_symbols = [
+        entity
+        for entity in result.symbol_entities
+        if entity["path"] == "serializer.py::Serializer.dumps"
+    ]
+    assert len(dumps_symbols) == 1
+    assert dumps_symbols[0]["payload"]["range"]["start_line"] == 11
+
+
 def test_repeat_scan_is_idempotent(test_workspace: Path) -> None:
     """Index the same tree twice; symbol IDs and import edges are byte-for-byte stable."""
     _write(test_workspace, "a.py", "from b import f\n\n\ndef g():\n    return f()\n")

@@ -122,7 +122,14 @@ describe('useProjectMapLayers retry scheduling', () => {
     await advanceRetryTimers(1);
     await waitFor(() => expect(changesCalls).toBe(2));
     await waitFor(() => expect(result.current.fetchFallbackReason).toBeNull());
-    expect(getMapSyncLogEvents().some((event) => event.type === 'recovered')).toBe(true);
+    const events = getMapSyncLogEvents();
+    expect(events.some((event) => event.type === 'recovered')).toBe(true);
+    expect(events.every((event) => (
+      typeof event.stage === 'string'
+      && typeof event.status === 'string'
+      && typeof event.durationMs === 'number'
+      && event.durationMs >= 0
+    ))).toBe(true);
   });
 
   it('recovers after path-slice failure', async () => {

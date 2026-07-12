@@ -148,6 +148,73 @@ def test_verify_worker_observation_rejects_missing_exit_code() -> None:
         trusted_runner.verify_worker_observation(observation, probe=False)
 
 
+def _observation(*, exit_code: int = 0):
+    trusted_ipc = trusted_runner._load_module(
+        "bridle_trusted_ipc_for_transcript",
+        REPO_ROOT / "scripts/ci/trusted_ipc.py",
+    )
+    return trusted_ipc.WorkerObservation(
+        worker_state="exited",
+        exit_code=exit_code,
+        stdout="ok",
+        stderr="",
+        truncated_stdout=False,
+        truncated_stderr=False,
+        worker_pid=1,
+        worker_uid=1000,
+        controller_pid=2,
+        controller_uid=1001,
+    )
+
+
+def test_ipc_transcript_distinguishes_precheck_from_final_evidence() -> None:
+    payload = trusted_runner.build_ipc_transcript(
+        observation=_observation(),
+        probe_report=None,
+        worker_stdout="worker out",
+        worker_stderr="",
+        controller_precheck_verified=True,
+        final_evidence_exit_code=1,
+        final_evidence_error="docker_evidence_summary_not_passed",
+    )
+    assert "verified" not in payload
+    assert payload["controller_precheck_verified"] is True
+    assert payload["final_evidence_verified"] is False
+    assert payload["final_evidence_exit_code"] == 1
+    assert payload["final_evidence_error"] == "docker_evidence_summary_not_passed"
+
+
+def test_controller_failure_transcript_preserves_primary_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = tmp_path / "evidence"
+    monkeypatch.setenv("BRIDLE_DOCKER_EVIDENCE_DIR", str(evidence))
+    observation = _observation(exit_code=0)
+    trusted_runner.write_controller_failure_transcript(
+        error="docker_evidence_summary_not_passed",
+        phase="final_evidence",
+        final_evidence_exit_code=1,
+        worker_stdout="primary stdout",
+        worker_stderr="",
+        observation=observation,
+    )
+    trusted_runner.write_controller_failure_transcript(
+        error="outer controller wrapper",
+        worker_stdout="secondary stdout",
+        worker_stderr="secondary stderr",
+        observation=observation,
+    )
+    payload = json.loads((evidence / "controller-failure.json").read_text(encoding="utf-8"))
+    assert payload["phase"] == "final_evidence"
+    assert payload["error"] == "docker_evidence_summary_not_passed"
+    assert payload["secondary_error"] == "outer controller wrapper"
+    assert payload["worker_stdout_tail"] == "primary stdout"
+    assert payload["secondary_worker_stdout_tail"] == "secondary stdout"
+    assert payload["secondary_worker_stderr_tail"] == "secondary stderr"
+    assert payload["final_evidence_exit_code"] == 1
+
+
 def test_container_conftest_provides_test_workspace_with_worker_confcutdir() -> None:
     candidate_worker = trusted_runner._load_module(
         "bridle_candidate_worker",
@@ -174,13 +241,41 @@ def test_pytest_arguments_disable_capture_for_docker_gate(monkeypatch: pytest.Mo
         REPO_ROOT / "scripts/ci/candidate_worker.py",
     )
     monkeypatch.setenv("BRIDLE_RUN_DOCKER_TESTS", "1")
+    trusted_scripts = REPO_ROOT / "scripts/ci"
+    candidate_src = str((REPO_ROOT / "candidate/backend/src").resolve())
+    monkeypatch.setenv("BRIDLE_TRUSTED_SCRIPTS_DIR", str(trusted_scripts))
+    monkeypatch.setenv("PYTHONPATH", candidate_src)
     args = candidate_worker.pytest_arguments(
-        candidate_root=REPO_ROOT,
+        candidate_root=REPO_ROOT / "candidate",
         trusted_config=REPO_ROOT / "backend/pyproject.toml",
         extra_args=("-q",),
     )
     assert "-s" in args
     assert "--capture=no" in args
+    assert "trusted_test_observer" in args
+    pythonpath = os.environ["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath[0] == str(trusted_scripts)
+    assert candidate_src in pythonpath
+    root_index = args.index("--rootdir")
+    assert Path(args[root_index + 1]) == (REPO_ROOT / "backend").resolve()
+    test_file = next(Path(arg) for arg in args if arg.endswith("test_docker_integration.py"))
+    assert test_file == (REPO_ROOT / "backend/tests/agent/container/test_docker_integration.py").resolve()
+
+
+def test_candidate_worker_prepend_pythonpath_preserves_candidate_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_worker = trusted_runner._load_module(
+        "bridle_candidate_worker_pythonpath",
+        REPO_ROOT / "scripts/ci/candidate_worker.py",
+    )
+    candidate_src = REPO_ROOT / "candidate/backend/src"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    candidate_worker._prepend_pythonpath(candidate_src)
+    assert os.environ["PYTHONPATH"] == str(candidate_src)
+
+    candidate_worker._prepend_pythonpath(candidate_src)
+    assert os.environ["PYTHONPATH"].split(os.pathsep) == [str(candidate_src)]
 
 
 @dataclass

@@ -286,6 +286,9 @@ jobs:
             --image-digest "${{ steps.review-image.outputs.image_digest }}" \
             --github-sha "$GITHUB_SHA" 2>&1 | tee "$RUNNER_TEMP/gate.log"; then
             echo "docker_gate_failed see $RUNNER_TEMP/gate.log" >&2
+            if [ -f "$BRIDLE_DOCKER_EVIDENCE_DIR/gate-failure.json" ]; then
+              cat "$BRIDLE_DOCKER_EVIDENCE_DIR/gate-failure.json" >&2
+            fi
             exit 1
           fi
           echo "trusted_harness_ref=${{ steps.trusted-ref.outputs.ref }}" >> "$GITHUB_OUTPUT"
@@ -336,6 +339,10 @@ jobs:
           echo "=== controller-failure.json ===" >&2
           if [ -f "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" ]; then
             cat "$RUNNER_TEMP/bridle-docker-evidence/controller-failure.json" >&2
+          fi
+          echo "=== gate-failure.json ===" >&2
+          if [ -f "$RUNNER_TEMP/bridle-docker-evidence/gate-failure.json" ]; then
+            cat "$RUNNER_TEMP/bridle-docker-evidence/gate-failure.json" >&2
           fi
           echo "=== session-summary.json ===" >&2
           if [ -f "$RUNNER_TEMP/bridle-docker-evidence/session-summary.json" ]; then

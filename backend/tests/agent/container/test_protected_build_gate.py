@@ -123,6 +123,13 @@ def test_ruleset_rejects_status_only_checks() -> None:
     assert "status_only_checks_not_sufficient" in errors
 
 
+def test_workflow_dumps_structured_gate_failure() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/container-docker-linux.yml").read_text(encoding="utf-8")
+    assert "gate-failure.json" in workflow
+    assert 'cat "$BRIDLE_DOCKER_EVIDENCE_DIR/gate-failure.json"' in workflow
+    assert 'cat "$RUNNER_TEMP/bridle-docker-evidence/gate-failure.json"' in workflow
+
+
 def test_ruleset_rejects_wrong_workflow_path() -> None:
     payload = json.loads(
         (REPO_ROOT / ".github/rulesets/protected-docker-posix-gate.json").read_text(encoding="utf-8")

@@ -205,6 +205,69 @@ export interface BoundaryOverview {
   debt_nodes: string[];
 }
 
+export interface ModuleCandidateFile {
+  file_path: string;
+  role: string;
+  file_hash: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface ModuleCandidate {
+  id: string;
+  run_id: string;
+  module_id: string;
+  name: string;
+  status: 'candidate' | 'confirmed' | 'rejected' | 'stale';
+  confidence: number;
+  evidence_id: string;
+  metrics: Record<string, unknown>;
+  file_fingerprint: string;
+  is_execution_boundary: boolean;
+  created_at: string;
+  confirmed_at: string | null;
+  files?: ModuleCandidateFile[];
+}
+
+export interface ModuleCandidatePage {
+  items: ModuleCandidate[];
+}
+
+export interface ModuleInterfaceCandidate {
+  id: string;
+  run_id: string;
+  from_module: string;
+  to_module: string;
+  from_candidate_id: string;
+  to_candidate_id: string;
+  symbol: string;
+  signature: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  mock_file_path: string;
+  mock_hash: string;
+  confidence: number;
+  status: 'candidate' | 'confirmed' | 'rejected' | 'stale';
+  created_at: string;
+  confirmed_at: string | null;
+}
+
+export interface ModuleInterfaceCandidatePage {
+  items: ModuleInterfaceCandidate[];
+}
+
+export interface InterfaceMockArtifact {
+  id: string;
+  interface_candidate_id: string;
+  file_path: string;
+  file_hash: string;
+  status: 'generated' | 'confirmed' | 'rejected' | 'stale';
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface InterfaceMockArtifactPage {
+  items: InterfaceMockArtifact[];
+}
+
 export interface MapArbitrationPage {
   items: Array<{
     id: string;

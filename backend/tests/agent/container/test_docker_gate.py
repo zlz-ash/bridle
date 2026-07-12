@@ -319,6 +319,135 @@ def test_main_returns_non_zero_on_failure(tmp_path: Path) -> None:
         )
         == 1
     )
+    failure = json.loads((evidence_root / "gate-failure.json").read_text(encoding="utf-8"))
+    assert failure["error_code"] == "docker_evidence_file_missing"
+    assert failure["expected_source_digest"] == SOURCE
+    assert failure["expected_image_digest"] == IMAGE
+    assert failure["expected_github_sha"] == GITHUB_SHA
+
+
+def test_main_failure_records_duration_and_exit_code(tmp_path: Path) -> None:
+    evidence_root = tmp_path / "missing"
+    evidence_root.mkdir()
+
+    assert (
+        dg.main(
+            [
+                str(evidence_root),
+                "--source-digest",
+                SOURCE,
+                "--image-digest",
+                IMAGE,
+                "--github-sha",
+                GITHUB_SHA,
+            ]
+        )
+        == 1
+    )
+
+    failure = json.loads((evidence_root / "gate-failure.json").read_text(encoding="utf-8"))
+    assert failure["stage"] == "validate_docker_evidence"
+    assert failure["exit_code"] == 1
+    assert isinstance(failure["duration_ms"], int)
+    assert failure["duration_ms"] >= 0
+
+
+def test_main_writes_structured_failure_with_summary(
+    tmp_path: Path,
+    trusted_layout: tuple[Path, Path],
+) -> None:
+    _, canonical = trusted_layout
+    evidence_root = tmp_path / "evidence"
+    _build_valid_evidence(evidence_root, canonical=canonical)
+    wrong_source = "sha256:" + "c" * 64
+    assert (
+        dg.main(
+            [
+                str(evidence_root),
+                "--source-digest",
+                wrong_source,
+                "--image-digest",
+                IMAGE,
+                "--github-sha",
+                GITHUB_SHA,
+            ]
+        )
+        == 1
+    )
+    failure = json.loads((evidence_root / "gate-failure.json").read_text(encoding="utf-8"))
+    assert failure["error_code"] == "docker_evidence_source_digest_mismatch"
+    assert failure["summary_status"] == de.EVIDENCE_STATUS_PASSED
+    assert set(failure["entry_keys"]) == de.CRITICAL_TEST_KEYS
+    assert set(failure["entry_digest_keys"]) == de.CRITICAL_TEST_KEYS
+
+
+@pytest.mark.parametrize("authorization_scheme", ["Bearer", "Basic"])
+@pytest.mark.parametrize("diagnostic_unit", ["😀\\\"", "\x00"])
+def test_main_bounds_and_redacts_untrusted_failure_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    authorization_scheme: str,
+    diagnostic_unit: str,
+) -> None:
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    secret = "super-secret-value"
+    bearer_secret = "bearer-credential-value"
+    multibyte = diagnostic_unit * 2_000
+    summary = {
+        "status": multibyte + f" Authorization: {authorization_scheme} {bearer_secret}",
+        "session_id": multibyte + f" password={secret}",
+        "source_digest": multibyte,
+        "github_sha": multibyte,
+        "entries": [
+            {"test_key": multibyte + f"-entry-{index}-Authorization: {authorization_scheme} {bearer_secret}"}
+            for index in range(2_000)
+        ],
+        "entry_digests": {
+            multibyte + f"-digest-{index}-api_key={secret}": "sha256:" + "a" * 64
+            for index in range(2_000)
+        },
+    }
+    (evidence_root / "session-summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    def fail_validation(*args: object, **kwargs: object) -> None:
+        raise de.DockerEvidenceError(
+            "docker_evidence_malicious_summary",
+            detail=multibyte + f" token={secret} Authorization: {authorization_scheme} {bearer_secret}",
+        )
+
+    monkeypatch.setattr(dg, "validate_evidence_cli", fail_validation)
+
+    assert dg.main(
+        [
+            str(evidence_root),
+            "--source-digest",
+            SOURCE,
+            "--image-digest",
+            IMAGE,
+            "--github-sha",
+            GITHUB_SHA,
+        ]
+    ) == 1
+
+    failure_path = evidence_root / "gate-failure.json"
+    failure_text = failure_path.read_text(encoding="utf-8")
+    failure = json.loads(failure_text)
+    stderr = capsys.readouterr().err
+    assert len(failure_text.encode("utf-8")) <= 16_384
+    assert len(stderr.encode("utf-8")) <= 2_048
+    assert secret not in failure_text
+    assert secret not in stderr
+    assert bearer_secret not in failure_text
+    assert bearer_secret not in stderr
+    assert len(failure["entry_keys"]) <= 32
+    assert len(failure["entry_digest_keys"]) <= 32
+    assert failure["entry_key_count"] == 2_000
+    assert failure["entry_digest_key_count"] == 2_000
+    assert failure["entry_keys_truncated"] is True
+    assert failure["entry_digest_keys_truncated"] is True
+    assert failure["detail_truncated"] is True
 
 
 def test_main_returns_zero_on_success(
