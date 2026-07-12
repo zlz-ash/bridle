@@ -69,6 +69,7 @@ SENTINEL_READY_PREFIX = "BRIDLE_SENTINEL_READY:"
 SENTINEL_REQUEST_PREFIX = "BRIDLE_SENTINEL_REQUEST:"
 RUN_REGISTER_PREFIX = "BRIDLE_RUN_REGISTER:"
 CONTROLLER_IPC_ROOT = Path("/controller-ipc")
+CRITICAL_EVIDENCE_ACK_ROOT = CONTROLLER_IPC_ROOT / "critical-evidence-acks"
 TAMPER_CMD = "python -m pytest tests/test_tamper_baseline.py -q"
 _KEEP_ALIVE = ["python", "-m", "bridle.agent.container.entrypoint", "--keep-alive"]
 
@@ -391,7 +392,7 @@ def _candidate_root_for_relative_paths() -> Path:
 def _await_controller_sentinel_ack(outside: Path) -> str:
     candidate_root = _candidate_root_for_relative_paths()
     container_root = os.environ.get("BRIDLE_CANDIDATE_CONTAINER_ROOT", "")
-    request_id = uuid.uuid4().hex[:12]
+    request_id = uuid.uuid4().hex[:16]
     request_dir = CONTROLLER_IPC_ROOT / "sentinel-requests"
     request_dir.mkdir(parents=True, exist_ok=True)
     resolved_outside = outside.resolve()
@@ -433,6 +434,35 @@ def _parse_link_attack_report(run_result: dict) -> dict:
     raise AssertionError("missing link attack report in container stdout")
 
 
+def _emit_worker_critical_evidence(payload: dict) -> None:
+    request_id: str | None = None
+    primary = payload.get("primary")
+    if (
+        payload.get("test_key") == "link_attack"
+        and isinstance(primary, dict)
+        and primary.get("sentinel_handle")
+    ):
+        request_id = uuid.uuid4().hex[:16]
+        payload["controller_request_id"] = request_id
+    print(CRITICAL_EVIDENCE_PREFIX + json.dumps(payload, sort_keys=True), flush=True)
+    if request_id is None:
+        return
+    ack_path = CRITICAL_EVIDENCE_ACK_ROOT / f"{request_id}.json"
+    deadline = time.time() + 30.0
+    while time.time() < deadline:
+        if ack_path.is_file():
+            ack = json.loads(ack_path.read_text(encoding="utf-8"))
+            if (
+                ack.get("status") == "verified"
+                and ack.get("request_id") == request_id
+                and ack.get("sentinel_handle") == primary["sentinel_handle"]
+            ):
+                return
+            pytest.fail(f"critical_evidence_ack_invalid request_id={request_id}")
+        time.sleep(0.05)
+    pytest.fail(f"critical_evidence_ack_timeout request_id={request_id}")
+
+
 def _finalize_critical_test_evidence(
     *,
     test_workspace: Path,
@@ -469,7 +499,7 @@ def _finalize_critical_test_evidence(
                     "query_failures": ["cleanup_failed"],
                 },
             }
-            print(CRITICAL_EVIDENCE_PREFIX + json.dumps(payload, sort_keys=True), flush=True)
+            _emit_worker_critical_evidence(payload)
             raise
         if primary or primary_error:
             publish_failed_evidence(
@@ -498,7 +528,7 @@ def _finalize_critical_test_evidence(
                     "query_failures": list(teardown.query_failures),
                 },
             }
-            print(CRITICAL_EVIDENCE_PREFIX + json.dumps(payload, sort_keys=True), flush=True)
+            _emit_worker_critical_evidence(payload)
             return
         publish_passed_evidence(
             test_key,

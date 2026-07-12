@@ -7,6 +7,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import stat
 import sys
 import time
@@ -24,6 +25,29 @@ SENTINEL_REQUEST_PREFIX = "BRIDLE_SENTINEL_REQUEST:"
 RUN_REGISTER_PREFIX = "BRIDLE_RUN_REGISTER:"
 
 INNER_CANDIDATE_ROOT = "/bridle-candidate"
+REQUEST_ID_PATTERN = re.compile(r"[0-9a-f]{16}")
+
+
+def _validated_request_id(
+    value: Any,
+    *,
+    missing_error: str,
+    invalid_error: str,
+) -> str:
+    request_id = str(value or "").strip()
+    if not request_id:
+        raise RuntimeError(missing_error)
+    if REQUEST_ID_PATTERN.fullmatch(request_id) is None:
+        raise RuntimeError(invalid_error)
+    return request_id
+
+
+def _ack_path(ack_dir: Path, request_id: str) -> Path:
+    resolved_dir = ack_dir.resolve()
+    resolved_path = (resolved_dir / f"{request_id}.json").resolve()
+    if resolved_path.parent != resolved_dir:
+        raise RuntimeError("sentinel_ack_path_invalid")
+    return resolved_path
 
 
 def _load_sentinel_registry(trusted_scripts: Path):
@@ -201,10 +225,11 @@ def register_sentinel_request(
     ctx: Any,
     trusted_scripts: Path,
 ) -> str:
-    registry = _load_sentinel_registry(trusted_scripts)
-    request_id = str(payload.get("request_id") or "").strip()
-    if not request_id:
-        raise RuntimeError("sentinel_request_missing_id")
+    request_id = _validated_request_id(
+        payload.get("request_id"),
+        missing_error="sentinel_request_missing_id",
+        invalid_error="sentinel_request_invalid_id",
+    )
     if request_id in ctx.handled_request_ids:
         raise RuntimeError(f"sentinel_request_replayed request_id={request_id}")
     candidate_relative = str(payload.get("candidate_relative") or payload.get("path") or "").strip()
@@ -215,6 +240,7 @@ def register_sentinel_request(
         host_path = resolve_container_path_to_host(container_path, ctx.candidate_root)
     else:
         host_path = resolve_candidate_relative_path(ctx.candidate_root, candidate_relative)
+    registry = _load_sentinel_registry(trusted_scripts)
     record = registry.register_external_sentinel(host_path)
     handle = f"sent-{uuid.uuid4().hex[:16]}"
     ctx.sentinel_by_handle[handle] = record.to_dict()
@@ -222,7 +248,7 @@ def register_sentinel_request(
     if ctx.controller_ipc_dir is not None:
         ack_dir = ctx.controller_ipc_dir / "sentinel-acks"
         ack_dir.mkdir(parents=True, exist_ok=True)
-        ack_path = ack_dir / f"{request_id}.json"
+        ack_path = _ack_path(ack_dir, request_id)
         ack_path.write_text(
             json.dumps(
                 {
@@ -261,6 +287,101 @@ def poll_sentinel_request_files(
         register_sentinel_request(payload, ctx=ctx, trusted_scripts=trusted_scripts)
 
 
+def verify_live_sentinel_evidence(
+    payload: dict[str, Any],
+    *,
+    ctx: Any,
+    trusted_scripts: Path,
+) -> dict[str, Any]:
+    request_id = _validated_request_id(
+        payload.get("controller_request_id"),
+        missing_error="sentinel_live_verification_request_missing",
+        invalid_error="sentinel_live_verification_request_invalid",
+    )
+    if request_id in ctx.verified_sentinel_by_request:
+        raise RuntimeError(
+            f"sentinel_live_verification_replayed request_id={request_id}"
+        )
+    primary = payload.get("primary")
+    if not isinstance(primary, dict):
+        raise RuntimeError("sentinel_live_verification_primary_invalid")
+    sentinel_handle = str(primary.get("sentinel_handle") or "").strip()
+    if not sentinel_handle:
+        raise RuntimeError("sentinel_live_verification_handle_missing")
+    before = ctx.sentinel_by_handle.get(sentinel_handle)
+    if before is None:
+        raise RuntimeError("sentinel_not_preregistered_by_controller")
+
+    registry = _load_sentinel_registry(trusted_scripts)
+    host_path = Path(str(before["canonical_path"]))
+    after_record = registry.register_external_sentinel(host_path)
+    registry.verify_external_sentinel(host_path, before)
+    proof = {
+        "request_id": request_id,
+        "sentinel_handle": sentinel_handle,
+        "before": dict(before),
+        "after": after_record.to_dict(),
+    }
+    ctx.verified_sentinel_by_request[request_id] = proof
+    if ctx.controller_ipc_dir is not None:
+        ack_dir = ctx.controller_ipc_dir / "critical-evidence-acks"
+        ack_dir.mkdir(parents=True, exist_ok=True)
+        ack_path = _ack_path(ack_dir, request_id)
+        temporary = ack_path.with_name(f".{ack_path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "sentinel_handle": sentinel_handle,
+                    "status": "verified",
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary, ack_path)
+    LOGGER.info(
+        "sentinel_live_verified path=%s handle=%s request_id=%s",
+        host_path,
+        sentinel_handle,
+        request_id,
+    )
+    return proof
+
+
+def consume_live_sentinel_verification(
+    payload: dict[str, Any],
+    *,
+    ctx: Any,
+) -> dict[str, Any]:
+    request_id = _validated_request_id(
+        payload.get("controller_request_id"),
+        missing_error="sentinel_live_verification_request_missing",
+        invalid_error="sentinel_live_verification_request_invalid",
+    )
+    if request_id in ctx.consumed_sentinel_verification_requests:
+        raise RuntimeError(
+            f"sentinel_live_verification_already_consumed request_id={request_id}"
+        )
+    proof = ctx.verified_sentinel_by_request.get(request_id)
+    if proof is None:
+        raise RuntimeError(
+            f"sentinel_live_verification_missing request_id={request_id}"
+        )
+    primary = payload.get("primary")
+    sentinel_handle = (
+        str(primary.get("sentinel_handle") or "").strip()
+        if isinstance(primary, dict)
+        else ""
+    )
+    if not sentinel_handle or proof.get("sentinel_handle") != sentinel_handle:
+        raise RuntimeError(
+            f"sentinel_live_verification_handle_mismatch request_id={request_id}"
+        )
+    ctx.consumed_sentinel_verification_requests.add(request_id)
+    return dict(proof)
+
+
 def handle_controller_line(
     line: str,
     *,
@@ -287,6 +408,23 @@ def handle_controller_line(
         record = registry.register_external_sentinel(host_path)
         handle = f"sent-{uuid.uuid4().hex[:16]}"
         ctx.sentinel_by_handle[handle] = record.to_dict()
+        return
+
+    critical = _control_payload(line, CRITICAL_EVIDENCE_PREFIX)
+    if critical is None or not critical.startswith('{"'):
+        return
+    payload = json.loads(critical)
+    primary = payload.get("primary")
+    if (
+        payload.get("test_key") == "link_attack"
+        and isinstance(primary, dict)
+        and primary.get("sentinel_handle")
+    ):
+        verify_live_sentinel_evidence(
+            payload,
+            ctx=ctx,
+            trusted_scripts=trusted_scripts,
+        )
 
 
 def mark_evidence_run_started(*, trusted_pythonpath: Path) -> None:
@@ -401,7 +539,6 @@ def publish_from_worker_stdout(
         return pytest_exitstatus
     de = _load_docker_evidence(trusted_pythonpath)
 
-    registry = _load_sentinel_registry(trusted_scripts)
     seen_test_keys: set[str] = set()
     for line in stdout.splitlines():
         critical = _control_payload(line, CRITICAL_EVIDENCE_PREFIX)
@@ -412,14 +549,9 @@ def publish_from_worker_stdout(
         primary = dict(payload["primary"])
         sentinel_handle = primary.pop("sentinel_handle", None)
         if sentinel_handle and test_key == "link_attack":
-            before = ctx.sentinel_by_handle.get(str(sentinel_handle))
-            if before is None:
-                raise RuntimeError("sentinel_not_preregistered_by_controller")
-            host_path = Path(str(before["canonical_path"]))
-            after_record = registry.register_external_sentinel(host_path)
-            registry.verify_external_sentinel(host_path, before)
-            primary["sentinel_before"] = dict(before)
-            primary["sentinel_after"] = after_record.to_dict()
+            proof = consume_live_sentinel_verification(payload, ctx=ctx)
+            primary["sentinel_before"] = dict(proof["before"])
+            primary["sentinel_after"] = dict(proof["after"])
             _map_attack_targets_to_host(primary, candidate_root=ctx.candidate_root)
         seen_test_keys.add(test_key)
         claimed_status = str(payload.get("status") or "")
@@ -468,7 +600,12 @@ def publish_from_worker_stdout(
 
 
 def wait_for_sentinel_ack(controller_ipc_dir: Path, request_id: str, *, timeout: float = 30.0) -> dict[str, Any]:
-    ack_path = controller_ipc_dir / "sentinel-acks" / f"{request_id}.json"
+    request_id = _validated_request_id(
+        request_id,
+        missing_error="sentinel_ack_request_missing",
+        invalid_error="sentinel_ack_request_invalid",
+    )
+    ack_path = _ack_path(controller_ipc_dir / "sentinel-acks", request_id)
     deadline = time.time() + timeout
     while time.time() < deadline:
         if ack_path.is_file():

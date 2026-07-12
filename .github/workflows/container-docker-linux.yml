@@ -10,15 +10,6 @@ on:
       - ".github/trusted-docker-harness.txt"
       - ".github/rulesets/**"
       - "scripts/ci/**"
-  pull_request:
-    paths:
-      - "backend/src/bridle/agent/container/**"
-      - "backend/tests/agent/container/**"
-      - "backend/pyproject.toml"
-      - ".github/workflows/container-docker-linux.yml"
-      - ".github/trusted-docker-harness.txt"
-      - ".github/rulesets/**"
-      - "scripts/ci/**"
 
 jobs:
   protected-docker-posix-gate:

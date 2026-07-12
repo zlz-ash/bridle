@@ -266,9 +266,11 @@ def _spawn_docker_worker(
         ipc_root = paths.controller_ipc.resolve()
         requests_dir = ipc_root / "sentinel-requests"
         acks_dir = ipc_root / "sentinel-acks"
+        critical_acks_dir = ipc_root / "critical-evidence-acks"
         events_dir = ipc_root / "test-events"
         requests_dir.mkdir(parents=True, exist_ok=True)
         acks_dir.mkdir(parents=True, exist_ok=True)
+        critical_acks_dir.mkdir(parents=True, exist_ok=True)
         events_dir.mkdir(parents=True, exist_ok=True)
         volume_args.extend(
             [
@@ -276,6 +278,8 @@ def _spawn_docker_worker(
                 f"{requests_dir}:/controller-ipc/sentinel-requests:rw",
                 "-v",
                 f"{acks_dir}:/controller-ipc/sentinel-acks:ro",
+                "-v",
+                f"{critical_acks_dir}:/controller-ipc/critical-evidence-acks:ro",
                 "-v",
                 f"{events_dir}:/controller-ipc/test-events:rw",
             ]
