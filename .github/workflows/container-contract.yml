@@ -1,0 +1,58 @@
+name: Container Contract Module Gate
+
+on:
+  push:
+    paths:
+      - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
+      - "backend/pyproject.toml"
+      - "scripts/ci/**"
+      - "scripts/verify_module_ci_gates.py"
+      - ".ai-dev/ci/contracts/map-container-test-contract.json"
+      - ".github/workflows/container-contract.yml"
+  pull_request:
+    paths:
+      - "backend/src/bridle/agent/container/**"
+      - "backend/tests/agent/container/**"
+      - "backend/pyproject.toml"
+      - "scripts/ci/**"
+      - "scripts/verify_module_ci_gates.py"
+      - ".ai-dev/ci/contracts/map-container-test-contract.json"
+      - ".github/workflows/container-contract.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-contract-gate:
+    name: container-contract-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install container contract dependencies
+        run: python -m pip install -e backend "pytest>=8.0" "pytest-asyncio>=0.25"
+
+      - name: Run reviewed container contract gate
+        run: >-
+          python scripts/verify_module_ci_gates.py
+          --contract .ai-dev/ci/contracts/map-container-test-contract.json
+          --gate container-contract
+          --output-dir .ai-dev/ci/runs/github-container-contract-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload container contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-contract-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ai-dev/ci/runs/github-container-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn

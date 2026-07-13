@@ -1,0 +1,483 @@
+{
+  "project_root": "D:\\代码仓\\Bridle-dev",
+  "created_at": "2026-07-11T12:55:48.804Z",
+  "files": [
+    {
+      "path": "docs/README.md",
+      "class": "root",
+      "owner": "ln-111-root-docs-creator",
+      "scope": "Documentation hub and navigation layer for Bridle maintainers, agents, and reviewers",
+      "doc_kind": "index",
+      "doc_role": "canonical",
+      "read_when": "Read when you need the canonical map of Bridle project documentation",
+      "skip_when": "Skip when you already know the exact canonical document or only need a root README command",
+      "primary_sources": [
+        "README.md",
+        "AGENTS.md",
+        "backend/pyproject.toml",
+        "frontend/package.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/architecture/patterns_catalog.md",
+      "class": "other",
+      "owner": "ln-112-project-core-creator",
+      "scope": "Bridle 当前代码中重复出现的架构与实现模式",
+      "doc_kind": "reference",
+      "doc_role": "working",
+      "read_when": "重构、评审或新增模块前需要确认现有模式时",
+      "skip_when": "只需要已经接受的架构决策时",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "backend/src/bridle",
+        "frontend/src",
+        "scripts/ci"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": ""
+    },
+    {
+      "path": "docs/documentation_standards.md",
+      "class": "root",
+      "owner": "ln-111-root-docs-creator",
+      "scope": "Canonical writing, structure, source, and verification requirements for Bridle project documentation",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "Read when creating, updating, reviewing, or validating project documentation",
+      "skip_when": "Skip when you only need a product behavior, API contract, or run command",
+      "primary_sources": [
+        "AGENTS.md",
+        "docs/README.md",
+        "docs/principles.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/principles.md",
+      "class": "root",
+      "owner": "ln-111-root-docs-creator",
+      "scope": "Canonical development principles and trade-off rules used for Bridle implementation, documentation, testing, and review decisions",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "read_when": "Read when planning, implementing, reviewing, or resolving competing technical constraints",
+      "skip_when": "Skip when you only need an exact API, schema, or run command",
+      "primary_sources": [
+        "AGENTS.md",
+        "backend/tests",
+        ".github/workflows/container-docker-linux.yml"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/api_spec.md",
+      "class": "project",
+      "owner": "ln-113-backend-docs-creator",
+      "scope": "当前 Bridle FastAPI 应用通过 /api/v1 暴露的 REST 与服务器发送事件契约。",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "需要确认 API 方法、路径、资源分组、认证边界或已知请求/响应契约时阅读。",
+      "skip_when": "只需要 SQLite 表结构、前端行为或控制器实现时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/architecture.md",
+      "class": "project",
+      "owner": "ln-112-project-core-creator",
+      "scope": "Bridle 当前系统边界、运行结构、架构决策与质量风险",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "read_when": "需要理解组件关系、关键运行链路、技术边界或变更影响时",
+      "skip_when": "只需要功能需求、API 字段或单个测试命令时",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "docs/project/requirements.md",
+        "docs/reference/adrs"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/database_schema.md",
+      "class": "project",
+      "owner": "ln-113-backend-docs-creator",
+      "scope": "当前工作区本地 SQLite 的三张持久化表、逻辑关系与迁移状态。",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "需要确认 Bridle 持久化实体、已知字段、逻辑关系或 schema 生命周期时阅读。",
+      "skip_when": "只需要 HTTP API 路径、前端状态或部署拓扑时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/design_guidelines.md",
+      "class": "project",
+      "owner": "ln-114-frontend-docs-creator",
+      "scope": "Canonical visual system, component inventory, accessibility targets, and UI maintenance rules for the current Bridle frontend",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "read_when": "Read when changing React UI, design-system components, tokens, typography, colors, or accessibility behavior",
+      "skip_when": "Skip when you only need backend, API, persistence, or infrastructure contracts",
+      "primary_sources": [
+        "frontend/package.json",
+        "frontend/src/components/ds",
+        "frontend/src/components/ds/styles.css",
+        "frontend/src/styles/tokens"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/implementation_status.md",
+      "class": "other",
+      "owner": "ln-112-project-core-creator",
+      "scope": "Bridle 需求、架构决策与当前代码/测试证据的追踪状态",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "判断某项能力是计划中、已有实现还是已被真实验证时",
+      "skip_when": "只需要需求定义、技术选型或 API 字段时",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        ".ai-dev/docs/ln-110/context-store.json",
+        "docs/project/requirements.md",
+        "docs/reference/adrs"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": ""
+    },
+    {
+      "path": "docs/project/infrastructure.md",
+      "class": "project",
+      "owner": "ln-115-devops-docs-creator",
+      "scope": "部署拓扑、主机与网络约束、端口、已部署服务、制品与 CI/CD 现状。",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "read_when": "需要确认 Bridle 的运行位置、端口、容器资产或当前 CI 门禁时阅读。",
+      "skip_when": "只需要本地启动、测试或故障处理步骤时跳过，改读 runbook.md。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/requirements.md",
+      "class": "project",
+      "owner": "ln-112-project-core-creator",
+      "scope": "Bridle 产品能力与已确认工程门禁的功能需求",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "read_when": "规划功能、测试合同、CI 用例或验收范围时",
+      "skip_when": "只需要技术实现细节或运行命令时",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/runbook.md",
+      "class": "project",
+      "owner": "ln-115-devops-docs-creator",
+      "scope": "本地环境准备、启动、测试、构建、容器门禁运行边界、健康检查与故障处理。",
+      "doc_kind": "how-to",
+      "doc_role": "canonical",
+      "read_when": "需要在本地启动、验证或排查 Bridle，或确认容器 CI 操作边界时阅读。",
+      "skip_when": "只需要静态拓扑、端口或 CI 现状清单时跳过，改读 infrastructure.md。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/tech_stack.md",
+      "class": "project",
+      "owner": "ln-112-project-core-creator",
+      "scope": "Bridle 当前采用的运行时、框架、存储、测试与辅助技术",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "安装依赖、评估升级、排查版本兼容或选择实现入口时",
+      "skip_when": "只需要业务需求或架构运行链路时",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "backend/pyproject.toml",
+        "frontend/package.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/README.md",
+      "class": "other",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "Bridle 的长期参考文档索引，覆盖 ADR、项目指南、包手册与调研记录。",
+      "doc_kind": "index",
+      "doc_role": "navigation",
+      "read_when": "需要查找长期技术决策、可复用项目知识或参考资料状态时阅读。",
+      "skip_when": "只需要当前启动命令、API 路径或实现状态时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        ".ai-dev/docs/ln-110/aggregate-summary.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": ""
+    },
+    {
+      "path": "docs/reference/adrs/adr-001-fastapi-backend.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "采用 FastAPI、Uvicorn、Pydantic 与 Typer 作为 Bridle 后端运行时的决策记录。",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "修改后端框架、ASGI server、CLI 入口或 API 运行边界前阅读。",
+      "skip_when": "只需要当前 endpoint 表或启动命令时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-002-local-sqlite-sqlalchemy.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "采用工作区本地 SQLite、SQLAlchemy async 与 aiosqlite 的持久化决策记录。",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "修改数据库引擎、ORM、工作区持久化或 schema 生命周期前阅读。",
+      "skip_when": "只需要三张表的当前概览时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-003-react-vite-frontend.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "采用 React、TypeScript、Vite 与 TanStack React Query 构建 Bridle 前端的决策记录。",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "修改前端框架、构建工具、服务端状态管理或地图同步模式前阅读。",
+      "skip_when": "只需要视觉规范或单个组件行为时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-004-langfuse-v4-observability.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "将 Langfuse v4 作为 Bridle 结构化日志之外可选观测适配层的决策记录。",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "修改观测开关、Langfuse 版本、外部 trace 发送或日志降级策略前阅读。",
+      "skip_when": "只需要本地日志字段或 API 路径时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-005-trusted-docker-gate.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "使用受信任控制面验证不受信候选容器链与真实 Linux/Docker evidence 的决策记录。",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "read_when": "修改容器边界、CI harness、镜像摘要、隔离测试或 evidence 校验前阅读。",
+      "skip_when": "只需要普通后端/前端测试命令时跳过。",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/project-pitfalls.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "Confirmed, repeatable Bridle project pitfalls and prevention checks",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "A change touches documentation, workspace paths, pipeline state, project-map CI, or the trusted Docker gate",
+      "skip_when": "You only need general development principles or a single run command",
+      "primary_sources": [
+        "AGENTS.md",
+        ".ai-dev/runtime/capability-report.json",
+        ".ai-dev/spec/requirements.json",
+        "docs/project/runbook.md",
+        "docs/reference/guides/testing-strategy.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/testing-strategy.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "Risk-based testing, evidence, and CI mapping rules for the current Bridle repository",
+      "doc_kind": "how-to",
+      "doc_role": "canonical",
+      "read_when": "Planning, writing, reviewing, or mapping Bridle tests into CI",
+      "skip_when": "You only need one command from the runbook",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        "backend/pyproject.toml",
+        "frontend/package.json",
+        "backend/tests",
+        "frontend/src/**/__tests__",
+        "scripts/ci",
+        ".github/workflows/container-docker-linux.yml"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/workspace-runtime-patterns.md",
+      "class": "reference",
+      "owner": "ln-120-reference-docs-creator",
+      "scope": "Reusable Bridle workspace-first runtime patterns and review checks",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "read_when": "Changing workspace binding, local API startup, persistence paths, file access, or runtime documentation",
+      "skip_when": "You only need a single start command from the runbook",
+      "primary_sources": [
+        "backend/src/bridle/cli.py",
+        "backend/src/bridle/config.py",
+        "backend/src/bridle/database.py",
+        "backend/src/bridle/features/workspace",
+        "docs/project/runbook.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/tasks/README.md",
+      "class": "tasks",
+      "owner": "ln-130-tasks-docs-creator",
+      "scope": "Bridle local task planning, pipeline states, review gates, and task artifact rules",
+      "doc_kind": "index",
+      "doc_role": "canonical",
+      "read_when": "Planning, reviewing, executing, or resuming work in this repository",
+      "skip_when": "You only need architecture, API, or one test command",
+      "primary_sources": [
+        "AGENTS.md",
+        "plan.md",
+        ".ai-dev/state/pipeline.json",
+        ".ai-dev/spec/requirements.json",
+        "docs/reference/guides/testing-strategy.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    }
+  ]
+}

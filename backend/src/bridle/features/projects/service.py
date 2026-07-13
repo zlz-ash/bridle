@@ -7,12 +7,12 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bridle.agent.runtime.project_registry import get_project_runtime_registry
 from bridle.api.errors import ConflictError, NotFoundError, ValidationError
+from bridle.features.project_map.store import ProjectPlanStore
+from bridle.features.projects.schemas import ProjectReadSchema
 from bridle.logging.facade import get_logging_facade
 from bridle.models.project import ProjectRecord
-from bridle.features.projects.schemas import ProjectReadSchema
-from bridle.features.project_map.store import ProjectPlanStore
-from bridle.features.project_map.watcher import get_code_map_watcher
 from bridle.utils.datetime_util import utc_now_naive
 
 
@@ -42,9 +42,9 @@ class ProjectService:
 
         store = ProjectPlanStore(root, project_id=record.id)
         initialized = store.initialize()
-        get_code_map_watcher().start(root, project_id=record.id)
         await db.commit()
         await db.refresh(record)
+        await get_project_runtime_registry().ensure_started(record.id, root)
         get_logging_facade().info_event(
             "project_open",
             "completed",

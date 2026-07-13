@@ -49,6 +49,9 @@ def _reset_global_workspace() -> None:
     import bridle.config as _cfg
 
     _cfg._global_config = None
+    from bridle.agent.runtime.project_registry import reset_project_runtime_registry_for_tests
+
+    reset_project_runtime_registry_for_tests()
 
 
 @pytest.fixture
@@ -165,7 +168,10 @@ async def client(
         container_runner=FakeContainerRunner(workspace_root=test_workspace),
     )
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with app.router.lifespan_context(app), AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as c:
         yield c
 
 

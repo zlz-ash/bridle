@@ -1,0 +1,3931 @@
+{
+  "blind_spots": [
+    {
+      "detail": {
+        "candidates": [],
+        "module": "base64"
+      },
+      "file_path": "src/itsdangerous/encoding.py",
+      "id": "blind-fixture-5a484d29dc0b89ff",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 51,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "collections.abc"
+      },
+      "file_path": "src/itsdangerous/serializer.py",
+      "id": "blind-fixture-8acc78ca229ddf27",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 68,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "collections.abc"
+      },
+      "file_path": "src/itsdangerous/signer.py",
+      "id": "blind-fixture-750864aafd83fb8f",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 68,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "collections.abc"
+      },
+      "file_path": "src/itsdangerous/timed.py",
+      "id": "blind-fixture-1277935bfbc4fb7d",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 68,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "datetime"
+      },
+      "file_path": "src/itsdangerous/exc.py",
+      "id": "blind-fixture-a6b45c9450a8d8e2",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 87,
+        "end_line": 4,
+        "start_byte": 58,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "datetime"
+      },
+      "file_path": "src/itsdangerous/timed.py",
+      "id": "blind-fixture-77837bb15f50fb62",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 132,
+        "end_line": 6,
+        "start_byte": 103,
+        "start_line": 6
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "datetime"
+      },
+      "file_path": "src/itsdangerous/timed.py",
+      "id": "blind-fixture-b5dab5a00aa713d5",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 163,
+        "end_line": 7,
+        "start_byte": 134,
+        "start_line": 7
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "hashlib"
+      },
+      "file_path": "src/itsdangerous/signer.py",
+      "id": "blind-fixture-9b455a43a4c22f2a",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 84,
+        "end_line": 4,
+        "start_byte": 70,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "hmac"
+      },
+      "file_path": "src/itsdangerous/signer.py",
+      "id": "blind-fixture-eb7cba783a0aa6df",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 97,
+        "end_line": 5,
+        "start_byte": 86,
+        "start_line": 5
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "importlib.metadata"
+      },
+      "file_path": "src/itsdangerous/__init__.py",
+      "id": "blind-fixture-8436fb2628f38963",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 1036,
+        "end_line": 26,
+        "start_byte": 1011,
+        "start_line": 26
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "json"
+      },
+      "file_path": "src/itsdangerous/_json.py",
+      "id": "blind-fixture-8151284f2d23810c",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 58,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "json"
+      },
+      "file_path": "src/itsdangerous/serializer.py",
+      "id": "blind-fixture-2a83334e862a7c76",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 81,
+        "end_line": 4,
+        "start_byte": 70,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "pallets_sphinx_themes"
+      },
+      "file_path": "docs/conf.py",
+      "id": "blind-fixture-6f696fe6ae1c500b",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 45,
+        "end_line": 1,
+        "start_byte": 0,
+        "start_line": 1
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "pallets_sphinx_themes"
+      },
+      "file_path": "docs/conf.py",
+      "id": "blind-fixture-f0c6bc92b966c995",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 92,
+        "end_line": 2,
+        "start_byte": 47,
+        "start_line": 2
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "string"
+      },
+      "file_path": "src/itsdangerous/encoding.py",
+      "id": "blind-fixture-a4f725aeab19beab",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 66,
+        "end_line": 4,
+        "start_byte": 53,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "struct"
+      },
+      "file_path": "src/itsdangerous/encoding.py",
+      "id": "blind-fixture-b39c1980b31ac7ed",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 81,
+        "end_line": 5,
+        "start_byte": 68,
+        "start_line": 5
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "time"
+      },
+      "file_path": "src/itsdangerous/timed.py",
+      "id": "blind-fixture-517386befe05b1a5",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 81,
+        "end_line": 4,
+        "start_byte": 70,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/__init__.py",
+      "id": "blind-fixture-384660c0a3cfaf2f",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 56,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/_json.py",
+      "id": "blind-fixture-ba0f22574478038d",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 78,
+        "end_line": 4,
+        "start_byte": 60,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/encoding.py",
+      "id": "blind-fixture-bae48a347696382c",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 101,
+        "end_line": 6,
+        "start_byte": 83,
+        "start_line": 6
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/exc.py",
+      "id": "blind-fixture-900b50729c7e72d2",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 56,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/serializer.py",
+      "id": "blind-fixture-03a5dd4ff6408de1",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 101,
+        "end_line": 5,
+        "start_byte": 83,
+        "start_line": 5
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/signer.py",
+      "id": "blind-fixture-734a23baef737a01",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 117,
+        "end_line": 6,
+        "start_byte": 99,
+        "start_line": 6
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/timed.py",
+      "id": "blind-fixture-6bce6a7b05eca6d5",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 101,
+        "end_line": 5,
+        "start_byte": 83,
+        "start_line": 5
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing"
+      },
+      "file_path": "src/itsdangerous/url_safe.py",
+      "id": "blind-fixture-199c279c0e29a121",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 56,
+        "end_line": 3,
+        "start_byte": 38,
+        "start_line": 3
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "typing_extensions"
+      },
+      "file_path": "src/itsdangerous/serializer.py",
+      "id": "blind-fixture-bfb179dc04e832ef",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 321,
+        "end_line": 14,
+        "start_byte": 291,
+        "start_line": 14
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "warnings"
+      },
+      "file_path": "src/itsdangerous/__init__.py",
+      "id": "blind-fixture-0ff114de77762d3b",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 1061,
+        "end_line": 27,
+        "start_byte": 1046,
+        "start_line": 27
+      },
+      "source": "static",
+      "status": "open"
+    },
+    {
+      "detail": {
+        "candidates": [],
+        "module": "zlib"
+      },
+      "file_path": "src/itsdangerous/url_safe.py",
+      "id": "blind-fixture-93f95ab2f05cb45f",
+      "kind": "unresolved_ref",
+      "range": {
+        "end_byte": 69,
+        "end_line": 4,
+        "start_byte": 58,
+        "start_line": 4
+      },
+      "source": "static",
+      "status": "open"
+    }
+  ],
+  "entities": [
+    {
+      "id": "code-004daff29497d94aa7757bf0",
+      "kind": "directory",
+      "name": ".devcontainer",
+      "parent_id": null,
+      "path": ".devcontainer",
+      "payload": {}
+    },
+    {
+      "id": "code-c149843e4a4b7800c50e5311",
+      "kind": "file",
+      "name": "devcontainer.json",
+      "parent_id": "code-004daff29497d94aa7757bf0",
+      "path": ".devcontainer/devcontainer.json",
+      "payload": {}
+    },
+    {
+      "id": "code-db11febc2c00346265c99828",
+      "kind": "file",
+      "name": "on-create-command.sh",
+      "parent_id": "code-004daff29497d94aa7757bf0",
+      "path": ".devcontainer/on-create-command.sh",
+      "payload": {}
+    },
+    {
+      "id": "code-222cc2be7c396d7d317701fc",
+      "kind": "file",
+      "name": ".editorconfig",
+      "parent_id": null,
+      "path": ".editorconfig",
+      "payload": {}
+    },
+    {
+      "id": "code-4053dfeea882e78d3f31d314",
+      "kind": "directory",
+      "name": ".github",
+      "parent_id": null,
+      "path": ".github",
+      "payload": {}
+    },
+    {
+      "id": "code-7bd2039190cd8db054e7cadd",
+      "kind": "directory",
+      "name": "ISSUE_TEMPLATE",
+      "parent_id": "code-4053dfeea882e78d3f31d314",
+      "path": ".github/ISSUE_TEMPLATE",
+      "payload": {}
+    },
+    {
+      "id": "code-72fa1e4fa5964df73f818bee",
+      "kind": "file",
+      "name": "bug-report.md",
+      "parent_id": "code-7bd2039190cd8db054e7cadd",
+      "path": ".github/ISSUE_TEMPLATE/bug-report.md",
+      "payload": {}
+    },
+    {
+      "id": "code-4868cbfa4b7fbb28e6346695",
+      "kind": "file",
+      "name": "config.yml",
+      "parent_id": "code-7bd2039190cd8db054e7cadd",
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "payload": {}
+    },
+    {
+      "id": "code-4097051f2d39b16ebea46a87",
+      "kind": "file",
+      "name": "feature-request.md",
+      "parent_id": "code-7bd2039190cd8db054e7cadd",
+      "path": ".github/ISSUE_TEMPLATE/feature-request.md",
+      "payload": {}
+    },
+    {
+      "id": "code-ac3871086216eae952bfb643",
+      "kind": "file",
+      "name": "dependabot.yml",
+      "parent_id": "code-4053dfeea882e78d3f31d314",
+      "path": ".github/dependabot.yml",
+      "payload": {}
+    },
+    {
+      "id": "code-05b1f16f56be8df483c880ae",
+      "kind": "file",
+      "name": "pull_request_template.md",
+      "parent_id": "code-4053dfeea882e78d3f31d314",
+      "path": ".github/pull_request_template.md",
+      "payload": {}
+    },
+    {
+      "id": "code-f019620edd42955bd2ad859f",
+      "kind": "directory",
+      "name": "workflows",
+      "parent_id": "code-4053dfeea882e78d3f31d314",
+      "path": ".github/workflows",
+      "payload": {}
+    },
+    {
+      "id": "code-6b235d4744b697bc82665aa6",
+      "kind": "file",
+      "name": "lock.yaml",
+      "parent_id": "code-f019620edd42955bd2ad859f",
+      "path": ".github/workflows/lock.yaml",
+      "payload": {}
+    },
+    {
+      "id": "code-9832843221082ae6ad43a3b2",
+      "kind": "file",
+      "name": "publish.yaml",
+      "parent_id": "code-f019620edd42955bd2ad859f",
+      "path": ".github/workflows/publish.yaml",
+      "payload": {}
+    },
+    {
+      "id": "code-bebcbc3a56e320f5ca5106f3",
+      "kind": "file",
+      "name": "tests.yaml",
+      "parent_id": "code-f019620edd42955bd2ad859f",
+      "path": ".github/workflows/tests.yaml",
+      "payload": {}
+    },
+    {
+      "id": "code-dfaa9a79675e5b61b48843e5",
+      "kind": "file",
+      "name": ".gitignore",
+      "parent_id": null,
+      "path": ".gitignore",
+      "payload": {}
+    },
+    {
+      "id": "code-5124d3abdddaf708fb04f233",
+      "kind": "file",
+      "name": ".pre-commit-config.yaml",
+      "parent_id": null,
+      "path": ".pre-commit-config.yaml",
+      "payload": {}
+    },
+    {
+      "id": "code-16bedcffdf502f19e6c67a17",
+      "kind": "file",
+      "name": ".readthedocs.yaml",
+      "parent_id": null,
+      "path": ".readthedocs.yaml",
+      "payload": {}
+    },
+    {
+      "id": "code-28fed9b9ccd7ef6dbc977bb9",
+      "kind": "file",
+      "name": "CHANGES.rst",
+      "parent_id": null,
+      "path": "CHANGES.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-75466c4f2898dd2a31d36f09",
+      "kind": "file",
+      "name": "CONTRIBUTING.rst",
+      "parent_id": null,
+      "path": "CONTRIBUTING.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-ec0b578f041db858bccf9a8b",
+      "kind": "file",
+      "name": "LICENSE.txt",
+      "parent_id": null,
+      "path": "LICENSE.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-42c59af8a4bae559bc5a5d5d",
+      "kind": "file",
+      "name": "README.md",
+      "parent_id": null,
+      "path": "README.md",
+      "payload": {}
+    },
+    {
+      "id": "code-69e2c19e4c0eb2ff70e7974c",
+      "kind": "directory",
+      "name": "docs",
+      "parent_id": null,
+      "path": "docs",
+      "payload": {}
+    },
+    {
+      "id": "code-dd7eefd971535a860fb987ae",
+      "kind": "file",
+      "name": "Makefile",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/Makefile",
+      "payload": {}
+    },
+    {
+      "id": "code-a2f18b4c53e3d555237390bc",
+      "kind": "directory",
+      "name": "_static",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/_static",
+      "payload": {}
+    },
+    {
+      "id": "code-551957cff8ecd46d75fb6f5d",
+      "kind": "file",
+      "name": "itsdangerous-logo-sidebar.png",
+      "parent_id": "code-a2f18b4c53e3d555237390bc",
+      "path": "docs/_static/itsdangerous-logo-sidebar.png",
+      "payload": {}
+    },
+    {
+      "id": "code-f90010fa750480144daf7732",
+      "kind": "file",
+      "name": "itsdangerous-logo.png",
+      "parent_id": "code-a2f18b4c53e3d555237390bc",
+      "path": "docs/_static/itsdangerous-logo.png",
+      "payload": {}
+    },
+    {
+      "id": "code-8d6e6c92c439e8ce29e32fc9",
+      "kind": "file",
+      "name": "changes.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/changes.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-e3de0ce7c38bc4d5c99df2ad",
+      "kind": "file",
+      "name": "concepts.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/concepts.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-24333f30f5a15336a42bd3ee",
+      "kind": "file",
+      "name": "conf.py",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/conf.py",
+      "payload": {}
+    },
+    {
+      "id": "code-907ec5790d6fdb61e5320510",
+      "kind": "file",
+      "name": "encoding.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/encoding.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-216c4b51f8fe355c2c145344",
+      "kind": "file",
+      "name": "exceptions.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/exceptions.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-fc55858c9fa4445616d49f06",
+      "kind": "file",
+      "name": "index.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/index.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-601bcbfb8406d46b13f58048",
+      "kind": "file",
+      "name": "license.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/license.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-c42177b64a083932919b74de",
+      "kind": "file",
+      "name": "make.bat",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/make.bat",
+      "payload": {}
+    },
+    {
+      "id": "code-17e39870024a11cb5a348902",
+      "kind": "file",
+      "name": "serializer.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/serializer.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-5722463674793b409173929d",
+      "kind": "file",
+      "name": "signer.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/signer.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-2df3dede7c82a6e789aa4225",
+      "kind": "file",
+      "name": "timed.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/timed.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-f19aa83e18b20d6183e1a073",
+      "kind": "file",
+      "name": "url_safe.rst",
+      "parent_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "path": "docs/url_safe.rst",
+      "payload": {}
+    },
+    {
+      "id": "code-90d5d08d3a6b3fd1fa9ead31",
+      "kind": "file",
+      "name": "pyproject.toml",
+      "parent_id": null,
+      "path": "pyproject.toml",
+      "payload": {}
+    },
+    {
+      "id": "code-19b0474ba0206835e30c4874",
+      "kind": "directory",
+      "name": "requirements",
+      "parent_id": null,
+      "path": "requirements",
+      "payload": {}
+    },
+    {
+      "id": "code-455c7042f325e0e2ceeeb021",
+      "kind": "file",
+      "name": "build.in",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/build.in",
+      "payload": {}
+    },
+    {
+      "id": "code-2eafbb141e4d38a08791ae7b",
+      "kind": "file",
+      "name": "build.txt",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/build.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-accea03e6a35e1b2ffa6029e",
+      "kind": "file",
+      "name": "dev.in",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/dev.in",
+      "payload": {}
+    },
+    {
+      "id": "code-88867028fb9976e62f5b306b",
+      "kind": "file",
+      "name": "dev.txt",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/dev.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-8b7ca710a4b19f4609a433ee",
+      "kind": "file",
+      "name": "docs.in",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/docs.in",
+      "payload": {}
+    },
+    {
+      "id": "code-e256f54a97df8345d7485ec3",
+      "kind": "file",
+      "name": "docs.txt",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/docs.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-88fad96e9634918bf67fa219",
+      "kind": "file",
+      "name": "tests.in",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/tests.in",
+      "payload": {}
+    },
+    {
+      "id": "code-b3dba186d54299268c74c41a",
+      "kind": "file",
+      "name": "tests.txt",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/tests.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-b1c6b2d29fda0b20105bab3b",
+      "kind": "file",
+      "name": "typing.in",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/typing.in",
+      "payload": {}
+    },
+    {
+      "id": "code-4b9f050bddecbba68ecf3cef",
+      "kind": "file",
+      "name": "typing.txt",
+      "parent_id": "code-19b0474ba0206835e30c4874",
+      "path": "requirements/typing.txt",
+      "payload": {}
+    },
+    {
+      "id": "code-0b27d7de365e6dfa11ef24a3",
+      "kind": "directory",
+      "name": "src",
+      "parent_id": null,
+      "path": "src",
+      "payload": {}
+    },
+    {
+      "id": "code-6e4eb3cf02d24d1e3ce42677",
+      "kind": "directory",
+      "name": "itsdangerous",
+      "parent_id": "code-0b27d7de365e6dfa11ef24a3",
+      "path": "src/itsdangerous",
+      "payload": {}
+    },
+    {
+      "id": "code-1320f88a4d8d4ec41b4db57f",
+      "kind": "file",
+      "name": "__init__.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/__init__.py",
+      "payload": {}
+    },
+    {
+      "id": "code-031c6138e64d726983bebe8f",
+      "kind": "function",
+      "name": "__getattr__",
+      "parent_id": "code-1320f88a4d8d4ec41b4db57f",
+      "path": "src/itsdangerous/__init__.py::__getattr__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "__getattr__",
+        "range": {
+          "end_byte": 1463,
+          "end_line": 38,
+          "start_byte": 934,
+          "start_line": 24
+        }
+      }
+    },
+    {
+      "id": "code-bbea6f52b80b9798c1df4c42",
+      "kind": "file",
+      "name": "_json.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/_json.py",
+      "payload": {}
+    },
+    {
+      "id": "code-948851f28a476507c3d0c91e",
+      "kind": "class",
+      "name": "_CompactJSON",
+      "parent_id": "code-bbea6f52b80b9798c1df4c42",
+      "path": "src/itsdangerous/_json.py::_CompactJSON",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_CompactJSON",
+        "range": {
+          "end_byte": 489,
+          "end_line": 18,
+          "start_byte": 84,
+          "start_line": 7
+        }
+      }
+    },
+    {
+      "id": "code-b24f0e79daafc0b2f0d89690",
+      "kind": "method",
+      "name": "dumps",
+      "parent_id": "code-948851f28a476507c3d0c91e",
+      "path": "src/itsdangerous/_json.py::_CompactJSON.dumps",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_CompactJSON.dumps",
+        "range": {
+          "end_byte": 489,
+          "end_line": 18,
+          "start_byte": 297,
+          "start_line": 15
+        }
+      }
+    },
+    {
+      "id": "code-44a7c27670668d5686504cad",
+      "kind": "method",
+      "name": "loads",
+      "parent_id": "code-948851f28a476507c3d0c91e",
+      "path": "src/itsdangerous/_json.py::_CompactJSON.loads",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_CompactJSON.loads",
+        "range": {
+          "end_byte": 270,
+          "end_line": 12,
+          "start_byte": 192,
+          "start_line": 11
+        }
+      }
+    },
+    {
+      "id": "code-c1443240d57557cc4b70b702",
+      "kind": "file",
+      "name": "encoding.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/encoding.py",
+      "payload": {}
+    },
+    {
+      "id": "code-4eda2d6d86acc5c36426075d",
+      "kind": "function",
+      "name": "base64_decode",
+      "parent_id": "code-c1443240d57557cc4b70b702",
+      "path": "src/itsdangerous/encoding.py::base64_decode",
+      "payload": {
+        "language": "python",
+        "qualified_name": "base64_decode",
+        "range": {
+          "end_byte": 989,
+          "end_line": 38,
+          "start_byte": 575,
+          "start_line": 28
+        }
+      }
+    },
+    {
+      "id": "code-04aac3872c44c3692ef4bb29",
+      "kind": "function",
+      "name": "base64_encode",
+      "parent_id": "code-c1443240d57557cc4b70b702",
+      "path": "src/itsdangerous/encoding.py::base64_encode",
+      "payload": {
+        "language": "python",
+        "qualified_name": "base64_encode",
+        "range": {
+          "end_byte": 569,
+          "end_line": 25,
+          "start_byte": 322,
+          "start_line": 20
+        }
+      }
+    },
+    {
+      "id": "code-df96c0d927b8a86e10aada41",
+      "kind": "function",
+      "name": "bytes_to_int",
+      "parent_id": "code-c1443240d57557cc4b70b702",
+      "path": "src/itsdangerous/encoding.py::bytes_to_int",
+      "payload": {
+        "language": "python",
+        "qualified_name": "bytes_to_int",
+        "range": {
+          "end_byte": 1461,
+          "end_line": 54,
+          "start_byte": 1365,
+          "start_line": 53
+        }
+      }
+    },
+    {
+      "id": "code-23f676bfd2ad0d0028045b95",
+      "kind": "function",
+      "name": "int_to_bytes",
+      "parent_id": "code-c1443240d57557cc4b70b702",
+      "path": "src/itsdangerous/encoding.py::int_to_bytes",
+      "payload": {
+        "language": "python",
+        "qualified_name": "int_to_bytes",
+        "range": {
+          "end_byte": 1359,
+          "end_line": 50,
+          "start_byte": 1276,
+          "start_line": 49
+        }
+      }
+    },
+    {
+      "id": "code-2c6f44514673c976ecd6d82c",
+      "kind": "function",
+      "name": "want_bytes",
+      "parent_id": "code-c1443240d57557cc4b70b702",
+      "path": "src/itsdangerous/encoding.py::want_bytes",
+      "payload": {
+        "language": "python",
+        "qualified_name": "want_bytes",
+        "range": {
+          "end_byte": 316,
+          "end_line": 17,
+          "start_byte": 135,
+          "start_line": 11
+        }
+      }
+    },
+    {
+      "id": "code-ef5f9d5a37703f69b12123b3",
+      "kind": "file",
+      "name": "exc.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/exc.py",
+      "payload": {}
+    },
+    {
+      "id": "code-e496e6084d0fb2289817746c",
+      "kind": "class",
+      "name": "BadData",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::BadData",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadData",
+        "range": {
+          "end_byte": 451,
+          "end_line": 19,
+          "start_byte": 93,
+          "start_line": 7
+        }
+      }
+    },
+    {
+      "id": "code-a838d5552188c32580c24241",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-e496e6084d0fb2289817746c",
+      "path": "src/itsdangerous/exc.py::BadData.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadData.__init__",
+        "range": {
+          "end_byte": 389,
+          "end_line": 16,
+          "start_byte": 289,
+          "start_line": 14
+        }
+      }
+    },
+    {
+      "id": "code-ef603fa1404b1e634b67ddcf",
+      "kind": "method",
+      "name": "__str__",
+      "parent_id": "code-e496e6084d0fb2289817746c",
+      "path": "src/itsdangerous/exc.py::BadData.__str__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadData.__str__",
+        "range": {
+          "end_byte": 451,
+          "end_line": 19,
+          "start_byte": 397,
+          "start_line": 18
+        }
+      }
+    },
+    {
+      "id": "code-fa708e928850207e52f32a43",
+      "kind": "class",
+      "name": "BadHeader",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::BadHeader",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadHeader",
+        "range": {
+          "end_byte": 2646,
+          "end_line": 89,
+          "start_byte": 1853,
+          "start_line": 66
+        }
+      }
+    },
+    {
+      "id": "code-66ac88b4cb55c4b4ec12a37a",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-fa708e928850207e52f32a43",
+      "path": "src/itsdangerous/exc.py::BadHeader.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadHeader.__init__",
+        "range": {
+          "end_byte": 2646,
+          "end_line": 89,
+          "start_byte": 2082,
+          "start_line": 74
+        }
+      }
+    },
+    {
+      "id": "code-c0da7ade01d83681ef519b7e",
+      "kind": "class",
+      "name": "BadPayload",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::BadPayload",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadPayload",
+        "range": {
+          "end_byte": 3305,
+          "end_line": 106,
+          "start_byte": 2652,
+          "start_line": 92
+        }
+      }
+    },
+    {
+      "id": "code-275748c697412b56181c533b",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-c0da7ade01d83681ef519b7e",
+      "path": "src/itsdangerous/exc.py::BadPayload.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadPayload.__init__",
+        "range": {
+          "end_byte": 3305,
+          "end_line": 106,
+          "start_byte": 3012,
+          "start_line": 101
+        }
+      }
+    },
+    {
+      "id": "code-1a0132450f30668eb61d979c",
+      "kind": "class",
+      "name": "BadSignature",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::BadSignature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadSignature",
+        "range": {
+          "end_byte": 911,
+          "end_line": 33,
+          "start_byte": 457,
+          "start_line": 22
+        }
+      }
+    },
+    {
+      "id": "code-a47dc51bb188fca48dc7616c",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-1a0132450f30668eb61d979c",
+      "path": "src/itsdangerous/exc.py::BadSignature.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadSignature.__init__",
+        "range": {
+          "end_byte": 911,
+          "end_line": 33,
+          "start_byte": 542,
+          "start_line": 25
+        }
+      }
+    },
+    {
+      "id": "code-a8cf3b7ba333d6f876337ceb",
+      "kind": "class",
+      "name": "BadTimeSignature",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::BadTimeSignature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadTimeSignature",
+        "range": {
+          "end_byte": 1672,
+          "end_line": 57,
+          "start_byte": 917,
+          "start_line": 36
+        }
+      }
+    },
+    {
+      "id": "code-638a72f99346bb46cb435152",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-a8cf3b7ba333d6f876337ceb",
+      "path": "src/itsdangerous/exc.py::BadTimeSignature.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "BadTimeSignature.__init__",
+        "range": {
+          "end_byte": 1672,
+          "end_line": 57,
+          "start_byte": 1074,
+          "start_line": 41
+        }
+      }
+    },
+    {
+      "id": "code-b79c876faa69c3c0daacdbac",
+      "kind": "class",
+      "name": "SignatureExpired",
+      "parent_id": "code-ef5f9d5a37703f69b12123b3",
+      "path": "src/itsdangerous/exc.py::SignatureExpired",
+      "payload": {
+        "language": "python",
+        "qualified_name": "SignatureExpired",
+        "range": {
+          "end_byte": 1847,
+          "end_line": 63,
+          "start_byte": 1678,
+          "start_line": 60
+        }
+      }
+    },
+    {
+      "id": "code-8d24c8b70fa31a7cfad3c8e8",
+      "kind": "file",
+      "name": "py.typed",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/py.typed",
+      "payload": {}
+    },
+    {
+      "id": "code-231b55051ecf943ba2b008a6",
+      "kind": "file",
+      "name": "serializer.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/serializer.py",
+      "payload": {}
+    },
+    {
+      "id": "code-c0cd2b25516acb03ac893dc1",
+      "kind": "class",
+      "name": "Serializer",
+      "parent_id": "code-231b55051ecf943ba2b008a6",
+      "path": "src/itsdangerous/serializer.py::Serializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer",
+        "range": {
+          "end_byte": 16005,
+          "end_line": 406,
+          "start_byte": 1418,
+          "start_line": 42
+        }
+      }
+    },
+    {
+      "id": "code-f6d73e87848add9384ac4321",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.__init__",
+        "range": {
+          "end_byte": 9565,
+          "end_line": 236,
+          "start_byte": 7785,
+          "start_line": 192
+        }
+      }
+    },
+    {
+      "id": "code-86e651a0acad2262f537814b",
+      "kind": "method",
+      "name": "_loads_unsafe_impl",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer._loads_unsafe_impl",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer._loads_unsafe_impl",
+        "range": {
+          "end_byte": 15725,
+          "end_line": 397,
+          "start_byte": 14786,
+          "start_line": 369
+        }
+      }
+    },
+    {
+      "id": "code-f68873e5f15c246e74178cea",
+      "kind": "method",
+      "name": "dump",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.dump",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.dump",
+        "range": {
+          "end_byte": 13274,
+          "end_line": 328,
+          "start_byte": 12994,
+          "start_line": 324
+        }
+      }
+    },
+    {
+      "id": "code-03dcda896054c02d9615fb19",
+      "kind": "method",
+      "name": "dump_payload",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.dump_payload",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.dump_payload",
+        "range": {
+          "end_byte": 11241,
+          "end_line": 278,
+          "start_byte": 10936,
+          "start_line": 273
+        }
+      }
+    },
+    {
+      "id": "code-d46c365102856d2a480cde7e",
+      "kind": "method",
+      "name": "dumps",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.dumps",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.dumps",
+        "range": {
+          "end_byte": 12987,
+          "end_line": 322,
+          "start_byte": 12429,
+          "start_line": 311
+        }
+      }
+    },
+    {
+      "id": "code-8ad0f27c689c26b2437d6539",
+      "kind": "method",
+      "name": "iter_unsigners",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.iter_unsigners",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.iter_unsigners",
+        "range": {
+          "end_byte": 12421,
+          "end_line": 309,
+          "start_byte": 11607,
+          "start_line": 289
+        }
+      }
+    },
+    {
+      "id": "code-3fced3bdaef4a7db37db5fee",
+      "kind": "method",
+      "name": "load",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.load",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.load",
+        "range": {
+          "end_byte": 14014,
+          "end_line": 349,
+          "start_byte": 13841,
+          "start_line": 347
+        }
+      }
+    },
+    {
+      "id": "code-951f339ab39835299193f493",
+      "kind": "method",
+      "name": "load_payload",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.load_payload",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.load_payload",
+        "range": {
+          "end_byte": 10928,
+          "end_line": 271,
+          "start_byte": 9824,
+          "start_line": 245
+        }
+      }
+    },
+    {
+      "id": "code-1b7b754d3c114753fb5c6f16",
+      "kind": "method",
+      "name": "load_unsafe",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.load_unsafe",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.load_unsafe",
+        "range": {
+          "end_byte": 16005,
+          "end_line": 406,
+          "start_byte": 15733,
+          "start_line": 399
+        }
+      }
+    },
+    {
+      "id": "code-3d3aa3c48b3c422bc7681430",
+      "kind": "method",
+      "name": "loads",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.loads",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.loads",
+        "range": {
+          "end_byte": 13833,
+          "end_line": 345,
+          "start_byte": 13282,
+          "start_line": 330
+        }
+      }
+    },
+    {
+      "id": "code-1692b5d5ae4672c6168f085f",
+      "kind": "method",
+      "name": "loads_unsafe",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.loads_unsafe",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.loads_unsafe",
+        "range": {
+          "end_byte": 14778,
+          "end_line": 367,
+          "start_byte": 14022,
+          "start_line": 351
+        }
+      }
+    },
+    {
+      "id": "code-1ce86d240053921c2ec78829",
+      "kind": "method",
+      "name": "make_signer",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.make_signer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.make_signer",
+        "range": {
+          "end_byte": 11599,
+          "end_line": 287,
+          "start_byte": 11249,
+          "start_line": 280
+        }
+      }
+    },
+    {
+      "id": "code-2ef3ecb394fc8786cf800f7a",
+      "kind": "method",
+      "name": "secret_key",
+      "parent_id": "code-c0cd2b25516acb03ac893dc1",
+      "path": "src/itsdangerous/serializer.py::Serializer.secret_key",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Serializer.secret_key",
+        "range": {
+          "end_byte": 9816,
+          "end_line": 243,
+          "start_byte": 9588,
+          "start_line": 239
+        }
+      }
+    },
+    {
+      "id": "code-df2742893f35ec6cfe543f21",
+      "kind": "class",
+      "name": "_PDataSerializer",
+      "parent_id": "code-231b55051ecf943ba2b008a6",
+      "path": "src/itsdangerous/serializer.py::_PDataSerializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_PDataSerializer",
+        "range": {
+          "end_byte": 1119,
+          "end_line": 31,
+          "start_byte": 756,
+          "start_line": 26
+        }
+      }
+    },
+    {
+      "id": "code-21ff3734d5d2ac58718b9e23",
+      "kind": "method",
+      "name": "dumps",
+      "parent_id": "code-df2742893f35ec6cfe543f21",
+      "path": "src/itsdangerous/serializer.py::_PDataSerializer.dumps",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_PDataSerializer.dumps",
+        "range": {
+          "end_byte": 1119,
+          "end_line": 31,
+          "start_byte": 1068,
+          "start_line": 31
+        }
+      }
+    },
+    {
+      "id": "code-6fe64642085ed316578cc403",
+      "kind": "method",
+      "name": "loads",
+      "parent_id": "code-df2742893f35ec6cfe543f21",
+      "path": "src/itsdangerous/serializer.py::_PDataSerializer.loads",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_PDataSerializer.loads",
+        "range": {
+          "end_byte": 866,
+          "end_line": 27,
+          "start_byte": 811,
+          "start_line": 27
+        }
+      }
+    },
+    {
+      "id": "code-8beda6b8edb2db00ce97004c",
+      "kind": "function",
+      "name": "is_text_serializer",
+      "parent_id": "code-231b55051ecf943ba2b008a6",
+      "path": "src/itsdangerous/serializer.py::is_text_serializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "is_text_serializer",
+        "range": {
+          "end_byte": 1412,
+          "end_line": 39,
+          "start_byte": 1189,
+          "start_line": 35
+        }
+      }
+    },
+    {
+      "id": "code-cc2d871ec9eba7f06dc419e9",
+      "kind": "file",
+      "name": "signer.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/signer.py",
+      "payload": {}
+    },
+    {
+      "id": "code-10b07887f3991a28caec571e",
+      "kind": "class",
+      "name": "HMACAlgorithm",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::HMACAlgorithm",
+      "payload": {
+        "language": "python",
+        "qualified_name": "HMACAlgorithm",
+        "range": {
+          "end_byte": 2090,
+          "end_line": 64,
+          "start_byte": 1409,
+          "start_line": 48
+        }
+      }
+    },
+    {
+      "id": "code-a70efebdd0f83e420b110efc",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-10b07887f3991a28caec571e",
+      "path": "src/itsdangerous/signer.py::HMACAlgorithm.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "HMACAlgorithm.__init__",
+        "range": {
+          "end_byte": 1924,
+          "end_line": 60,
+          "start_byte": 1732,
+          "start_line": 56
+        }
+      }
+    },
+    {
+      "id": "code-1c2c86c2fb1d2a5921a95e56",
+      "kind": "method",
+      "name": "get_signature",
+      "parent_id": "code-10b07887f3991a28caec571e",
+      "path": "src/itsdangerous/signer.py::HMACAlgorithm.get_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "HMACAlgorithm.get_signature",
+        "range": {
+          "end_byte": 2090,
+          "end_line": 64,
+          "start_byte": 1932,
+          "start_line": 62
+        }
+      }
+    },
+    {
+      "id": "code-95e51f1e7907c30601ed4226",
+      "kind": "class",
+      "name": "NoneAlgorithm",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::NoneAlgorithm",
+      "payload": {
+        "language": "python",
+        "qualified_name": "NoneAlgorithm",
+        "range": {
+          "end_byte": 1104,
+          "end_line": 37,
+          "start_byte": 869,
+          "start_line": 31
+        }
+      }
+    },
+    {
+      "id": "code-551b45b6bf8f565a0f878495",
+      "kind": "method",
+      "name": "get_signature",
+      "parent_id": "code-95e51f1e7907c30601ed4226",
+      "path": "src/itsdangerous/signer.py::NoneAlgorithm.get_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "NoneAlgorithm.get_signature",
+        "range": {
+          "end_byte": 1104,
+          "end_line": 37,
+          "start_byte": 1025,
+          "start_line": 36
+        }
+      }
+    },
+    {
+      "id": "code-60b7f8c97fd25fbe5d81c00a",
+      "kind": "class",
+      "name": "Signer",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::Signer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer",
+        "range": {
+          "end_byte": 9911,
+          "end_line": 266,
+          "start_byte": 2371,
+          "start_line": 76
+        }
+      }
+    },
+    {
+      "id": "code-3934a3f7b5d13907997003fe",
+      "kind": "method",
+      "name": "__init__",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.__init__",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.__init__",
+        "range": {
+          "end_byte": 6478,
+          "end_line": 173,
+          "start_byte": 4858,
+          "start_line": 129
+        }
+      }
+    },
+    {
+      "id": "code-eae4fb0cfc60f087b1040b01",
+      "kind": "method",
+      "name": "derive_key",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.derive_key",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.derive_key",
+        "range": {
+          "end_byte": 8139,
+          "end_line": 213,
+          "start_byte": 6737,
+          "start_line": 182
+        }
+      }
+    },
+    {
+      "id": "code-b2ab0538222151dd3616da78",
+      "kind": "method",
+      "name": "get_signature",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.get_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.get_signature",
+        "range": {
+          "end_byte": 8417,
+          "end_line": 220,
+          "start_byte": 8147,
+          "start_line": 215
+        }
+      }
+    },
+    {
+      "id": "code-2387a2c5053b00bfa6a879e5",
+      "kind": "method",
+      "name": "secret_key",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.secret_key",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.secret_key",
+        "range": {
+          "end_byte": 6729,
+          "end_line": 180,
+          "start_byte": 6501,
+          "start_line": 176
+        }
+      }
+    },
+    {
+      "id": "code-cc17d318c09c76346acd9168",
+      "kind": "method",
+      "name": "sign",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.sign",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.sign",
+        "range": {
+          "end_byte": 8604,
+          "end_line": 225,
+          "start_byte": 8425,
+          "start_line": 222
+        }
+      }
+    },
+    {
+      "id": "code-0926e13b1c0d8cafbfe48054",
+      "kind": "method",
+      "name": "unsign",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.unsign",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.unsign",
+        "range": {
+          "end_byte": 9587,
+          "end_line": 256,
+          "start_byte": 9119,
+          "start_line": 244
+        }
+      }
+    },
+    {
+      "id": "code-e75409bdac76c0987ac28371",
+      "kind": "method",
+      "name": "validate",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.validate",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.validate",
+        "range": {
+          "end_byte": 9911,
+          "end_line": 266,
+          "start_byte": 9595,
+          "start_line": 258
+        }
+      }
+    },
+    {
+      "id": "code-b34c24953effb5a8de623fad",
+      "kind": "method",
+      "name": "verify_signature",
+      "parent_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "path": "src/itsdangerous/signer.py::Signer.verify_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "Signer.verify_signature",
+        "range": {
+          "end_byte": 9111,
+          "end_line": 242,
+          "start_byte": 8612,
+          "start_line": 227
+        }
+      }
+    },
+    {
+      "id": "code-26dfe8b135e257080e8cdd3a",
+      "kind": "class",
+      "name": "SigningAlgorithm",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::SigningAlgorithm",
+      "payload": {
+        "language": "python",
+        "qualified_name": "SigningAlgorithm",
+        "range": {
+          "end_byte": 863,
+          "end_line": 28,
+          "start_byte": 304,
+          "start_line": 15
+        }
+      }
+    },
+    {
+      "id": "code-2bc52167467b33a3b0e88bba",
+      "kind": "method",
+      "name": "get_signature",
+      "parent_id": "code-26dfe8b135e257080e8cdd3a",
+      "path": "src/itsdangerous/signer.py::SigningAlgorithm.get_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "SigningAlgorithm.get_signature",
+        "range": {
+          "end_byte": 614,
+          "end_line": 22,
+          "start_byte": 452,
+          "start_line": 20
+        }
+      }
+    },
+    {
+      "id": "code-ac48a1d7de5d1eaac6b669db",
+      "kind": "method",
+      "name": "verify_signature",
+      "parent_id": "code-26dfe8b135e257080e8cdd3a",
+      "path": "src/itsdangerous/signer.py::SigningAlgorithm.verify_signature",
+      "payload": {
+        "language": "python",
+        "qualified_name": "SigningAlgorithm.verify_signature",
+        "range": {
+          "end_byte": 863,
+          "end_line": 28,
+          "start_byte": 622,
+          "start_line": 24
+        }
+      }
+    },
+    {
+      "id": "code-a8d9de4a501d6e36b88cddbd",
+      "kind": "function",
+      "name": "_lazy_sha1",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::_lazy_sha1",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_lazy_sha1",
+        "range": {
+          "end_byte": 1403,
+          "end_line": 45,
+          "start_byte": 1110,
+          "start_line": 40
+        }
+      }
+    },
+    {
+      "id": "code-7276a44422455ec0a8c5ac73",
+      "kind": "function",
+      "name": "_make_keys_list",
+      "parent_id": "code-cc2d871ec9eba7f06dc419e9",
+      "path": "src/itsdangerous/signer.py::_make_keys_list",
+      "payload": {
+        "language": "python",
+        "qualified_name": "_make_keys_list",
+        "range": {
+          "end_byte": 2366,
+          "end_line": 73,
+          "start_byte": 2096,
+          "start_line": 67
+        }
+      }
+    },
+    {
+      "id": "code-3a81df516a17c4f563150a18",
+      "kind": "file",
+      "name": "timed.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/timed.py",
+      "payload": {}
+    },
+    {
+      "id": "code-be4091ecc76d604e036040b9",
+      "kind": "class",
+      "name": "TimedSerializer",
+      "parent_id": "code-3a81df516a17c4f563150a18",
+      "path": "src/itsdangerous/timed.py::TimedSerializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimedSerializer",
+        "range": {
+          "end_byte": 8309,
+          "end_line": 228,
+          "start_byte": 6139,
+          "start_line": 170
+        }
+      }
+    },
+    {
+      "id": "code-d17ac4d347d59d45d317f72b",
+      "kind": "method",
+      "name": "iter_unsigners",
+      "parent_id": "code-be4091ecc76d604e036040b9",
+      "path": "src/itsdangerous/timed.py::TimedSerializer.iter_unsigners",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimedSerializer.iter_unsigners",
+        "range": {
+          "end_byte": 6546,
+          "end_line": 180,
+          "start_byte": 6351,
+          "start_line": 177
+        }
+      }
+    },
+    {
+      "id": "code-095767f38d176da724dd461c",
+      "kind": "method",
+      "name": "loads",
+      "parent_id": "code-be4091ecc76d604e036040b9",
+      "path": "src/itsdangerous/timed.py::TimedSerializer.loads",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimedSerializer.loads",
+        "range": {
+          "end_byte": 8026,
+          "end_line": 220,
+          "start_byte": 6646,
+          "start_line": 185
+        }
+      }
+    },
+    {
+      "id": "code-12481da32d26d560a2ce1dfa",
+      "kind": "method",
+      "name": "loads_unsafe",
+      "parent_id": "code-be4091ecc76d604e036040b9",
+      "path": "src/itsdangerous/timed.py::TimedSerializer.loads_unsafe",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimedSerializer.loads_unsafe",
+        "range": {
+          "end_byte": 8309,
+          "end_line": 228,
+          "start_byte": 8034,
+          "start_line": 222
+        }
+      }
+    },
+    {
+      "id": "code-3ece4b62aebb570c8796a79a",
+      "kind": "class",
+      "name": "TimestampSigner",
+      "parent_id": "code-3a81df516a17c4f563150a18",
+      "path": "src/itsdangerous/timed.py::TimestampSigner",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner",
+        "range": {
+          "end_byte": 6133,
+          "end_line": 167,
+          "start_byte": 554,
+          "start_line": 22
+        }
+      }
+    },
+    {
+      "id": "code-c2554bfd5b3785511336a95a",
+      "kind": "method",
+      "name": "get_timestamp",
+      "parent_id": "code-3ece4b62aebb570c8796a79a",
+      "path": "src/itsdangerous/timed.py::TimestampSigner.get_timestamp",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner.get_timestamp",
+        "range": {
+          "end_byte": 1028,
+          "end_line": 33,
+          "start_byte": 862,
+          "start_line": 29
+        }
+      }
+    },
+    {
+      "id": "code-c118f479e24ac25b0d59091e",
+      "kind": "method",
+      "name": "sign",
+      "parent_id": "code-3ece4b62aebb570c8796a79a",
+      "path": "src/itsdangerous/timed.py::TimestampSigner.sign",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner.sign",
+        "range": {
+          "end_byte": 1824,
+          "end_line": 51,
+          "start_byte": 1467,
+          "start_line": 45
+        }
+      }
+    },
+    {
+      "id": "code-bde5aac5e618d37c6af0b499",
+      "kind": "method",
+      "name": "timestamp_to_datetime",
+      "parent_id": "code-3ece4b62aebb570c8796a79a",
+      "path": "src/itsdangerous/timed.py::TimestampSigner.timestamp_to_datetime",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner.timestamp_to_datetime",
+        "range": {
+          "end_byte": 1459,
+          "end_line": 43,
+          "start_byte": 1036,
+          "start_line": 35
+        }
+      }
+    },
+    {
+      "id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "kind": "method",
+      "name": "unsign",
+      "parent_id": "code-3ece4b62aebb570c8796a79a",
+      "path": "src/itsdangerous/timed.py::TimestampSigner.unsign",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner.unsign",
+        "range": {
+          "end_byte": 5774,
+          "end_line": 158,
+          "start_byte": 2399,
+          "start_line": 72
+        }
+      }
+    },
+    {
+      "id": "code-34d5640f905aec712e9cbb9b",
+      "kind": "method",
+      "name": "validate",
+      "parent_id": "code-3ece4b62aebb570c8796a79a",
+      "path": "src/itsdangerous/timed.py::TimestampSigner.validate",
+      "payload": {
+        "language": "python",
+        "qualified_name": "TimestampSigner.validate",
+        "range": {
+          "end_byte": 6133,
+          "end_line": 167,
+          "start_byte": 5782,
+          "start_line": 160
+        }
+      }
+    },
+    {
+      "id": "code-a8c436f527edcb033df35c6e",
+      "kind": "file",
+      "name": "url_safe.py",
+      "parent_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "path": "src/itsdangerous/url_safe.py",
+      "payload": {}
+    },
+    {
+      "id": "code-5f94085c25865b2f8f9e3d96",
+      "kind": "class",
+      "name": "URLSafeSerializer",
+      "parent_id": "code-a8c436f527edcb033df35c6e",
+      "path": "src/itsdangerous/url_safe.py::URLSafeSerializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "URLSafeSerializer",
+        "range": {
+          "end_byte": 2293,
+          "end_line": 76,
+          "start_byte": 2021,
+          "start_line": 72
+        }
+      }
+    },
+    {
+      "id": "code-b4d698f24e6fbe6336c0fb9e",
+      "kind": "class",
+      "name": "URLSafeSerializerMixin",
+      "parent_id": "code-a8c436f527edcb033df35c6e",
+      "path": "src/itsdangerous/url_safe.py::URLSafeSerializerMixin",
+      "payload": {
+        "language": "python",
+        "qualified_name": "URLSafeSerializerMixin",
+        "range": {
+          "end_byte": 2015,
+          "end_line": 69,
+          "start_byte": 327,
+          "start_line": 15
+        }
+      }
+    },
+    {
+      "id": "code-a7b12efaeda1d6c3fc67fb2a",
+      "kind": "method",
+      "name": "dump_payload",
+      "parent_id": "code-b4d698f24e6fbe6336c0fb9e",
+      "path": "src/itsdangerous/url_safe.py::URLSafeSerializerMixin.dump_payload",
+      "payload": {
+        "language": "python",
+        "qualified_name": "URLSafeSerializerMixin.dump_payload",
+        "range": {
+          "end_byte": 2015,
+          "end_line": 69,
+          "start_byte": 1608,
+          "start_line": 55
+        }
+      }
+    },
+    {
+      "id": "code-69060988413594191759eeed",
+      "kind": "method",
+      "name": "load_payload",
+      "parent_id": "code-b4d698f24e6fbe6336c0fb9e",
+      "path": "src/itsdangerous/url_safe.py::URLSafeSerializerMixin.load_payload",
+      "payload": {
+        "language": "python",
+        "qualified_name": "URLSafeSerializerMixin.load_payload",
+        "range": {
+          "end_byte": 1600,
+          "end_line": 53,
+          "start_byte": 664,
+          "start_line": 23
+        }
+      }
+    },
+    {
+      "id": "code-e974bc6372750da0d3820a65",
+      "kind": "class",
+      "name": "URLSafeTimedSerializer",
+      "parent_id": "code-a8c436f527edcb033df35c6e",
+      "path": "src/itsdangerous/url_safe.py::URLSafeTimedSerializer",
+      "payload": {
+        "language": "python",
+        "qualified_name": "URLSafeTimedSerializer",
+        "range": {
+          "end_byte": 2586,
+          "end_line": 83,
+          "start_byte": 2299,
+          "start_line": 79
+        }
+      }
+    },
+    {
+      "id": "code-f4fbc015ac0e0132e94d32c0",
+      "kind": "directory",
+      "name": "tests",
+      "parent_id": null,
+      "path": "tests",
+      "payload": {}
+    },
+    {
+      "id": "code-9056ca56d4b0dd54eedb0a3c",
+      "kind": "directory",
+      "name": "test_itsdangerous",
+      "parent_id": "code-f4fbc015ac0e0132e94d32c0",
+      "path": "tests/test_itsdangerous",
+      "payload": {}
+    },
+    {
+      "id": "code-80c44b06a88606d2db44ffad",
+      "kind": "test",
+      "name": "__init__.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/__init__.py",
+      "payload": {}
+    },
+    {
+      "id": "code-61d9f057ff8d661932832904",
+      "kind": "test",
+      "name": "test_encoding.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/test_encoding.py",
+      "payload": {}
+    },
+    {
+      "id": "code-ac389acc4a63e08661a2629b",
+      "kind": "test",
+      "name": "test_serializer.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/test_serializer.py",
+      "payload": {}
+    },
+    {
+      "id": "code-9480a04a1374ceb175ed2c96",
+      "kind": "test",
+      "name": "test_signer.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/test_signer.py",
+      "payload": {}
+    },
+    {
+      "id": "code-acab10ace39af7184447ce72",
+      "kind": "test",
+      "name": "test_timed.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/test_timed.py",
+      "payload": {}
+    },
+    {
+      "id": "code-55ebca5ca00bb87f2c8dda99",
+      "kind": "test",
+      "name": "test_url_safe.py",
+      "parent_id": "code-9056ca56d4b0dd54eedb0a3c",
+      "path": "tests/test_itsdangerous/test_url_safe.py",
+      "payload": {}
+    },
+    {
+      "id": "code-b59cd4bf214a486284946aa8",
+      "kind": "file",
+      "name": "tox.ini",
+      "parent_id": null,
+      "path": "tox.ini",
+      "payload": {}
+    }
+  ],
+  "fixture": {
+    "name": "itsdangerous",
+    "source": "external-fixtures/itsdangerous-2.2.0",
+    "version": "2.2.0"
+  },
+  "relations": [
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "BadData"
+      },
+      "source_id": "code-4eda2d6d86acc5c36426075d",
+      "target_id": "code-e496e6084d0fb2289817746c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "BadPayload"
+      },
+      "source_id": "code-69060988413594191759eeed",
+      "target_id": "code-c0da7ade01d83681ef519b7e"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "BadPayload"
+      },
+      "source_id": "code-951f339ab39835299193f493",
+      "target_id": "code-c0da7ade01d83681ef519b7e"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "BadSignature"
+      },
+      "source_id": "code-0926e13b1c0d8cafbfe48054",
+      "target_id": "code-1a0132450f30668eb61d979c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "BadTimeSignature"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-a8cf3b7ba333d6f876337ceb"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "HMACAlgorithm"
+      },
+      "source_id": "code-3934a3f7b5d13907997003fe",
+      "target_id": "code-10b07887f3991a28caec571e"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "SignatureExpired"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-b79c876faa69c3c0daacdbac"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "__init__"
+      },
+      "source_id": "code-275748c697412b56181c533b",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "__init__"
+      },
+      "source_id": "code-638a72f99346bb46cb435152",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "__init__"
+      },
+      "source_id": "code-66ac88b4cb55c4b4ec12a37a",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "__init__"
+      },
+      "source_id": "code-a47dc51bb188fca48dc7616c",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "__init__"
+      },
+      "source_id": "code-a838d5552188c32580c24241",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "_loads_unsafe_impl"
+      },
+      "source_id": "code-12481da32d26d560a2ce1dfa",
+      "target_id": "code-86e651a0acad2262f537814b"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "_loads_unsafe_impl"
+      },
+      "source_id": "code-1692b5d5ae4672c6168f085f",
+      "target_id": "code-86e651a0acad2262f537814b"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "_make_keys_list"
+      },
+      "source_id": "code-3934a3f7b5d13907997003fe",
+      "target_id": "code-7276a44422455ec0a8c5ac73"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "_make_keys_list"
+      },
+      "source_id": "code-f6d73e87848add9384ac4321",
+      "target_id": "code-7276a44422455ec0a8c5ac73"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_decode"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-4eda2d6d86acc5c36426075d"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_decode"
+      },
+      "source_id": "code-69060988413594191759eeed",
+      "target_id": "code-4eda2d6d86acc5c36426075d"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_decode"
+      },
+      "source_id": "code-b34c24953effb5a8de623fad",
+      "target_id": "code-4eda2d6d86acc5c36426075d"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_encode"
+      },
+      "source_id": "code-a7b12efaeda1d6c3fc67fb2a",
+      "target_id": "code-04aac3872c44c3692ef4bb29"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_encode"
+      },
+      "source_id": "code-b2ab0538222151dd3616da78",
+      "target_id": "code-04aac3872c44c3692ef4bb29"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "base64_encode"
+      },
+      "source_id": "code-c118f479e24ac25b0d59091e",
+      "target_id": "code-04aac3872c44c3692ef4bb29"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "bytes_to_int"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-df96c0d927b8a86e10aada41"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "derive_key"
+      },
+      "source_id": "code-b2ab0538222151dd3616da78",
+      "target_id": "code-eae4fb0cfc60f087b1040b01"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "derive_key"
+      },
+      "source_id": "code-b34c24953effb5a8de623fad",
+      "target_id": "code-eae4fb0cfc60f087b1040b01"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dump_payload"
+      },
+      "source_id": "code-a7b12efaeda1d6c3fc67fb2a",
+      "target_id": "code-03dcda896054c02d9615fb19"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dump_payload"
+      },
+      "source_id": "code-d46c365102856d2a480cde7e",
+      "target_id": "code-03dcda896054c02d9615fb19"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dumps"
+      },
+      "source_id": "code-03dcda896054c02d9615fb19",
+      "target_id": "code-b24f0e79daafc0b2f0d89690"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dumps"
+      },
+      "source_id": "code-8beda6b8edb2db00ce97004c",
+      "target_id": "code-b24f0e79daafc0b2f0d89690"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dumps"
+      },
+      "source_id": "code-b24f0e79daafc0b2f0d89690",
+      "target_id": "code-b24f0e79daafc0b2f0d89690"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "dumps"
+      },
+      "source_id": "code-f68873e5f15c246e74178cea",
+      "target_id": "code-b24f0e79daafc0b2f0d89690"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_signature"
+      },
+      "source_id": "code-ac48a1d7de5d1eaac6b669db",
+      "target_id": "code-2bc52167467b33a3b0e88bba"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_signature"
+      },
+      "source_id": "code-b2ab0538222151dd3616da78",
+      "target_id": "code-2bc52167467b33a3b0e88bba"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_signature"
+      },
+      "source_id": "code-c118f479e24ac25b0d59091e",
+      "target_id": "code-2bc52167467b33a3b0e88bba"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_signature"
+      },
+      "source_id": "code-cc17d318c09c76346acd9168",
+      "target_id": "code-2bc52167467b33a3b0e88bba"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_timestamp"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-c2554bfd5b3785511336a95a"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "get_timestamp"
+      },
+      "source_id": "code-c118f479e24ac25b0d59091e",
+      "target_id": "code-c2554bfd5b3785511336a95a"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "int_to_bytes"
+      },
+      "source_id": "code-c118f479e24ac25b0d59091e",
+      "target_id": "code-23f676bfd2ad0d0028045b95"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "is_text_serializer"
+      },
+      "source_id": "code-951f339ab39835299193f493",
+      "target_id": "code-8beda6b8edb2db00ce97004c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "is_text_serializer"
+      },
+      "source_id": "code-f6d73e87848add9384ac4321",
+      "target_id": "code-8beda6b8edb2db00ce97004c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "iter_unsigners"
+      },
+      "source_id": "code-095767f38d176da724dd461c",
+      "target_id": "code-8ad0f27c689c26b2437d6539"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "iter_unsigners"
+      },
+      "source_id": "code-3d3aa3c48b3c422bc7681430",
+      "target_id": "code-8ad0f27c689c26b2437d6539"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "iter_unsigners"
+      },
+      "source_id": "code-d17ac4d347d59d45d317f72b",
+      "target_id": "code-8ad0f27c689c26b2437d6539"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "load_payload"
+      },
+      "source_id": "code-095767f38d176da724dd461c",
+      "target_id": "code-951f339ab39835299193f493"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "load_payload"
+      },
+      "source_id": "code-3d3aa3c48b3c422bc7681430",
+      "target_id": "code-951f339ab39835299193f493"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "load_payload"
+      },
+      "source_id": "code-69060988413594191759eeed",
+      "target_id": "code-951f339ab39835299193f493"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "load_payload"
+      },
+      "source_id": "code-86e651a0acad2262f537814b",
+      "target_id": "code-951f339ab39835299193f493"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "loads"
+      },
+      "source_id": "code-3fced3bdaef4a7db37db5fee",
+      "target_id": "code-44a7c27670668d5686504cad"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "loads"
+      },
+      "source_id": "code-44a7c27670668d5686504cad",
+      "target_id": "code-44a7c27670668d5686504cad"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "loads"
+      },
+      "source_id": "code-86e651a0acad2262f537814b",
+      "target_id": "code-44a7c27670668d5686504cad"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "loads"
+      },
+      "source_id": "code-951f339ab39835299193f493",
+      "target_id": "code-44a7c27670668d5686504cad"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "loads_unsafe"
+      },
+      "source_id": "code-1b7b754d3c114753fb5c6f16",
+      "target_id": "code-1692b5d5ae4672c6168f085f"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "make_signer"
+      },
+      "source_id": "code-8ad0f27c689c26b2437d6539",
+      "target_id": "code-1ce86d240053921c2ec78829"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "make_signer"
+      },
+      "source_id": "code-d46c365102856d2a480cde7e",
+      "target_id": "code-1ce86d240053921c2ec78829"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "sign"
+      },
+      "source_id": "code-d46c365102856d2a480cde7e",
+      "target_id": "code-cc17d318c09c76346acd9168"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "timestamp_to_datetime"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-bde5aac5e618d37c6af0b499"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "unsign"
+      },
+      "source_id": "code-095767f38d176da724dd461c",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "unsign"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "unsign"
+      },
+      "source_id": "code-34d5640f905aec712e9cbb9b",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "unsign"
+      },
+      "source_id": "code-3d3aa3c48b3c422bc7681430",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "unsign"
+      },
+      "source_id": "code-e75409bdac76c0987ac28371",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "verify_signature"
+      },
+      "source_id": "code-0926e13b1c0d8cafbfe48054",
+      "target_id": "code-ac48a1d7de5d1eaac6b669db"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "verify_signature"
+      },
+      "source_id": "code-b34c24953effb5a8de623fad",
+      "target_id": "code-ac48a1d7de5d1eaac6b669db"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-03dcda896054c02d9615fb19",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-04aac3872c44c3692ef4bb29",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-0926e13b1c0d8cafbfe48054",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-095767f38d176da724dd461c",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-0c2dfcba37a2d7f22e9f8ee6",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-3934a3f7b5d13907997003fe",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-3d3aa3c48b3c422bc7681430",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-4eda2d6d86acc5c36426075d",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-7276a44422455ec0a8c5ac73",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-b2ab0538222151dd3616da78",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-b34c24953effb5a8de623fad",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-c118f479e24ac25b0d59091e",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-cc17d318c09c76346acd9168",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-d46c365102856d2a480cde7e",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-eae4fb0cfc60f087b1040b01",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "calls",
+      "payload": {
+        "callee": "want_bytes"
+      },
+      "source_id": "code-f6d73e87848add9384ac4321",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-004daff29497d94aa7757bf0",
+      "target_id": "code-c149843e4a4b7800c50e5311"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-004daff29497d94aa7757bf0",
+      "target_id": "code-db11febc2c00346265c99828"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-0b27d7de365e6dfa11ef24a3",
+      "target_id": "code-6e4eb3cf02d24d1e3ce42677"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-10b07887f3991a28caec571e",
+      "target_id": "code-1c2c86c2fb1d2a5921a95e56"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-10b07887f3991a28caec571e",
+      "target_id": "code-a70efebdd0f83e420b110efc"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-031c6138e64d726983bebe8f"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-2eafbb141e4d38a08791ae7b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-455c7042f325e0e2ceeeb021"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-4b9f050bddecbba68ecf3cef"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-88867028fb9976e62f5b306b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-88fad96e9634918bf67fa219"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-8b7ca710a4b19f4609a433ee"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-accea03e6a35e1b2ffa6029e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-b1c6b2d29fda0b20105bab3b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-b3dba186d54299268c74c41a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-19b0474ba0206835e30c4874",
+      "target_id": "code-e256f54a97df8345d7485ec3"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-1a0132450f30668eb61d979c",
+      "target_id": "code-a47dc51bb188fca48dc7616c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-8beda6b8edb2db00ce97004c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-c0cd2b25516acb03ac893dc1"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-df2742893f35ec6cfe543f21"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-26dfe8b135e257080e8cdd3a",
+      "target_id": "code-2bc52167467b33a3b0e88bba"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-26dfe8b135e257080e8cdd3a",
+      "target_id": "code-ac48a1d7de5d1eaac6b669db"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-3ece4b62aebb570c8796a79a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-be4091ecc76d604e036040b9"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-0c2dfcba37a2d7f22e9f8ee6"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-34d5640f905aec712e9cbb9b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-bde5aac5e618d37c6af0b499"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-c118f479e24ac25b0d59091e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-c2554bfd5b3785511336a95a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-4053dfeea882e78d3f31d314",
+      "target_id": "code-05b1f16f56be8df483c880ae"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-4053dfeea882e78d3f31d314",
+      "target_id": "code-7bd2039190cd8db054e7cadd"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-4053dfeea882e78d3f31d314",
+      "target_id": "code-ac3871086216eae952bfb643"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-4053dfeea882e78d3f31d314",
+      "target_id": "code-f019620edd42955bd2ad859f"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-0926e13b1c0d8cafbfe48054"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-2387a2c5053b00bfa6a879e5"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-3934a3f7b5d13907997003fe"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-b2ab0538222151dd3616da78"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-b34c24953effb5a8de623fad"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-cc17d318c09c76346acd9168"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-e75409bdac76c0987ac28371"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-60b7f8c97fd25fbe5d81c00a",
+      "target_id": "code-eae4fb0cfc60f087b1040b01"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-17e39870024a11cb5a348902"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-216c4b51f8fe355c2c145344"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-24333f30f5a15336a42bd3ee"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-2df3dede7c82a6e789aa4225"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-5722463674793b409173929d"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-601bcbfb8406d46b13f58048"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-8d6e6c92c439e8ce29e32fc9"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-907ec5790d6fdb61e5320510"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-a2f18b4c53e3d555237390bc"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-c42177b64a083932919b74de"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-dd7eefd971535a860fb987ae"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-e3de0ce7c38bc4d5c99df2ad"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-f19aa83e18b20d6183e1a073"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-69e2c19e4c0eb2ff70e7974c",
+      "target_id": "code-fc55858c9fa4445616d49f06"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-1320f88a4d8d4ec41b4db57f"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-231b55051ecf943ba2b008a6"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-3a81df516a17c4f563150a18"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-8d24c8b70fa31a7cfad3c8e8"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-a8c436f527edcb033df35c6e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-bbea6f52b80b9798c1df4c42"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-cc2d871ec9eba7f06dc419e9"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-6e4eb3cf02d24d1e3ce42677",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-7bd2039190cd8db054e7cadd",
+      "target_id": "code-4097051f2d39b16ebea46a87"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-7bd2039190cd8db054e7cadd",
+      "target_id": "code-4868cbfa4b7fbb28e6346695"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-7bd2039190cd8db054e7cadd",
+      "target_id": "code-72fa1e4fa5964df73f818bee"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-948851f28a476507c3d0c91e",
+      "target_id": "code-44a7c27670668d5686504cad"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-948851f28a476507c3d0c91e",
+      "target_id": "code-b24f0e79daafc0b2f0d89690"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-95e51f1e7907c30601ed4226",
+      "target_id": "code-551b45b6bf8f565a0f878495"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a2f18b4c53e3d555237390bc",
+      "target_id": "code-551957cff8ecd46d75fb6f5d"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a2f18b4c53e3d555237390bc",
+      "target_id": "code-f90010fa750480144daf7732"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-5f94085c25865b2f8f9e3d96"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-b4d698f24e6fbe6336c0fb9e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-e974bc6372750da0d3820a65"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-a8cf3b7ba333d6f876337ceb",
+      "target_id": "code-638a72f99346bb46cb435152"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-b4d698f24e6fbe6336c0fb9e",
+      "target_id": "code-69060988413594191759eeed"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-b4d698f24e6fbe6336c0fb9e",
+      "target_id": "code-a7b12efaeda1d6c3fc67fb2a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-bbea6f52b80b9798c1df4c42",
+      "target_id": "code-948851f28a476507c3d0c91e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-be4091ecc76d604e036040b9",
+      "target_id": "code-095767f38d176da724dd461c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-be4091ecc76d604e036040b9",
+      "target_id": "code-12481da32d26d560a2ce1dfa"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-be4091ecc76d604e036040b9",
+      "target_id": "code-d17ac4d347d59d45d317f72b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-03dcda896054c02d9615fb19"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-1692b5d5ae4672c6168f085f"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-1b7b754d3c114753fb5c6f16"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-1ce86d240053921c2ec78829"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-2ef3ecb394fc8786cf800f7a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-3d3aa3c48b3c422bc7681430"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-3fced3bdaef4a7db37db5fee"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-86e651a0acad2262f537814b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-8ad0f27c689c26b2437d6539"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-951f339ab39835299193f493"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-d46c365102856d2a480cde7e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-f68873e5f15c246e74178cea"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0cd2b25516acb03ac893dc1",
+      "target_id": "code-f6d73e87848add9384ac4321"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c0da7ade01d83681ef519b7e",
+      "target_id": "code-275748c697412b56181c533b"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-04aac3872c44c3692ef4bb29"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-23f676bfd2ad0d0028045b95"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-2c6f44514673c976ecd6d82c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-4eda2d6d86acc5c36426075d"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-df96c0d927b8a86e10aada41"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-10b07887f3991a28caec571e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-26dfe8b135e257080e8cdd3a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-60b7f8c97fd25fbe5d81c00a"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-7276a44422455ec0a8c5ac73"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-95e51f1e7907c30601ed4226"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-a8d9de4a501d6e36b88cddbd"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-df2742893f35ec6cfe543f21",
+      "target_id": "code-21ff3734d5d2ac58718b9e23"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-df2742893f35ec6cfe543f21",
+      "target_id": "code-6fe64642085ed316578cc403"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-e496e6084d0fb2289817746c",
+      "target_id": "code-a838d5552188c32580c24241"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-e496e6084d0fb2289817746c",
+      "target_id": "code-ef603fa1404b1e634b67ddcf"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-1a0132450f30668eb61d979c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-a8cf3b7ba333d6f876337ceb"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-b79c876faa69c3c0daacdbac"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-c0da7ade01d83681ef519b7e"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-e496e6084d0fb2289817746c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-ef5f9d5a37703f69b12123b3",
+      "target_id": "code-fa708e928850207e52f32a43"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-f019620edd42955bd2ad859f",
+      "target_id": "code-6b235d4744b697bc82665aa6"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-f019620edd42955bd2ad859f",
+      "target_id": "code-9832843221082ae6ad43a3b2"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-f019620edd42955bd2ad859f",
+      "target_id": "code-bebcbc3a56e320f5ca5106f3"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-f4fbc015ac0e0132e94d32c0",
+      "target_id": "code-9056ca56d4b0dd54eedb0a3c"
+    },
+    {
+      "kind": "contains",
+      "payload": {},
+      "source_id": "code-fa708e928850207e52f32a43",
+      "target_id": "code-66ac88b4cb55c4b4ec12a37a"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": "._json",
+        "target_path": "src/itsdangerous/_json.py"
+      },
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-bbea6f52b80b9798c1df4c42"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".encoding",
+        "target_path": "src/itsdangerous/encoding.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".encoding",
+        "target_path": "src/itsdangerous/encoding.py"
+      },
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".encoding",
+        "target_path": "src/itsdangerous/encoding.py"
+      },
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".encoding",
+        "target_path": "src/itsdangerous/encoding.py"
+      },
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".encoding",
+        "target_path": "src/itsdangerous/encoding.py"
+      },
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-c1443240d57557cc4b70b702"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-c1443240d57557cc4b70b702",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".exc",
+        "target_path": "src/itsdangerous/exc.py"
+      },
+      "source_id": "code-cc2d871ec9eba7f06dc419e9",
+      "target_id": "code-ef5f9d5a37703f69b12123b3"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".serializer",
+        "target_path": "src/itsdangerous/serializer.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-231b55051ecf943ba2b008a6"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".serializer",
+        "target_path": "src/itsdangerous/serializer.py"
+      },
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-231b55051ecf943ba2b008a6"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".serializer",
+        "target_path": "src/itsdangerous/serializer.py"
+      },
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-231b55051ecf943ba2b008a6"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".signer",
+        "target_path": "src/itsdangerous/signer.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-cc2d871ec9eba7f06dc419e9"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".signer",
+        "target_path": "src/itsdangerous/signer.py"
+      },
+      "source_id": "code-231b55051ecf943ba2b008a6",
+      "target_id": "code-cc2d871ec9eba7f06dc419e9"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".signer",
+        "target_path": "src/itsdangerous/signer.py"
+      },
+      "source_id": "code-3a81df516a17c4f563150a18",
+      "target_id": "code-cc2d871ec9eba7f06dc419e9"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".timed",
+        "target_path": "src/itsdangerous/timed.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-3a81df516a17c4f563150a18"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".timed",
+        "target_path": "src/itsdangerous/timed.py"
+      },
+      "source_id": "code-a8c436f527edcb033df35c6e",
+      "target_id": "code-3a81df516a17c4f563150a18"
+    },
+    {
+      "kind": "imports",
+      "payload": {
+        "module": ".url_safe",
+        "target_path": "src/itsdangerous/url_safe.py"
+      },
+      "source_id": "code-1320f88a4d8d4ec41b4db57f",
+      "target_id": "code-a8c436f527edcb033df35c6e"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "BadData"
+      },
+      "source_id": "code-1a0132450f30668eb61d979c",
+      "target_id": "code-e496e6084d0fb2289817746c"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "BadData"
+      },
+      "source_id": "code-c0da7ade01d83681ef519b7e",
+      "target_id": "code-e496e6084d0fb2289817746c"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "BadSignature"
+      },
+      "source_id": "code-a8cf3b7ba333d6f876337ceb",
+      "target_id": "code-1a0132450f30668eb61d979c"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "BadSignature"
+      },
+      "source_id": "code-fa708e928850207e52f32a43",
+      "target_id": "code-1a0132450f30668eb61d979c"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "BadTimeSignature"
+      },
+      "source_id": "code-b79c876faa69c3c0daacdbac",
+      "target_id": "code-a8cf3b7ba333d6f876337ceb"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "Signer"
+      },
+      "source_id": "code-3ece4b62aebb570c8796a79a",
+      "target_id": "code-60b7f8c97fd25fbe5d81c00a"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "SigningAlgorithm"
+      },
+      "source_id": "code-10b07887f3991a28caec571e",
+      "target_id": "code-26dfe8b135e257080e8cdd3a"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "SigningAlgorithm"
+      },
+      "source_id": "code-95e51f1e7907c30601ed4226",
+      "target_id": "code-26dfe8b135e257080e8cdd3a"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "URLSafeSerializerMixin"
+      },
+      "source_id": "code-5f94085c25865b2f8f9e3d96",
+      "target_id": "code-b4d698f24e6fbe6336c0fb9e"
+    },
+    {
+      "kind": "inherits",
+      "payload": {
+        "base": "URLSafeSerializerMixin"
+      },
+      "source_id": "code-e974bc6372750da0d3820a65",
+      "target_id": "code-b4d698f24e6fbe6336c0fb9e"
+    }
+  ]
+}

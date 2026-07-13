@@ -1,0 +1,14 @@
+{
+  "project_root": "D:\\代码仓\\Bridle-dev",
+  "stack": "node",
+  "score": 10,
+  "ok": true,
+  "findings": [],
+  "summary": {
+    "total": 0,
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "MEDIUM": 0,
+    "LOW": 0
+  }
+}

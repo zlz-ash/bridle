@@ -1,0 +1,16 @@
+{
+  "algorithm": "sha256",
+  "canonicalization": "sorted path + NUL + lowercase file sha256, joined by LF",
+  "external_ignored": true,
+  "modules": {
+    "project_map": {
+      "content_hash": "72a359046999a5df229fb1915028ab00c30fde9d186e1dcf9a8d9a51196f161c",
+      "node_count": 58
+    },
+    "container": {
+      "content_hash": "749837c400b328f0ba1e9f44890ab6e9de2519a6a5574a73aba69006628ab4db",
+      "node_count": 88
+    }
+  },
+  "schema_version": 1
+}

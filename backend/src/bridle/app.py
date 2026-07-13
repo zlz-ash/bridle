@@ -22,7 +22,12 @@ from bridle.features.workspace.files_controller import router as workspace_files
 logger = logging.getLogger("bridle")
 
 
-def create_app(test_db=None, test_workspace: str | None = None, container_runner=None) -> FastAPI:
+def create_app(
+    test_db=None,
+    test_workspace: str | None = None,
+    container_runner=None,
+    project_runtime_registry=None,
+) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
@@ -43,10 +48,38 @@ def create_app(test_db=None, test_workspace: str | None = None, container_runner
         from bridle.api.deps import set_test_db
         set_test_db(test_db)
 
+    from bridle.agent.runtime.project_map_agent import ProjectRuntimeShutdownError
+    from bridle.agent.runtime.project_registry import (
+        configure_project_runtime_registry,
+        get_project_runtime_registry,
+    )
+    from bridle.logging.facade import get_logging_facade
+
+    runtime_registry = project_runtime_registry or get_project_runtime_registry()
+    if project_runtime_registry is not None:
+        configure_project_runtime_registry(project_runtime_registry)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Run the application lifetime."""
-        yield
+        try:
+            yield
+        finally:
+            result = await runtime_registry.stop_all()
+            if result.failures:
+                get_logging_facade().error_event(
+                    "project_runtime_shutdown",
+                    "failed",
+                    error_code="project_runtime_shutdown_failed",
+                    detail={
+                        "failure_count": len(result.failures),
+                        "project_ids": [failure.project_id for failure in result.failures],
+                    },
+                )
+                raise ProjectRuntimeShutdownError(
+                    "one or more project runtimes failed to stop",
+                    failures=result.failures,
+                )
 
     app = FastAPI(title="Bridle", version=__version__, lifespan=lifespan)
     app.state.started_at = time.time()
