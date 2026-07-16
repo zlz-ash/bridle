@@ -1,0 +1,76 @@
+name: Agent Runtime Authorization Gate
+
+on:
+  push:
+    paths:
+      - "backend/src/bridle/agent/runtime/**"
+      - "backend/src/bridle/features/project_map/watcher.py"
+      - "backend/src/bridle/features/projects/service.py"
+      - "backend/src/bridle/app.py"
+      - "backend/tests/agent/runtime/**"
+      - "backend/tests/features/project_map/test_map_watcher.py"
+      - "backend/tests/features/projects/test_project_service.py"
+      - "backend/pyproject.toml"
+      - ".github/workflows/agent-runtime-authorization.yml"
+  pull_request:
+    paths:
+      - "backend/src/bridle/agent/runtime/**"
+      - "backend/src/bridle/features/project_map/watcher.py"
+      - "backend/src/bridle/features/projects/service.py"
+      - "backend/src/bridle/app.py"
+      - "backend/tests/agent/runtime/**"
+      - "backend/tests/features/project_map/test_map_watcher.py"
+      - "backend/tests/features/projects/test_project_service.py"
+      - "backend/pyproject.toml"
+      - ".github/workflows/agent-runtime-authorization.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-runtime-authorization-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-runtime-authorization-gate:
+    name: agent-runtime-authorization-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e backend "pytest>=8.0" "pytest-asyncio>=0.25"
+
+      - name: Run reviewed agent runtime authorization gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ai-dev/ci/runs/agent-runtime-authorization
+          python -m pytest backend/tests/agent/runtime -q -ra \
+            --junitxml=.ai-dev/ci/runs/agent-runtime-authorization/junit.xml \
+            2>&1 | tee .ai-dev/ci/runs/agent-runtime-authorization/pytest.log
+
+      - name: Run reviewed project mapper registry gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest \
+            backend/tests/agent/runtime/test_project_runtime_registry.py \
+            backend/tests/features/project_map/test_map_watcher.py \
+            backend/tests/features/projects/test_project_service.py \
+            -q -ra \
+            --junitxml=.ai-dev/ci/runs/agent-runtime-authorization/project-mapper-junit.xml \
+            2>&1 | tee .ai-dev/ci/runs/agent-runtime-authorization/project-mapper-pytest.log
+
+      - name: Upload agent runtime authorization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-runtime-authorization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ai-dev/ci/runs/agent-runtime-authorization
+          if-no-files-found: error

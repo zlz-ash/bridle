@@ -1,6 +1,7 @@
 """Local static skill registry for master → worker prompt guidance."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from dataclasses import dataclass
@@ -61,9 +62,16 @@ def detect_env_layout(
         return "java_spring"
     if any("src/" in p for p in paths) and any("tests/" in p for p in paths):
         return "python_src_package"
-    if any(p.endswith(".py") for p in paths) and not any("src/" in p for p in paths):
-        if any("/" not in p.strip("/") for p in paths if p.endswith(".py") and "test" not in p.lower()):
-            return "python_flat"
+    if (
+        any(p.endswith(".py") for p in paths)
+        and not any("src/" in p for p in paths)
+        and any(
+            "/" not in p.strip("/")
+            for p in paths
+            if p.endswith(".py") and "test" not in p.lower()
+        )
+    ):
+        return "python_flat"
     if "spring" in lower_desc or "junit" in lower_desc or "maven" in lower_desc:
         return "java_spring"
     if "src/" in lower_desc or "package" in lower_desc:
@@ -170,6 +178,10 @@ class SkillRegistry:
     def list_ids(self) -> list[str]:
         """List shared skills; no input exits as stable registry identifiers."""
         return sorted(self._skills)
+
+    def frozen_copy(self) -> SkillRegistry:
+        """Detach one runtime generation from later registry mutations."""
+        return type(self)(copy.deepcopy(self._skills))
 
     def prompt_fragment(self, skill_id: str, submodule_key: str) -> str:
         skill = self.get(skill_id)

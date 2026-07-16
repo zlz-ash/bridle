@@ -22,9 +22,10 @@ async def test_open_project_is_idempotent_and_initializes_plan_db(client, test_w
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["id"] == second.json()["id"]
-    assert first.json()["scan_status"] == "ready"
-    assert first.json()["can_chat"] is True
-    assert first.json()["can_edit_plan"] is True
+    assert first.json()["scan_status"] == "not_scanned"
+    assert second.json()["scan_status"] == "not_scanned"
+    assert first.json()["can_chat"] is False
+    assert first.json()["can_edit_plan"] is False
     assert first.json()["available"] is True
     assert (project_root / ".bridle" / "plan.db").is_file()
 

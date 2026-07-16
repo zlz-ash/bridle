@@ -9,6 +9,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from bridle.agent.runtime.change_outbox import (
+    AtomicPatchCommitter,
+    ChangeCorrelation,
+    ChangeOutbox,
+    ChangeOutboxError,
+)
 from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.agent.tools.executor import Executor
 from bridle.agent.tools.proposal_path_validator import ProposalPathValidator
@@ -85,7 +91,17 @@ class SandboxedToolExecutor:
 
     stdout_preview_limit = STDOUT_PREVIEW_LIMIT
 
-    def __init__(self, policy: SandboxPolicy, *, test_backend: Any | None = None) -> None:
+    def __init__(
+        self,
+        policy: SandboxPolicy,
+        *,
+        test_backend: Any | None = None,
+        project_id: str | None = None,
+        agent_id: str | None = None,
+        generation: int = 1,
+        trace_id: str | None = None,
+        formal_workspace: bool = False,
+    ) -> None:
         self.policy = policy
         self._test_backend = test_backend
         runs_root = policy.workspace_root / ".bridle-runs"
@@ -98,6 +114,19 @@ class SandboxedToolExecutor:
         self._granted_files: set[str] = set()
         self._access_records: list[dict[str, Any]] = []
         self._access_dedupe: dict[str, dict[str, Any]] = {}
+        self._patch_committer: AtomicPatchCommitter | None = None
+        self._change_correlation: ChangeCorrelation | None = None
+        if formal_workspace:
+            resolved_project_id = project_id or policy.run_id
+            self._change_correlation = ChangeCorrelation(
+                trace_id=trace_id or f"patch-{policy.run_id}",
+                project_id=resolved_project_id,
+                agent_id=agent_id or policy.node_id,
+                generation=generation,
+            )
+            self._patch_committer = AtomicPatchCommitter(
+                ChangeOutbox(policy.workspace_root, project_id=resolved_project_id)
+            )
         self.tdd_state = TDDStateTracker()
 
     @property
@@ -563,6 +592,22 @@ class SandboxedToolExecutor:
         dry_run = validation.dry_run
         if dry_run is None or not dry_run.valid:
             return _failed("PatchApplyError", ["Patch validation missing dry-run result"])
+        if self._patch_committer is not None and self._change_correlation is not None:
+            try:
+                result = self._patch_committer.commit(
+                    norm_path,
+                    change_type=change_type,  # type: ignore[arg-type]
+                    new_text=None if change_type == "remove" else dry_run.new_text,
+                    correlation=self._change_correlation,
+                )
+            except ChangeOutboxError as exc:
+                return _failed("PatchApplyError", [exc.error_code])
+            if result.status != "ready":
+                return _failed(
+                    "PatchApplyError",
+                    [result.error_code or result.status],
+                )
+            return None
         try:
             if change_type == "remove":
                 if target.is_file():

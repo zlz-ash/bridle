@@ -20,6 +20,9 @@ async def test_code_entities_blind_spots_and_boundaries_endpoints(client, test_w
     (root / "pkg" / "tests" / "test_a.py").write_text("def test_a():\n    assert True\n", encoding="utf-8")
 
     project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    rescan = await client.post(f"/api/v1/projects/{project['id']}/rescan")
+    assert rescan.status_code == 200
+    assert rescan.json()["scan_status"] in {"ready", "needs_arbitration"}
 
     entities = await client.get(f"/api/v1/projects/{project['id']}/map/code-entities", params={"limit": 200})
     assert entities.status_code == 200

@@ -15,8 +15,14 @@ class StdoutLogSink:
 
     def emit(self, event: LogEvent) -> None:
         payload = event.to_dict()
+        runtime_fields = "".join(
+            f"{key}={payload[key]} "
+            for key in ("trace_id", "message_id", "project_id", "agent_id", "generation")
+            if key in payload
+        )
         self._stream.write(
             f"[{payload['level']}] {payload['action']} status={payload['status']} "
+            f"{runtime_fields}"
             f"session_id={payload.get('session_id')} run_id={payload.get('run_id')} "
             f"detail={json.dumps(payload.get('detail') or {}, ensure_ascii=False, default=str)}\n"
         )

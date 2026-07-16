@@ -103,10 +103,7 @@ class ModifyLoopService:
             (node_id, node_id),
         ).fetchall()
         declared = {str(r["symbol"]) for r in rows}
-        if not declared:
-            undeclared = exposed_symbols
-        else:
-            undeclared = exposed_symbols - declared
+        undeclared = exposed_symbols if not declared else exposed_symbols - declared
         if undeclared:
             raise ConflictError(
                 resource="consistency_gate",

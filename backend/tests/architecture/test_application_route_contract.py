@@ -35,8 +35,18 @@ def test_application_exposes_only_project_runtime_routes():
     assert api_roots <= {"events", "health", "projects", "sessions", "workspace"}
 
 
-def test_orm_metadata_exposes_only_project_runtime_tables():
-    """Inspect production model exports; module input exits with project runtime records only."""
+def test_orm_metadata_exposes_only_persisted_application_records():
+    """Inspect production model exports; module input exits with known application records only."""
     exports = set(production_models.__all__)
 
-    assert exports == {"Base", "ProjectRecord", "ProjectSessionRecord", "ProjectMessageRecord"}
+    assert exports == {
+        "Base",
+        "ProjectRecord",
+        "ProjectSessionRecord",
+        "ProjectMessageRecord",
+        "ProjectRuntimeRecoveryRecord",
+        "AgentRuntimeRecord",
+        "RuntimeChildResultReceiptRecord",
+        "RuntimeInputDeliveryRecord",
+        "RuntimeInputResultRecord",
+    }

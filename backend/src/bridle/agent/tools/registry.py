@@ -1,17 +1,18 @@
 """AgentToolRegistry bridge from DeepSeek tool calls to SandboxedToolExecutor."""
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from bridle.agent.context.types import ToolDescriptor
+from bridle.agent.runtime.schemas import AgentContext
+from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.agent.tools.deepseek_schema import V1_TOOL_NAMES
 from bridle.agent.tools.proposal_test_validator import resolve_allowed_test_commands
-from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.agent.tools.sandboxed_executor import SandboxedToolExecutor
 from bridle.logging.jsonl import log_event
-from bridle.agent.runtime.schemas import AgentContext
 
 RuntimeToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -281,7 +282,15 @@ class AgentToolRegistry:
             policy = policy.with_readonly_files(frozenset(str(p) for p in readonly))
         backend = test_backend or snap.get("_container_test_backend")
         return cls(
-            SandboxedToolExecutor(policy, test_backend=backend),
+            SandboxedToolExecutor(
+                policy,
+                test_backend=backend,
+                project_id=str(snap.get("project_id") or policy.run_id),
+                agent_id=str(snap.get("agent_id") or policy.node_id),
+                generation=int(snap.get("generation") or 1),
+                trace_id=str(snap.get("trace_id") or f"patch-{policy.run_id}"),
+                formal_workspace=bool(snap.get("formal_workspace", False)),
+            ),
             runtime_handlers=runtime_handlers,
             role_capabilities=context.tool_capabilities,
         )
@@ -299,6 +308,14 @@ class AgentToolRegistry:
             if name in self._RUNTIME_TOOL_DESCRIPTORS and self._is_allowed(name)
         )
         return descriptors
+
+    def frozen_copy(self) -> AgentToolRegistry:
+        """Detach one runtime generation from later registry mutations."""
+        return type(self)(
+            self._executor,
+            runtime_handlers=dict(self._runtime_handlers),
+            role_capabilities=copy.deepcopy(self._role_capabilities),
+        )
 
     def _is_allowed(self, tool_name: str) -> bool:
         """Resolve one role capability; tool input exits allowed and defaults true for old node contexts."""
@@ -452,10 +469,7 @@ class AgentToolRegistry:
             error_code = raw.get("error_code", "")
             category, retryable = classify_tool_error(error_code, raw)
             out["category"] = category
-            if "retryable" in raw:
-                out["retryable"] = raw["retryable"]
-            else:
-                out["retryable"] = retryable
+            out["retryable"] = raw.get("retryable", retryable)
             if raw.get("next_action"):
                 out["next_action"] = raw["next_action"]
             if raw.get("results"):

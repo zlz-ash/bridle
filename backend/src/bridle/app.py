@@ -1,6 +1,7 @@
 """FastAPI app factory."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -22,7 +23,14 @@ from bridle.features.workspace.files_controller import router as workspace_files
 logger = logging.getLogger("bridle")
 
 
-def create_app(test_db=None, test_workspace: str | None = None, container_runner=None) -> FastAPI:
+def create_app(
+    test_db=None,
+    test_workspace: str | None = None,
+    container_runner=None,
+    project_runtime_registry=None,
+    runtime_lifecycle=None,
+    runtime_shutdown_timeout: float = 5.0,
+) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
@@ -43,10 +51,240 @@ def create_app(test_db=None, test_workspace: str | None = None, container_runner
         from bridle.api.deps import set_test_db
         set_test_db(test_db)
 
+    from bridle.agent.runtime.project_map_agent import ProjectRuntimeShutdownError
+    from bridle.agent.runtime.project_registry import (
+        ProjectRuntimeStopAllResult,
+        ProjectRuntimeStopFailure,
+        configure_project_runtime_registry,
+        get_project_runtime_registry,
+    )
+    from bridle.logging.facade import get_logging_facade
+
+    runtime_registry = project_runtime_registry or get_project_runtime_registry()
+    if project_runtime_registry is not None:
+        configure_project_runtime_registry(project_runtime_registry)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Run the application lifetime."""
-        yield
+        startup_mailboxes = []
+        relay_stop = None
+        relay_task = None
+        application_sessions = None
+        try:
+            active_lifecycle = runtime_lifecycle
+            if (
+                active_lifecycle is None
+                and test_db is None
+                and test_workspace is None
+                and project_runtime_registry is None
+            ):
+                from pathlib import Path
+
+                from sqlalchemy import select
+
+                from bridle import database
+                from bridle.agent.runtime.input_relay import RuntimeInputRelay
+                from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
+                from bridle.agent.runtime.session_runtime_lifecycle import RuntimeSessionLifecycle
+                from bridle.models.project import ProjectRecord
+
+                database._ensure_engine()
+                async with database.async_session() as session:
+                    projects = (await session.execute(select(ProjectRecord))).scalars().all()
+                project_paths = {project.id: Path(project.path) for project in projects}
+                mailboxes: dict[str, PersistentMailbox] = {}
+
+                def mailbox_for_project(project_id: str) -> PersistentMailbox:
+                    current = mailboxes.get(project_id)
+                    if current is not None:
+                        return current
+                    project_root = project_paths[project_id]
+                    if not project_root.is_dir():
+                        raise FileNotFoundError("project_path_unavailable")
+                    current = PersistentMailbox(
+                        project_root / ".bridle" / "mail.db",
+                        project_id=project_id,
+                        consumer_id="startup-recovery",
+                    )
+                    mailboxes[project_id] = current
+                    startup_mailboxes.append(current)
+                    return current
+
+                active_lifecycle = RuntimeSessionLifecycle(
+                    database.async_session,
+                    relay=RuntimeInputRelay(
+                        database.async_session,
+                        mailbox_for_project=mailbox_for_project,
+                    ),
+                )
+            if active_lifecycle is not None:
+                application_sessions = active_lifecycle.sessions
+            elif test_db is not None and test_db.bind is not None:
+                from sqlalchemy.ext.asyncio import async_sessionmaker
+
+                application_sessions = async_sessionmaker(
+                    test_db.bind,
+                    expire_on_commit=False,
+                )
+            if application_sessions is not None:
+                from sqlalchemy import delete, select
+
+                from bridle.agent.runtime.gateway import recover_project_runtime
+                from bridle.models.project import ProjectRecord
+                from bridle.models.project_runtime_recovery import (
+                    ProjectRuntimeRecoveryRecord,
+                )
+
+                bind = application_sessions.kw["bind"]
+                async with bind.begin() as connection:
+                    await connection.run_sync(
+                        ProjectRuntimeRecoveryRecord.__table__.create,
+                        checkfirst=True,
+                    )
+                if active_lifecycle is not None:
+                    await active_lifecycle.recover_before_requests()
+                async with application_sessions() as session:
+                    projects = (
+                        await session.execute(select(ProjectRecord))
+                    ).scalars().all()
+                for project in projects:
+                    try:
+                        await recover_project_runtime(
+                            project_path=project.path,
+                            project_id=project.id,
+                            facade=get_logging_facade(),
+                        )
+                    except Exception as exc:
+                        async with application_sessions() as session:
+                            record = await session.get(
+                                ProjectRuntimeRecoveryRecord,
+                                project.id,
+                            )
+                            reason = f"runtime_recovery_{type(exc).__name__}"
+                            if record is None:
+                                session.add(
+                                    ProjectRuntimeRecoveryRecord(
+                                        project_id=project.id,
+                                        status="degraded",
+                                        reason=reason,
+                                        error_type=type(exc).__name__,
+                                    )
+                                )
+                            else:
+                                record.status = "degraded"
+                                record.reason = reason
+                                record.error_type = type(exc).__name__
+                            await session.commit()
+                        get_logging_facade().error_event(
+                            "app.runtime_project_degraded",
+                            "degraded",
+                            project_id=project.id,
+                            error_code=type(exc).__name__,
+                            detail={"reason": "project_recovery_failed"},
+                        )
+                    else:
+                        async with application_sessions() as session:
+                            await session.execute(
+                                delete(ProjectRuntimeRecoveryRecord).where(
+                                    ProjectRuntimeRecoveryRecord.project_id == project.id
+                                )
+                            )
+                            await session.commit()
+                        get_logging_facade().info_event(
+                            "app.runtime_project_recovered",
+                            "completed",
+                            project_id=project.id,
+                            detail={"recovered": True},
+                        )
+            if active_lifecycle is not None:
+                relay_stop = asyncio.Event()
+                relay_task = asyncio.create_task(
+                    active_lifecycle.run_relay_retry(relay_stop),
+                    name="runtime-input-relay",
+                )
+            yield
+        finally:
+            from bridle.agent.runtime.gateway import shutdown_gateway_runtimes
+
+            get_logging_facade().info_event(
+                "app.runtime_shutdown_started",
+                "started",
+                detail={"timeout_seconds": runtime_shutdown_timeout},
+            )
+            failures: list[ProjectRuntimeStopFailure] = []
+            await runtime_registry.begin_shutdown()
+            if relay_stop is not None:
+                relay_stop.set()
+            if relay_task is not None:
+                try:
+                    await relay_task
+                except Exception as exc:
+                    failures.append(
+                        ProjectRuntimeStopFailure(
+                            "runtime-input-relay",
+                            "runtime_input_relay_stop_failed",
+                            type(exc).__name__,
+                        )
+                    )
+            shutdown_task = asyncio.create_task(shutdown_gateway_runtimes())
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.shield(shutdown_task),
+                    timeout=runtime_shutdown_timeout,
+                )
+            except TimeoutError:
+                get_logging_facade().error_event(
+                    "app.runtime_shutdown_forced",
+                    "forced",
+                    error_code="runtime_shutdown_timeout",
+                    detail={"timeout_seconds": runtime_shutdown_timeout},
+                )
+                result = await shutdown_task
+            except Exception as exc:
+                failures.append(
+                    ProjectRuntimeStopFailure(
+                        "gateway",
+                        "gateway_runtime_shutdown_failed",
+                        type(exc).__name__,
+                    )
+                )
+                result = ProjectRuntimeStopAllResult()
+            for mailbox in startup_mailboxes:
+                try:
+                    await mailbox.close()
+                except Exception as exc:
+                    failures.append(
+                        ProjectRuntimeStopFailure(
+                            mailbox.project_id,
+                            "startup_mailbox_close_failed",
+                            type(exc).__name__,
+                        )
+                    )
+            failures.extend(result.failures)
+            if failures:
+                get_logging_facade().error_event(
+                    "app.runtime_shutdown_failed",
+                    "failed",
+                    error_code="project_runtime_shutdown_failed",
+                    detail={
+                        "failure_count": len(failures),
+                    },
+                )
+                get_logging_facade().info_event(
+                    "app.runtime_shutdown_completed",
+                    "completed",
+                    detail={"failure_count": len(failures)},
+                )
+                raise ProjectRuntimeShutdownError(
+                    "one or more project runtimes failed to stop",
+                    failures=tuple(failures),
+                )
+            get_logging_facade().info_event(
+                "app.runtime_shutdown_completed",
+                "completed",
+                detail={"failure_count": 0},
+            )
 
     app = FastAPI(title="Bridle", version=__version__, lifespan=lifespan)
     app.state.started_at = time.time()

@@ -1,0 +1,89 @@
+name: Project Map Module Gate
+
+on:
+  push:
+    paths:
+      - "backend/src/**"
+      - "backend/tests/features/project_map/**"
+      - "backend/pyproject.toml"
+      - "frontend/src/api/**"
+      - "frontend/src/hooks/map*.ts"
+      - "frontend/src/hooks/useProjectMapLayers.ts"
+      - "frontend/src/hooks/__tests__/mapLayerSync.test.ts"
+      - "frontend/src/hooks/__tests__/mapSyncLogger.test.ts"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.test.ts"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.retry.test.tsx"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.sync.test.tsx"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "scripts/verify_module_ci_gates.py"
+      - ".ai-dev/ci/contracts/map-container-test-contract.json"
+      - ".github/workflows/project-map.yml"
+  pull_request:
+    paths:
+      - "backend/src/**"
+      - "backend/tests/features/project_map/**"
+      - "backend/pyproject.toml"
+      - "frontend/src/api/**"
+      - "frontend/src/hooks/map*.ts"
+      - "frontend/src/hooks/useProjectMapLayers.ts"
+      - "frontend/src/hooks/__tests__/mapLayerSync.test.ts"
+      - "frontend/src/hooks/__tests__/mapSyncLogger.test.ts"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.test.ts"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.retry.test.tsx"
+      - "frontend/src/hooks/__tests__/useProjectMapLayers.sync.test.tsx"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "scripts/verify_module_ci_gates.py"
+      - ".ai-dev/ci/contracts/map-container-test-contract.json"
+      - ".github/workflows/project-map.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-map-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  map-module-gate:
+    name: map-module-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e backend "pytest>=8.0" "pytest-asyncio>=0.25"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify module gate contract
+        run: python -m pytest .ai-dev/ci/tests/test_verify_module_ci_gates.py -q
+
+      - name: Run reviewed project-map gate
+        run: >-
+          python scripts/verify_module_ci_gates.py
+          --contract .ai-dev/ci/contracts/map-container-test-contract.json
+          --gate map
+          --output-dir .ai-dev/ci/runs/github-map-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload project-map gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-map-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ai-dev/ci/runs/github-map-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn

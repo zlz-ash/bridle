@@ -1,0 +1,391 @@
+{
+  "project_root": "D:\\代码仓\\Bridle-dev",
+  "generated_at": "2026-07-11T12:57:44.846Z",
+  "docs": [
+    {
+      "path": "docs/README.md",
+      "doc_kind": "index",
+      "doc_role": "canonical",
+      "owner": "ln-111-root-docs-creator",
+      "primary_sources": [
+        "README.md",
+        "AGENTS.md",
+        "backend/pyproject.toml",
+        "frontend/package.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/architecture/patterns_catalog.md",
+      "doc_kind": "reference",
+      "doc_role": "working",
+      "owner": "ln-112-project-core-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "backend/src/bridle",
+        "frontend/src",
+        "scripts/ci"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": null
+    },
+    {
+      "path": "docs/documentation_standards.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-111-root-docs-creator",
+      "primary_sources": [
+        "AGENTS.md",
+        "docs/README.md",
+        "docs/principles.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/principles.md",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "owner": "ln-111-root-docs-creator",
+      "primary_sources": [
+        "AGENTS.md",
+        "backend/tests",
+        ".github/workflows/container-docker-linux.yml"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/api_spec.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-113-backend-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/architecture.md",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "owner": "ln-112-project-core-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "docs/project/requirements.md",
+        "docs/reference/adrs"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/database_schema.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-113-backend-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/design_guidelines.md",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "owner": "ln-114-frontend-docs-creator",
+      "primary_sources": [
+        "frontend/package.json",
+        "frontend/src/components/ds",
+        "frontend/src/components/ds/styles.css",
+        "frontend/src/styles/tokens"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/implementation_status.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-112-project-core-creator",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        ".ai-dev/docs/ln-110/context-store.json",
+        "docs/project/requirements.md",
+        "docs/reference/adrs"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": null
+    },
+    {
+      "path": "docs/project/infrastructure.md",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "owner": "ln-115-devops-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/requirements.md",
+      "doc_kind": "explanation",
+      "doc_role": "canonical",
+      "owner": "ln-112-project-core-creator",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/runbook.md",
+      "doc_kind": "how-to",
+      "doc_role": "canonical",
+      "owner": "ln-115-devops-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/project/tech_stack.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-112-project-core-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        "backend/pyproject.toml",
+        "frontend/package.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/README.md",
+      "doc_kind": "index",
+      "doc_role": "navigation",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json",
+        ".ai-dev/docs/ln-110/aggregate-summary.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": null
+    },
+    {
+      "path": "docs/reference/adrs/adr-001-fastapi-backend.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-002-local-sqlite-sqlalchemy.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-003-react-vite-frontend.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-004-langfuse-v4-observability.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/adrs/adr-005-trusted-docker-gate.md",
+      "doc_kind": "record",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/docs/ln-110/context-store.json"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/project-pitfalls.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        "AGENTS.md",
+        ".ai-dev/runtime/capability-report.json",
+        ".ai-dev/spec/requirements.json",
+        "docs/project/runbook.md",
+        "docs/reference/guides/testing-strategy.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/testing-strategy.md",
+      "doc_kind": "how-to",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        ".ai-dev/spec/requirements.json",
+        "backend/pyproject.toml",
+        "frontend/package.json",
+        "backend/tests",
+        "frontend/src/**/__tests__",
+        "scripts/ci",
+        ".github/workflows/container-docker-linux.yml"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/reference/guides/workspace-runtime-patterns.md",
+      "doc_kind": "reference",
+      "doc_role": "canonical",
+      "owner": "ln-120-reference-docs-creator",
+      "primary_sources": [
+        "backend/src/bridle/cli.py",
+        "backend/src/bridle/config.py",
+        "backend/src/bridle/database.py",
+        "backend/src/bridle/features/workspace",
+        "docs/project/runbook.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    },
+    {
+      "path": "docs/tasks/README.md",
+      "doc_kind": "index",
+      "doc_role": "canonical",
+      "owner": "ln-130-tasks-docs-creator",
+      "primary_sources": [
+        "AGENTS.md",
+        "plan.md",
+        ".ai-dev/state/pipeline.json",
+        ".ai-dev/spec/requirements.json",
+        "docs/reference/guides/testing-strategy.md"
+      ],
+      "key_sections": [
+        "Quick Navigation",
+        "Agent Entry",
+        "Maintenance"
+      ],
+      "last_updated": "2026-07-11"
+    }
+  ]
+}

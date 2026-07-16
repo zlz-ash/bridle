@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -26,6 +26,11 @@ class LogEvent:
     action: str
     status: str
     level: LogLevel = LogLevel.INFO
+    trace_id: str | None = None
+    message_id: str | None = None
+    project_id: str | None = None
+    agent_id: str | None = None
+    generation: int | None = None
     session_id: str | None = None
     run_id: str | None = None
     node_id: str | None = None
@@ -44,7 +49,7 @@ class LogEvent:
     exit_code: int | None = None
     timed_out: bool | None = None
     detail: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
