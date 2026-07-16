@@ -4,15 +4,17 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bridle.agent.runtime.project_registry import get_project_runtime_registry
+from bridle.agent.runtime.change_outbox import ChangeOutbox
+from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
 from bridle.api.errors import ConflictError, NotFoundError, ValidationError
 from bridle.features.project_map.store import ProjectPlanStore
 from bridle.features.projects.schemas import ProjectReadSchema
 from bridle.logging.facade import get_logging_facade
 from bridle.models.project import ProjectRecord
+from bridle.models.project_runtime_recovery import ProjectRuntimeRecoveryRecord
 from bridle.utils.datetime_util import utc_now_naive
 
 
@@ -41,10 +43,21 @@ class ProjectService:
             record.last_opened_at = utc_now_naive()
 
         store = ProjectPlanStore(root, project_id=record.id)
-        initialized = store.initialize()
+        initialized = store.initialize(scan_if_created=False)
+        ChangeOutbox(root, project_id=record.id)
+        mailbox = PersistentMailbox(
+            root / ".bridle" / "mail.db",
+            project_id=record.id,
+            consumer_id="project-storage-init",
+        )
+        await mailbox.close()
+        await db.execute(
+            delete(ProjectRuntimeRecoveryRecord).where(
+                ProjectRuntimeRecoveryRecord.project_id == record.id
+            )
+        )
         await db.commit()
         await db.refresh(record)
-        await get_project_runtime_registry().ensure_started(record.id, root)
         get_logging_facade().info_event(
             "project_open",
             "completed",
@@ -66,7 +79,17 @@ class ProjectService:
                 select(ProjectRecord).order_by(ProjectRecord.last_opened_at.desc(), ProjectRecord.id.desc())
             )
         ).scalars().all()
-        return [ProjectService._to_read(record) for record in records]
+        recovery_rows = (
+            await db.execute(select(ProjectRuntimeRecoveryRecord))
+        ).scalars().all()
+        recovery_by_project = {row.project_id: row.reason for row in recovery_rows}
+        return [
+            ProjectService._to_read(
+                record,
+                recovery_reason=recovery_by_project.get(record.id),
+            )
+            for record in records
+        ]
 
     @staticmethod
     async def rescan_project(db: AsyncSession, project_id: str) -> dict:
@@ -104,6 +127,7 @@ class ProjectService:
         record: ProjectRecord,
         *,
         scan_status: str | None = None,
+        recovery_reason: str | None = None,
     ) -> ProjectReadSchema:
         """Serialize project state; record/status input returns availability and local scan state."""
         root = Path(record.path)
@@ -113,7 +137,14 @@ class ProjectService:
             "can_edit_plan": False,
             "readiness_reason": "unavailable",
         }
-        if status is None and (root / ".bridle" / "plan.db").is_file():
+        if recovery_reason is not None:
+            status = "stale"
+            readiness = {
+                "can_chat": False,
+                "can_edit_plan": False,
+                "readiness_reason": recovery_reason,
+            }
+        elif status is None and (root / ".bridle" / "plan.db").is_file():
             overview = ProjectPlanStore(root, project_id=record.id).overview()
             status = overview["scan_status"]
             readiness = {

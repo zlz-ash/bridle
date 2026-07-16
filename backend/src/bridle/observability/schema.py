@@ -5,6 +5,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 STANDARD_IDENTITY_FIELDS = frozenset({
+    "trace_id",
+    "message_id",
+    "project_id",
+    "agent_id",
+    "generation",
     "session_id",
     "run_id",
     "node_id",
@@ -45,6 +50,11 @@ CORE_EVENT_PREFIXES = (
 
 @dataclass(frozen=True)
 class ObservabilityContext:
+    trace_id: str | None = None
+    message_id: str | None = None
+    project_id: str | None = None
+    agent_id: str | None = None
+    generation: int | None = None
     session_id: str | None = None
     run_id: str | None = None
     node_id: str | None = None

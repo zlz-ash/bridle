@@ -21,6 +21,15 @@ def _node(node_id: str, *, parent_id: str | None = None, order: int = 0) -> dict
     }
 
 
+async def _open_and_rescan(client, root: Path) -> dict:
+    """Open storage then explicitly build a ready Map for tests that require indexed data."""
+    project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    response = await client.post(f"/api/v1/projects/{project['id']}/rescan")
+    assert response.status_code == 200
+    assert response.json()["scan_status"] == "ready"
+    return project
+
+
 @pytest.mark.asyncio
 async def test_patch_uses_existing_plan_service_as_the_only_edit_entry(
     client,
@@ -54,7 +63,7 @@ async def test_patch_and_progressive_reads_share_project_plan_db(client, test_wo
     """Patch one project map; project/pagination inputs exit through bounded read endpoints."""
     root = test_workspace / "map-project"
     root.mkdir()
-    project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    project = await _open_and_rescan(client, root)
 
     patched = await client.patch(
         f"/api/v1/projects/{project['id']}/map",
@@ -109,7 +118,7 @@ async def test_patch_returns_structured_running_conflict(client, test_workspace:
     """Patch a running node; project/patch input exits as HTTP 409 with stable error code."""
     root = test_workspace / "running-map-project"
     root.mkdir()
-    project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    project = await _open_and_rescan(client, root)
     await client.patch(
         f"/api/v1/projects/{project['id']}/map",
         json={"add_nodes": [_node("active")]},
@@ -139,7 +148,7 @@ async def test_arbitration_api_lists_and_resolves_pending_objections(client, tes
     """Resolve a map objection over HTTP; project input exits with readiness restored."""
     root = test_workspace / "arbitration-api"
     root.mkdir()
-    project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    project = await _open_and_rescan(client, root)
     objection = ProjectPlanStore(root, project_id=project["id"]).create_map_objection(
         objection_type="ambiguous_responsibility",
         related_node_ids=["code-1"],
@@ -191,7 +200,7 @@ async def test_path_slice_returns_entities_for_changed_file(client, test_workspa
     root = test_workspace / "path-slice-api"
     (root / "src").mkdir(parents=True)
     (root / "src" / "target.py").write_text("def fn():\n    return 1\n", encoding="utf-8")
-    project = (await client.post("/api/v1/projects/open", json={"path": str(root)})).json()
+    project = await _open_and_rescan(client, root)
 
     response = await client.get(
         f"/api/v1/projects/{project['id']}/map/path-slice",

@@ -19,7 +19,7 @@ class ProjectRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     last_opened_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive)
 
-    sessions: Mapped[list["ProjectSessionRecord"]] = relationship(
+    sessions: Mapped[list[ProjectSessionRecord]] = relationship(
         "ProjectSessionRecord",
         back_populates="project",
         cascade="all, delete-orphan",
@@ -27,5 +27,3 @@ class ProjectRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 from bridle.models.project_session import ProjectSessionRecord  # noqa: E402
-
-ProjectSessionRecord

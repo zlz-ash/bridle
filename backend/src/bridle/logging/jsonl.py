@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bridle.logging.facade import emit_event as _emit_event
 
@@ -13,14 +13,25 @@ class JSONLFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry: dict = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "action": getattr(record, "action", record.getMessage()),
             "status": getattr(record, "status", "unknown"),
         }
 
-        for field in ("task_id", "node_id", "plan_node_id", "run_id", "duration_ms"):
+        for field in (
+            "task_id",
+            "node_id",
+            "plan_node_id",
+            "run_id",
+            "duration_ms",
+            "trace_id",
+            "message_id",
+            "project_id",
+            "agent_id",
+            "generation",
+        ):
             value = getattr(record, field, None)
             if value is not None:
                 log_entry[field] = value

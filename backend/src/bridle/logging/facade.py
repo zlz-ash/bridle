@@ -22,9 +22,10 @@ class LoggingFacade:
             try:
                 sink.emit(event)
             except Exception:
-                logging.getLogger("bridle.logging").exception(
+                logging.getLogger("bridle.logging").error(
                     "log_sink_emit_failed",
                     extra={"detail": {"action": event.action}},
+                    exc_info=False,
                 )
 
     def _build_event(
@@ -42,6 +43,11 @@ class LoggingFacade:
             action=action,
             status=status,
             level=level,
+            trace_id=_as_str(merged.get("trace_id")),
+            message_id=_as_str(merged.get("message_id")),
+            project_id=_as_str(merged.get("project_id")),
+            agent_id=_as_str(merged.get("agent_id")),
+            generation=_as_int(merged.get("generation")),
             session_id=_as_str(merged.get("session_id")),
             run_id=_as_str(merged.get("run_id")),
             node_id=_as_str(merged.get("node_id")),

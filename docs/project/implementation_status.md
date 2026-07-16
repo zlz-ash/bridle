@@ -3,7 +3,7 @@
 <!-- DOC_ROLE: canonical -->
 <!-- READ_WHEN: 判断某项能力是计划中、已有实现还是已被真实验证时 -->
 <!-- SKIP_WHEN: 只需要需求定义、技术选型或 API 字段时 -->
-<!-- PRIMARY_SOURCES: .ai-dev/spec/requirements.json, .ai-dev/docs/ln-110/context-store.json, docs/project/requirements.md, docs/reference/adrs -->
+<!-- PRIMARY_SOURCES: .ai-dev/spec/requirements.json, .ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json, .ai-dev/docs/ln-110/context-store.json, docs/project/requirements.md, docs/reference/adrs -->
 
 # 实现状态追踪
 
@@ -18,7 +18,7 @@
 
 ## Agent Entry
 
-本文只回答“当前能证明到什么程度”。`Implemented` 表示 Context Store 或当前源码边界记录了实现入口；`Verified` 必须附带本轮或可复查运行记录。2026-07-11 的文档重写阶段没有运行产品测试，因此本文不把任何条目提升为 `Verified`。任务基线中的 `pending` 也不会因为文档已经提及就自动完成。
+本文只回答“当前能证明到什么程度”。`Implemented` 表示 Context Store 或当前源码边界记录了实现入口；`Verified` 必须附带本轮或可复查运行记录。BATCH-AR-01～07 均已完成各自目标测试、本地验证及独立 Spec/Test、Quality 双审，状态均为 `BATCH_REVIEW_CLEAN`。BATCH-AR-07 通过 17 项 no-xfail 目标门禁、363 项相关回归、1224 项全量后端测试及 59 个变更范围 Python 文件 Ruff，当前为 `Verified`。
 
 ## Status Definitions
 
@@ -37,9 +37,16 @@
 | FR-BRD-001~004 | [requirements.md](requirements.md) | workspace 启动、本地绑定、Git 初始化与工作区读取 | Implemented | `backend/src/bridle/cli.py`, `backend/src/bridle/features/workspace` | `backend/tests/cli`（仅记录路径，未运行） | — | Context Store 确认 CLI、workspace feature 与 loopback 默认边界。 |
 | FR-BRD-010~015 | [requirements.md](requirements.md) | 项目记录、增量/语义地图、候选与刷新 | Implemented | `backend/src/bridle/features/projects`, `backend/src/bridle/features/project_map` | `backend/tests/features/project_map`（仅记录路径，未运行） | — | Context Store 列出项目地图查询和写接口。 |
 | FR-BRD-020~024 | [requirements.md](requirements.md) | 会话、消息、角色、能力与 provider | Implemented | `backend/src/bridle/features/sessions`, `backend/src/bridle/agent/providers` | 未在本轮运行 | — | Context Store 记录 projects、project_sessions、project_messages schema 与会话端点。 |
+| FR-BRD-025~029 | [requirements.md](requirements.md) / [确认记录](../../.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json) | 统一 Runtime、项目本地 Mail/Outbox、正式补丁、Map 幂等消费与每代能力隔离 | Verified | AR-01～07 均已有实现；AR-07 接入 lifespan 恢复、逐项目 `project_runtime_recovery` 降级、永久 shutdown latch、Forwarder/Runtime/finalizer 收口与正式补丁重投整链 | AR-01～07 均为 `BATCH_REVIEW_CLEAN`；AR-07 通过 17 项目标门禁、363 项相关回归、1224 项全量后端测试、59 文件变更范围 Ruff及独立双审 | 2026-07-15 | 现有 API schema/status 保持不变；全仓 Ruff 63 项历史基线未冒充 clean。 |
+| BATCH-AR-01 | [批次计划](../../.ai-dev/batches/BATCH-AR-01/plan.json) | Runtime 持久化职责、投递登记、项目三库基础 schema 与日志关联字段 | Verified | `backend/src/bridle/models/agent_runtime.py`、`backend/src/bridle/agent/runtime/persistence.py`、`backend/src/bridle/logging`、`backend/src/bridle/features/project_map/store.py` | 15-test JUnit、本地验证及独立 Spec/Test、Quality 双审均为 clean | 2026-07-14 | 状态为 `BATCH_REVIEW_CLEAN`；只覆盖 AR-01 基础子范围。 |
+| BATCH-AR-02 | [批次计划](../../.ai-dev/batches/BATCH-AR-02/plan.json) | 项目本地持久化 Mailbox、canonical 地址/envelope、顺序、容量、lease fencing、ACK/NACK、无限重试与 loop wake | Verified | `backend/src/bridle/agent/runtime/mailbox.py`、`backend/src/bridle/agent/runtime/persistent_mailbox.py`、`backend/src/bridle/agent/runtime/project_storage.py` | 18-test 目标 JUnit、63-case 既有回归、5-case no-xfail、本地验证及独立 Spec/Test、Quality 双审均为 clean | 2026-07-14 | 状态为 `BATCH_REVIEW_CLEAN`；不包含 Runtime Host 接线、Outbox 转发、Map Runtime 或能力 registry。 |
+| BATCH-AR-03 | [批次计划](../../.ai-dev/batches/BATCH-AR-03/plan.json) | 统一 Host 生命周期、父/子/Map 单例规则、不可变 generation 能力视图与撤权换代 | Verified | `backend/src/bridle/agent/runtime/host.py`、`agent_runtime.py`、`capability_view.py`、Tool/Skill registry | 目标测试、本地验证及独立 Spec/Test、Quality 双审均为 clean | 2026-07-14 | 状态为 `BATCH_REVIEW_CLEAN`；不包含会话 relay、正式补丁或 Map 消费。 |
+| BATCH-AR-04 | [批次计划](../../.ai-dev/batches/BATCH-AR-04/plan.json) | 会话输入 relay、父子协调、结果回执、关闭/撤权与历史保留 | Verified | `backend/src/bridle/agent/runtime/input_relay.py`、`parent_child_runtime.py`、`gateway.py`、`backend/src/bridle/features/sessions` | 目标测试、本地验证及独立 Spec/Test、Quality 双审均为 clean | 2026-07-14 | 状态为 `BATCH_REVIEW_CLEAN`；不包含正式补丁 Outbox。 |
+| BATCH-AR-05 | [批次计划](../../.ai-dev/batches/BATCH-AR-05/plan.json) | 正式单文件原子补丁、项目 Outbox、可靠转发与多文件部分成功语义 | Verified | `backend/src/bridle/agent/runtime/change_outbox.py`、`backend/src/bridle/agent/tools/sandboxed_executor.py`、`gateway.py` | 114 项目标测试、201 项 Runtime 回归、本地验证及独立 Spec/Test、Quality 双审均为 clean | 2026-07-15 | 状态为 `BATCH_REVIEW_CLEAN`；Mail 满/busy 与提交崩溃窗口保留可恢复 READY。 |
+| BATCH-AR-06 | [批次计划](../../.ai-dev/batches/BATCH-AR-06/plan.json) | 按需 Map Runtime、事务消息回执、commit-then-ACK、空队列退休、wake 重试与持久化降级 | Verified | `backend/src/bridle/agent/runtime/project_map_agent.py`、`project_registry.py`、`change_outbox.py`、`backend/src/bridle/features/project_map/store.py` | 70 项扩展目标、144 项相关回归、5 项 no-xfail、Ruff 及独立 Spec/Test、Quality 复审均 clean | 2026-07-15 | 状态为 `BATCH_REVIEW_CLEAN`；应用启动恢复与统一关闭属于 AR-07。 |
+| BATCH-AR-07 | [批次计划](../../.ai-dev/batches/BATCH-AR-07/plan.json) | lifespan 启动恢复、逐项目隔离降级、统一关闭、兼容与真实整链验收 | Verified | `backend/src/bridle/app.py`、`agent/runtime/gateway.py`、`project_registry.py`、`models/project_runtime_recovery.py`、`features/projects/service.py` | 17 项 no-xfail 目标门禁、363 项相关回归、1224 项全量后端测试、59 文件变更范围 Ruff 及独立 Spec/Test、Quality 复审均 clean | 2026-07-15 | 状态为 `BATCH_REVIEW_CLEAN`；全仓 Ruff 另有 63 项历史基线，不冒充通过。 |
 | FR-BRD-030~034 | [requirements.md](requirements.md) | React UI、Vite 代理、地图同步与设计系统 | Implemented | `frontend/src/api`, `frontend/src/components`, `frontend/src/hooks`, `frontend/src/layout`, `frontend/src/lib` | `frontend/src/hooks/__tests__`（仅记录路径，未运行） | — | Context Store 确认前端域、React Query 与自定义 `brd-*` 组件系统。 |
 | FR-BRD-040~046 | [requirements.md](requirements.md) | 结构化错误、观测、容器 evidence、Unicode 与 schema 口径 | Implemented | `backend/src/bridle/app.py`, `backend/src/bridle/observability`, `backend/src/bridle/agent/container`, `.github/workflows/container-docker-linux.yml`, `scripts/ci` | `backend/tests/observability`, `backend/tests/logging`, `backend/tests/agent/container`（均未在本轮运行） | — | 已确认实现入口存在，不等于测试已通过。 |
-| REQ-MAPPER-001 / SEC-AUTH-001 / REQ-LIFE-001 | [agent_runtime.md](agent_runtime.md) / [.ai-dev spec](../../.ai-dev/spec/agent-runtime-requirements.json) | 项目级 Mapper、RBAC+ABAC Grant、会话子 Agent 与统一销毁协议 | Planned | 当前存在分散的 gateway、role、tool、skill 与 project-map 入口，尚未形成目标运行时 | 尚无目标契约测试或运行证据 | — | 必须按授权基础、项目 Mapper、会话子 Agent、生命周期收口分批通过 TDD 和独立评审。 |
 | REQ-DOC-001 / AC-DOC-001 | [.ai-dev/spec/requirements.json](../../.ai-dev/spec/requirements.json) | 重写 docs 并通过集中质量门 | In Progress | `docs/**/*.md` | 尚无集中校验报告 | — | 当前只是 ln-112 核心文档子集，不能代表全部 docs 完成。 |
 | REQ-MAP-CI-001 / AC-MAP-CI-001 | [.ai-dev/spec/requirements.json](../../.ai-dev/spec/requirements.json) | 后端 project-map 与前端地图同步 CI 门禁 | Planned | Context Store 明确记录门禁尚未存在 | 尚无评审后 CASE 目录与运行证据 | — | 必须先完成测试合同、RED/GREEN 与双评审。 |
 | REQ-CONT-CI-001 | [.ai-dev/spec/requirements.json](../../.ai-dev/spec/requirements.json) | 平台无关容器快速门禁 | Planned | `backend/tests/agent/container` | 尚无新门禁运行记录 | — | 测试路径存在不代表新门禁已编排。 |

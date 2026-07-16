@@ -75,6 +75,135 @@ class TestSandboxedToolExecutorPatch:
         assert "src/read_me.py" in result["sandbox_inputs"]
 
 
+@pytest.mark.asyncio
+async def test_formal_patch_routes_through_atomic_outbox_boundary(test_workspace: Path) -> None:
+    from bridle.agent.runtime.change_outbox import ChangeOutbox
+
+    policy = SandboxPolicy.for_run(
+        run_id="run-formal-outbox",
+        node_id="node-formal-outbox",
+        workspace_root=test_workspace,
+        allowed_files=["src/formal.py", "src/candidate.py", ".bridle/blocked.py"],
+        node_tests=[],
+    )
+    formal = SandboxedToolExecutor(
+        policy,
+        project_id="project-formal",
+        agent_id="agent-formal",
+        generation=2,
+        trace_id="trace-formal",
+        formal_workspace=True,
+    )
+    formal.tdd_state.bypass_for_test_setup()
+    result = await formal.propose_file_patch(
+        "src/formal.py",
+        "--- /dev/null\n+++ b/src/formal.py\n@@ -0,0 +1 @@\n+formal = True\n",
+        "add",
+    )
+    assert result["status"] == "completed"
+    intents = ChangeOutbox(test_workspace, project_id="project-formal").intents()
+    assert len(intents) == 1
+    assert intents[0].relative_path == "src/formal.py"
+    assert intents[0].state == "READY"
+
+    blocked = await formal.propose_file_patch(
+        ".bridle/blocked.py",
+        "--- /dev/null\n+++ b/.bridle/blocked.py\n@@ -0,0 +1 @@\n+blocked = True\n",
+        "add",
+    )
+    assert blocked["status"] == "failed"
+    assert not (test_workspace / ".bridle" / "blocked.py").exists()
+
+    candidate_root = test_workspace / "candidate"
+    candidate_policy = SandboxPolicy.for_run(
+        run_id="run-candidate-outbox",
+        node_id="node-candidate-outbox",
+        workspace_root=candidate_root,
+        allowed_files=["src/candidate.py"],
+        node_tests=[],
+    )
+    candidate = SandboxedToolExecutor(
+        candidate_policy,
+        project_id="project-formal",
+        agent_id="agent-formal",
+        generation=2,
+        trace_id="trace-formal",
+        formal_workspace=False,
+    )
+    candidate.tdd_state.bypass_for_test_setup()
+    candidate_result = await candidate.propose_file_patch(
+        "src/candidate.py",
+        "--- /dev/null\n+++ b/src/candidate.py\n@@ -0,0 +1 @@\n+candidate = True\n",
+        "add",
+    )
+    assert candidate_result["status"] == "completed"
+    assert not (candidate_root / ".bridle" / "change_outbox.db").exists()
+
+
+@pytest.mark.asyncio
+async def test_real_executor_multi_file_partial_success_is_independent(test_workspace: Path) -> None:
+    from bridle.agent.runtime import change_outbox as change_outbox_module
+    from bridle.agent.runtime.change_outbox import ChangeOutbox
+    from bridle.agent.runtime.mailbox import AgentAddress
+    from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
+
+    policy = SandboxPolicy.for_run(
+        run_id="run-partial-outbox",
+        node_id="node-partial-outbox",
+        workspace_root=test_workspace,
+        allowed_files=["src/first.py", ".bridle/middle.py", "src/last.py"],
+        node_tests=[],
+    )
+    executor = SandboxedToolExecutor(
+        policy,
+        project_id="project-partial",
+        agent_id="agent-partial",
+        generation=1,
+        trace_id="trace-partial",
+        formal_workspace=True,
+    )
+    executor.tdd_state.bypass_for_test_setup()
+    first = await executor.propose_file_patch(
+        "src/first.py",
+        "--- /dev/null\n+++ b/src/first.py\n@@ -0,0 +1 @@\n+first = True\n",
+        "add",
+    )
+    middle = await executor.propose_file_patch(
+        ".bridle/middle.py",
+        "--- /dev/null\n+++ b/.bridle/middle.py\n@@ -0,0 +1 @@\n+middle = True\n",
+        "add",
+    )
+    last = await executor.propose_file_patch(
+        "src/last.py",
+        "--- /dev/null\n+++ b/src/last.py\n@@ -0,0 +1 @@\n+last = True\n",
+        "add",
+    )
+    assert first["status"] == "completed"
+    assert middle["status"] == "failed"
+    assert last["status"] == "completed"
+    assert (test_workspace / "src" / "first.py").exists()
+    assert not (test_workspace / ".bridle" / "middle.py").exists()
+    assert (test_workspace / "src" / "last.py").exists()
+    intents = ChangeOutbox(test_workspace, project_id="project-partial").intents()
+    assert [item.relative_path for item in intents] == ["src/first.py", "src/last.py"]
+    mailbox = PersistentMailbox(
+        test_workspace / ".bridle" / "mail.db",
+        project_id="project-partial",
+        consumer_id="map-runtime",
+    )
+    forwarder = change_outbox_module.ChangeOutboxForwarder(
+        ChangeOutbox(test_workspace, project_id="project-partial"),
+        mailbox,
+    )
+    assert [result.status for result in forwarder.run_once()] == ["delivered", "delivered"]
+    target = AgentAddress("project-partial", "map-runtime", 1)
+    claimed = [mailbox.claim(target), mailbox.claim(target)]
+    assert [item.envelope.payload["path"] for item in claimed if item.envelope] == [
+        "src/first.py",
+        "src/last.py",
+    ]
+
+
 _CALC_ADD_DIFF = (
     "--- /dev/null\n"
     "+++ b/calc.py\n"

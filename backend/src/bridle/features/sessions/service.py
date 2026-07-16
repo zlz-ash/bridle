@@ -6,17 +6,19 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bridle.agent.runtime.mailbox import AgentAddress
+from bridle.agent.runtime.persistence import add_runtime_input_delivery
 from bridle.api.errors import ConflictError, ForbiddenError, NotFoundError
-from bridle.logging.facade import get_logging_facade
-from bridle.models.project_message import ProjectMessageRecord
-from bridle.models.project_session import ProjectSessionRecord
+from bridle.features.projects.service import ProjectService
 from bridle.features.sessions.schemas import (
     ProjectMessageCreateSchema,
     ProjectMessageReadSchema,
     ProjectSessionReadSchema,
     SessionRoleChangeSchema,
 )
-from bridle.features.projects.service import ProjectService
+from bridle.logging.facade import LoggingFacade, get_logging_facade
+from bridle.models.project_message import ProjectMessageRecord
+from bridle.models.project_session import ProjectSessionRecord
 
 
 class ProjectSessionService:
@@ -126,6 +128,70 @@ class ProjectSessionService:
             "project_message_persist",
             session,
             detail={"message_id": record.id, "role": record.role},
+        )
+        return ProjectMessageReadSchema.model_validate(record)
+
+    @staticmethod
+    async def create_runtime_input(
+        db: AsyncSession,
+        session_id: str,
+        *,
+        content: str,
+        target: AgentAddress,
+        facade: LoggingFacade | None = None,
+        trace_id: str | None = None,
+    ) -> ProjectMessageReadSchema:
+        """Atomically persist one user message and its pending runtime delivery fact."""
+        session = await ProjectSessionService._load(db, session_id)
+        if not Path(session.project_path_snapshot).is_dir():
+            raise ConflictError(
+                resource="project_session",
+                message="Project path is unavailable; history is read-only",
+                error_code="project_unavailable_read_only",
+            )
+        if target.project_id != session.project_id:
+            raise ConflictError(
+                resource="project_session",
+                message="Runtime input target belongs to another project",
+                error_code="runtime_input_target_mismatch",
+            )
+        record = ProjectMessageRecord(
+            session_id=session.id,
+            role="user",
+            content=content,
+        )
+        db.add(record)
+        try:
+            await db.flush()
+            await add_runtime_input_delivery(
+                db,
+                message_id=record.id,
+                session_message_id=record.id,
+                project_id=session.project_id,
+                session_id=session.id,
+                target_address=target.to_uri(),
+                target_agent_id=target.agent_id,
+                target_generation=target.generation,
+            )
+            await db.commit()
+        except BaseException:
+            await db.rollback()
+            raise
+        await db.refresh(record)
+        correlation = {
+            "message_id": record.id,
+            "project_id": session.project_id,
+            "agent_id": target.agent_id,
+            "generation": target.generation,
+            "session_id": session.id,
+        }
+        if trace_id is not None:
+            correlation["trace_id"] = trace_id
+        (facade or get_logging_facade()).info_event(
+            "runtime_input.persisted",
+            "completed",
+            detail={"attempt": 0},
+            **correlation,
         )
         return ProjectMessageReadSchema.model_validate(record)
 

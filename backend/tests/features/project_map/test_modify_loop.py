@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,116 @@ def test_dispatch_and_complete_node_flow(test_workspace: Path) -> None:
 
     node = store.verify_node("svc", exposed_symbols=set(), has_red=True, has_green=True)
     assert node["status"] == "completed"
+
+
+def test_dispatch_persists_plan_state_and_spawn_fact_atomically(
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write(test_workspace, "worker.py", "def run():\n    return 1\n")
+    store = ProjectPlanStore(test_workspace, project_id="spawn-atomic")
+    store.initialize()
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        connection.execute(
+            "INSERT INTO plan_nodes(id, node_type, title, goal, payload, status) "
+            "VALUES ('worker', 'module', 'worker', 'run', ?, 'ready')",
+            (json.dumps({"files": ["worker.py"]}),),
+        )
+        connection.commit()
+    before_seq = store.latest_change_seq()
+
+    original_record_change = store._record_change
+
+    def fail_record_change(*args, **kwargs):
+        raise RuntimeError("commit_failed")
+
+    monkeypatch.setattr(store, "_record_change", fail_record_change)
+    with pytest.raises(RuntimeError, match="commit_failed"):
+        store.dispatch_child_agent("worker", target_role="executing")
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        assert connection.execute(
+            "SELECT status FROM plan_nodes WHERE id='worker'"
+        ).fetchone()[0] == "ready"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM child_spawn_facts WHERE node_id='worker'"
+        ).fetchone()[0] == 0
+    assert store.latest_change_seq() == before_seq
+
+    monkeypatch.setattr(store, "_record_change", original_record_change)
+    dispatched = store.dispatch_child_agent("worker", target_role="executing")
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        fact = connection.execute(
+            "SELECT message_id, target_role FROM child_spawn_facts WHERE node_id='worker'"
+        ).fetchone()
+    assert dispatched["status"] == "executing"
+    assert dispatched["spawn_message_id"] == fact[0]
+    assert fact[1] == "executing"
+    assert store.latest_change_seq() == before_seq + 1
+
+
+def test_child_result_updates_plan_and_receipt_atomically_and_idempotently(
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write(test_workspace, "child.py", "def run():\n    return 1\n")
+    store = ProjectPlanStore(test_workspace, project_id="child-result-atomic")
+    store.initialize()
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        connection.execute(
+            "INSERT INTO plan_nodes(id, node_type, title, goal, payload, status) "
+            "VALUES ('child', 'module', 'child', 'run', '{}', 'ready')"
+        )
+        connection.commit()
+    spawn = store.dispatch_child_agent("child", target_role="executing")
+    before_seq = store.latest_change_seq()
+
+    original_record_change = store._record_change
+
+    def fail_record_change(*args, **kwargs):
+        raise RuntimeError("result_commit_failed")
+
+    monkeypatch.setattr(store, "_record_change", fail_record_change)
+    with pytest.raises(RuntimeError, match="result_commit_failed"):
+        store.apply_child_result(
+            message_id=f"child-result-{spawn['spawn_message_id']}",
+            node_id="child",
+            status="completed",
+        )
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        assert connection.execute(
+            "SELECT status FROM plan_nodes WHERE id='child'"
+        ).fetchone()[0] == "executing"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM child_result_receipts"
+        ).fetchone()[0] == 0
+
+    monkeypatch.setattr(store, "_record_change", original_record_change)
+    first = store.apply_child_result(
+        message_id=f"child-result-{spawn['spawn_message_id']}",
+        node_id="child",
+        status="completed",
+    )
+    duplicate = store.apply_child_result(
+        message_id=f"child-result-{spawn['spawn_message_id']}",
+        node_id="child",
+        status="completed",
+    )
+
+    assert first == {"node_id": "child", "status": "completed", "applied": True}
+    assert duplicate == {"node_id": "child", "status": "completed", "applied": False}
+    assert store.get_node("child")["status"] == "completed"
+    assert store.latest_change_seq() == before_seq + 1
+    with closing(sqlite3.connect(store.database_path)) as connection:
+        assert connection.execute(
+            "SELECT message_id, node_id, result_status FROM child_result_receipts"
+        ).fetchone() == (
+            f"child-result-{spawn['spawn_message_id']}",
+            "child",
+            "completed",
+        )
+        assert connection.execute(
+            "SELECT status FROM child_spawn_facts WHERE node_id='child'"
+        ).fetchone()[0] == "completed"
 
 
 def test_external_code_change_marks_drifted_node(test_workspace: Path) -> None:

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
+from bridle.agent.runtime.agent_runtime import RuntimeHandle, RuntimeState
+from bridle.agent.runtime.host import AgentRuntimeHost
+from bridle.agent.runtime.mailbox import AgentAddress, MailboxResult
+from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
+from bridle.features.project_map.store import ProjectPlanStore
 from bridle.logging.facade import LoggingFacade, get_logging_facade
 
 
@@ -17,12 +23,6 @@ class ProjectMapAgentState(StrEnum):
     STOP_FAILED = "stop_failed"
     STOPPED = "stopped"
     FAILED = "failed"
-
-
-class ProjectMapWatcher(Protocol):
-    def start(self, project_root: Path, *, project_id: str) -> None: ...
-
-    def stop(self, project_id: str, *, timeout_seconds: float = 5.0) -> bool: ...
 
 
 class ProjectRuntimeShutdownError(RuntimeError):
@@ -40,33 +40,43 @@ class ProjectRuntimeShutdownError(RuntimeError):
         super().__init__(message)
 
 
-TaskFactory = Callable[..., asyncio.Task[None]]
-_STOP = object()
+RetireCallback = Callable[[str, int, int], Awaitable[bool]]
+CommitHook = Callable[[], None]
 
 
 class ProjectMapAgent:
+    """Short-lived consumer that applies durable CodeChanged mail to plan.db."""
+
     def __init__(
         self,
         project_id: str,
         project_root: str | Path,
         *,
-        watcher: ProjectMapWatcher,
-        task_factory: TaskFactory = asyncio.create_task,
+        generation: int,
+        mailbox: PersistentMailbox,
+        retire_callback: RetireCallback,
         logging_facade: LoggingFacade | None = None,
-        stop_timeout_seconds: float = 5.0,
+        batch_size: int = 64,
+        receive_timeout: float = 0.05,
+        after_commit_hook: CommitHook | None = None,
     ) -> None:
         self.project_id = project_id
         self.canonical_path = Path(project_root).expanduser().resolve()
-        self._watcher = watcher
-        self._task_factory = task_factory
+        self.generation = generation
+        self.mailbox = mailbox
+        self.target = AgentAddress(project_id, "map-runtime", 1)
+        self._retire_callback = retire_callback
         self._logging = logging_facade or get_logging_facade()
-        self._stop_timeout_seconds = stop_timeout_seconds
-        self._mailbox: asyncio.Queue[object] = asyncio.Queue()
+        self._batch_size = max(1, batch_size)
+        self._receive_timeout = max(0.001, receive_timeout)
+        self._after_commit_hook = after_commit_hook
+        self._stop_requested = asyncio.Event()
+        self._activation = asyncio.Event()
         self._lifecycle_lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
-        self._actor_stop_requested = False
-        self._actor_failure_reported = False
+        self._runtime_handle: RuntimeHandle | None = None
         self._state = ProjectMapAgentState.NEW
+        self.degraded = False
 
     @property
     def state(self) -> ProjectMapAgentState:
@@ -76,226 +86,162 @@ class ProjectMapAgent:
     def task(self) -> asyncio.Task[None] | None:
         return self._task
 
-    async def start(self) -> ProjectMapAgent:
+    @property
+    def runtime_handle(self) -> RuntimeHandle | None:
+        return self._runtime_handle
+
+    async def run(self, handle: RuntimeHandle, host: AgentRuntimeHost) -> None:
+        """Run as one task owned by the shared Runtime Host."""
         async with self._lifecycle_lock:
-            if self._state is ProjectMapAgentState.RUNNING:
-                return self
             if self._state is not ProjectMapAgentState.NEW:
-                raise RuntimeError(f"project_map_agent_cannot_start:{self._state}")
+                raise RuntimeError(f"project_map_handler_cannot_run:{self._state}")
             self._state = ProjectMapAgentState.STARTING
-            watcher_start = asyncio.create_task(
-                asyncio.to_thread(
-                    self._watcher.start,
-                    self.canonical_path,
-                    project_id=self.project_id,
-                )
-            )
-            cancelled = await self._wait_until_done(watcher_start)
-            start_error: Exception | None = None
-            try:
-                watcher_start.result()
-            except Exception as exc:
-                start_error = exc
+            self._task = asyncio.current_task()
+            self._runtime_handle = handle
+        try:
+            await self._activation.wait()
+            if self._stop_requested.is_set():
+                return
+            self._state = ProjectMapAgentState.RUNNING
+            self._log("map.runtime_created", "completed")
+            await self._consume()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._state = ProjectMapAgentState.FAILED
+            await self._mark_degraded(type(exc).__name__)
+            with suppress(Exception):
+                await host.transition(handle, RuntimeState.FAILED, reason="map_handler_failed")
+            raise
+        finally:
+            await self.mailbox.close()
+            if self._state not in {ProjectMapAgentState.FAILED, ProjectMapAgentState.STOPPING}:
+                self._state = ProjectMapAgentState.STOPPED
 
-            if cancelled or start_error is not None:
-                rollback_error, rollback_cancelled = await self._rollback_watcher()
-                self._state = (
-                    ProjectMapAgentState.STOP_FAILED
-                    if rollback_error is not None
-                    else ProjectMapAgentState.FAILED
-                )
-                self._log_start_failure(start_error, rollback_error)
-                if rollback_error is not None:
-                    raise ProjectRuntimeShutdownError(
-                        "project map agent start rollback failed",
-                        error_code="project_map_agent_start_rollback_failed",
-                        cancelled=cancelled or rollback_cancelled,
-                    ) from (start_error or asyncio.CancelledError())
-                if cancelled or rollback_cancelled:
-                    raise asyncio.CancelledError
-                assert start_error is not None
-                raise start_error
-
-            try:
-                coroutine: Coroutine[Any, Any, None] = self._run()
-                try:
-                    self._task = self._task_factory(
-                        coroutine,
-                        name=f"project-map-agent-{self.project_id[:8]}",
-                    )
-                except Exception:
-                    coroutine.close()
-                    raise
-                self._state = ProjectMapAgentState.RUNNING
-                self._logging.info_event(
-                    "project_map_agent_start",
-                    "completed",
-                    detail={"project_id": self.project_id, "state": self._state},
-                )
-                return self
-            except Exception as exc:
-                if self._task is not None and not self._task.done():
-                    self._task.cancel()
-                    await asyncio.gather(self._task, return_exceptions=True)
-                self._task = None
-                rollback_error, rollback_cancelled = await self._rollback_watcher()
-                self._state = (
-                    ProjectMapAgentState.STOP_FAILED
-                    if rollback_error is not None
-                    else ProjectMapAgentState.FAILED
-                )
-                self._log_start_failure(exc, rollback_error)
-                if rollback_error is not None:
-                    raise ProjectRuntimeShutdownError(
-                        "project map agent start rollback failed",
-                        error_code="project_map_agent_start_rollback_failed",
-                        cancelled=rollback_cancelled,
-                    ) from exc
-                if rollback_cancelled:
-                    raise asyncio.CancelledError from exc
-                raise
+    def activate(self) -> None:
+        self._activation.set()
 
     async def stop(self) -> ProjectMapAgentState:
         async with self._lifecycle_lock:
             if self._state is ProjectMapAgentState.STOPPED:
                 return self._state
-            if self._state in {ProjectMapAgentState.NEW, ProjectMapAgentState.FAILED}:
-                self._state = ProjectMapAgentState.STOPPED
-                return self._state
+            self._state = ProjectMapAgentState.STOPPING
+            self._stop_requested.set()
+            self.mailbox.notify(target=self.target)
+            if self._task is not None and self._task is not asyncio.current_task():
+                await asyncio.gather(self._task, return_exceptions=True)
+            await self.mailbox.close()
+            self._state = ProjectMapAgentState.STOPPED
+            return self._state
 
-            cleanup = asyncio.create_task(self._stop_impl())
-            cancelled = await self._wait_until_done(cleanup)
-            cleanup_error: BaseException | None = None
-            result: ProjectMapAgentState | None = None
-            try:
-                result = cleanup.result()
-            except BaseException as exc:
-                cleanup_error = exc
-            if cleanup_error is not None:
-                if cancelled and isinstance(cleanup_error, ProjectRuntimeShutdownError):
-                    cleanup_error.cancelled = True
-                raise cleanup_error
-            if cancelled:
-                raise asyncio.CancelledError
-            assert result is not None
-            return result
-
-    async def _stop_impl(self) -> ProjectMapAgentState:
-        self._state = ProjectMapAgentState.STOPPING
-        errors: list[BaseException] = []
-        watcher_error: Exception | None = None
-        if self._task is not None:
-            if not self._task.done():
-                self._actor_stop_requested = True
-                await self._mailbox.put(_STOP)
-                try:
-                    await self._task
-                except asyncio.CancelledError as exc:
-                    self._actor_failure_reported = True
-                    errors.append(exc)
-                except Exception as exc:  # pragma: no cover - defensive task failure path
-                    self._actor_failure_reported = True
-                    errors.append(exc)
-            elif not self._actor_stop_requested and not self._actor_failure_reported:
-                self._actor_stop_requested = True
-                self._actor_failure_reported = True
-                try:
-                    self._task.result()
-                except asyncio.CancelledError as exc:
-                    errors.append(exc)
-                except Exception as exc:  # pragma: no cover - defensive task failure path
-                    errors.append(exc)
-                else:
-                    errors.append(RuntimeError("project_map_agent_task_exited"))
-        try:
-            stopped = await asyncio.to_thread(
-                self._watcher.stop,
-                self.project_id,
-                timeout_seconds=self._stop_timeout_seconds,
-            )
-            if not stopped:
-                watcher_error = RuntimeError("map_watcher_stop_timeout")
-        except Exception as exc:
-            watcher_error = exc
-        if watcher_error is not None:
-            errors.append(watcher_error)
-        if errors:
-            primary_error = watcher_error or errors[0]
-            self._state = ProjectMapAgentState.STOP_FAILED
-            self._logging.error_event(
-                "project_map_agent_stop",
-                "failed",
-                error_code="project_map_agent_stop_failed",
-                detail={
-                    "project_id": self.project_id,
-                    "error_type": type(primary_error).__name__,
-                },
-            )
-            raise ProjectRuntimeShutdownError(
-                "project map agent cleanup failed",
-                error_code="project_map_agent_stop_failed",
-            ) from primary_error
-        self._state = ProjectMapAgentState.STOPPED
-        self._logging.info_event(
-            "project_map_agent_stop",
-            "completed",
-            detail={"project_id": self.project_id, "state": self._state},
-        )
-        return self._state
-
-    async def _rollback_watcher(self) -> tuple[Exception | None, bool]:
-        rollback = asyncio.create_task(
-            asyncio.to_thread(
-                self._watcher.stop,
-                self.project_id,
-                timeout_seconds=self._stop_timeout_seconds,
-            )
-        )
-        cancelled = await self._wait_until_done(rollback)
-        try:
-            stopped = rollback.result()
-            if stopped:
-                return None, cancelled
-            return RuntimeError("map_watcher_stop_timeout"), cancelled
-        except Exception as exc:
-            return exc, cancelled
-
-    async def _wait_until_done(self, task: asyncio.Task[Any]) -> bool:
-        cancelled = False
-        while not task.done():
-            try:
-                await asyncio.wait((task,))
-            except asyncio.CancelledError:
-                cancelled = True
-        return cancelled
-
-    def _log_start_failure(
-        self,
-        start_error: Exception | None,
-        rollback_error: Exception | None,
-    ) -> None:
-        if rollback_error is not None:
-            self._logging.error_event(
-                "project_map_agent_start_rollback",
-                "failed",
-                error_code="project_map_agent_start_rollback_failed",
-                detail={
-                    "project_id": self.project_id,
-                    "error_type": type(rollback_error).__name__,
-                },
-            )
-        self._logging.error_event(
-            "project_map_agent_start",
-            "failed",
-            error_code="project_map_agent_start_failed",
-            detail={
-                "project_id": self.project_id,
-                "error_type": type(start_error).__name__ if start_error else "CancelledError",
-            },
-        )
-
-    async def _run(self) -> None:
-        while True:
-            message = await self._mailbox.get()
-            if message is _STOP:
+    async def _consume(self) -> None:
+        while not self._stop_requested.is_set():
+            first = await self.mailbox.receive(self.target, timeout=self._receive_timeout)
+            if first.status == "claimed":
+                claims = [first]
+                while len(claims) < self._batch_size:
+                    next_claim = self.mailbox.claim(self.target)
+                    if next_claim.status != "claimed":
+                        break
+                    claims.append(next_claim)
+                await self._process_batch(claims)
+                continue
+            if first.status == "closed":
                 return
+            if first.status != "empty":
+                await asyncio.sleep(self._receive_timeout)
+                continue
+            version = self.mailbox.wake_version
+            self._log("map.empty_checked", "empty")
+            if await self._retire_callback(self.project_id, self.generation, version):
+                return
+
+    async def _process_batch(self, claims: list[MailboxResult]) -> None:
+        first_message_id = claims[0].message_id
+        self._log("map.batch_claimed", "completed", message_id=first_message_id)
+        messages: list[tuple[str, list[str]]] = []
+        for claim in claims:
+            envelope = claim.envelope
+            payload = None if envelope is None else envelope.payload
+            path = payload.get("path") if isinstance(payload, dict) else None
+            if envelope is None or envelope.message_type != "CodeChanged" or not isinstance(path, str):
+                await self._mark_degraded("unsupported_map_message", message_id=claim.message_id)
+                self._nack_claims(claims)
+                return
+            assert claim.message_id is not None
+            messages.append((claim.message_id, [path]))
+        self._log("map.refresh_started", "started", message_id=first_message_id)
+        store = ProjectPlanStore(
+            self.canonical_path,
+            project_id=self.project_id,
+            facade=self._logging,
+        )
+        try:
+            await asyncio.to_thread(store.initialize, scan_if_created=False)
+            result = await asyncio.to_thread(store.apply_code_changed_batch, messages)
+        except Exception as exc:
+            await self._mark_degraded(type(exc).__name__, message_id=first_message_id)
+            self._nack_claims(claims)
+            return
+        self._log("map.transaction_committed", "completed", message_id=first_message_id)
+        for message_id in result["duplicate_message_ids"]:
+            self._log("map.message_duplicate", "ignored", message_id=message_id)
+        if self._after_commit_hook is not None:
+            self._after_commit_hook()
+        acked = True
+        for claim in claims:
+            assert claim.message_id is not None and claim.lease_token is not None
+            outcome = self.mailbox.ack(
+                claim.message_id,
+                claim.lease_token,
+                target=self.target,
+            )
+            acked = acked and outcome.status == "acked"
+        if acked:
+            self._log("map.batch_acked", "completed", message_id=first_message_id)
+        else:
+            await self._mark_degraded("mail_ack_lost_lease", message_id=first_message_id)
+
+    def _nack_claims(self, claims: list[MailboxResult]) -> None:
+        for claim in claims:
+            if claim.message_id is None or claim.lease_token is None:
+                continue
+            self.mailbox.nack(claim.message_id, claim.lease_token, target=self.target)
+
+    async def _mark_degraded(self, reason: str, *, message_id: str | None = None) -> None:
+        self.degraded = True
+        try:
+            store = ProjectPlanStore(
+                self.canonical_path,
+                project_id=self.project_id,
+                facade=self._logging,
+            )
+            await asyncio.to_thread(store.mark_map_degraded, reason=reason)
+        except Exception as exc:
+            self._log(
+                "map.degraded_persist_failed",
+                "failed",
+                message_id=message_id,
+                error_code=type(exc).__name__,
+            )
+        self._log("map.degraded", "degraded", message_id=message_id, error_code=reason)
+
+    def _log(
+        self,
+        action: str,
+        status: str,
+        *,
+        message_id: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self._logging.info_event(
+            action,
+            status,
+            trace_id=f"map-{self.project_id}-{self.generation}",
+            message_id=message_id or f"map-runtime-{self.project_id}-{self.generation}",
+            project_id=self.project_id,
+            agent_id="map-runtime",
+            generation=self.generation,
+            error_code=error_code,
+            detail={"state": self._state},
+        )

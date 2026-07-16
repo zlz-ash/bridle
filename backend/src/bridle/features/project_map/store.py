@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS map_applied_messages (
+    message_id TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS plan_nodes (
     id TEXT PRIMARY KEY,
     parent_id TEXT,
@@ -208,6 +212,20 @@ CREATE TABLE IF NOT EXISTS module_interfaces (
     status      TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS child_spawn_facts (
+    message_id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL UNIQUE,
+    target_role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS child_result_receipts (
+    message_id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    result_status TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS semantic_map_runs (
     id           TEXT PRIMARY KEY,
     status       TEXT NOT NULL,
@@ -339,7 +357,7 @@ class ProjectPlanStore:
             raise ValidationError(resource="project_map", message="plan.db project_id is missing")
         return cls(root, project_id=str(row[0]), facade=facade)
 
-    def initialize(self) -> dict[str, Any]:
+    def initialize(self, *, scan_if_created: bool = True) -> dict[str, Any]:
         """Open/create the DB and first-scan a workspace; output reports creation and scan state."""
         started = time.perf_counter()
         created = not self.database_path.exists()
@@ -347,11 +365,12 @@ class ProjectPlanStore:
         self._log("project_map_initialize", "started", detail={"created": created})
 
         try:
+            self._validate_existing_metadata()
             with self._connect() as connection:
                 connection.executescript(_SCHEMA)
                 self._initialize_metadata(connection)
                 self._migrate_schema(connection)
-            if created:
+            if created and scan_if_created:
                 self.rescan()
             self._recover_interrupted_semantic_scan()
             self._maybe_run_semantic_scan()
@@ -468,76 +487,9 @@ class ProjectPlanStore:
         """Refresh changed or deleted paths; rebuilds cross-file edges without full rescan."""
         started = time.perf_counter()
         normalized = sorted({self._normalize_relative_path(path) for path in rel_paths})
-        normalized_set = set(normalized)
-        parse_paths = [
-            rel_path
-            for rel_path in normalized
-            if self.project_root.joinpath(*rel_path.split("/")).is_file()
-        ]
         self._log("project_map_incremental_refresh", "started", detail={"path_count": len(normalized)})
         with self._connect() as connection:
-            test_dirs = self._declared_test_dirs(connection)
-            all_stale_ids = self._entity_ids_for_paths(connection, normalized)
-            rebuild_paths = sorted(
-                self._collect_relation_rebuild_paths(connection, all_stale_ids, normalized_set)
-            )
-
-            annotation_snapshots = self._collect_annotation_snapshots(connection, normalized)
-            for rel_path in normalized:
-                self._purge_path_artifacts(connection, rel_path)
-            connection.execute(
-                "DELETE FROM code_symbols WHERE def_entity_id NOT IN (SELECT id FROM code_entities)"
-            )
-
-            if parse_paths:
-                entities = WorkspaceOverviewService.scan_paths(self.project_root, parse_paths)
-                file_entities = self._workspace_file_entities(connection, normalized, entities)
-                index = self._indexer.run(
-                    self.project_root,
-                    file_entities=file_entities,
-                    parse_paths=parse_paths,
-                    test_dirs=test_dirs,
-                )
-                entities = self._apply_test_classification(entities, index.test_paths)
-                self._insert_code_entities(connection, entities, index.symbol_entities, index.relations)
-
-            rebuild_only = [path for path in rebuild_paths if path not in normalized_set]
-            if rebuild_only:
-                self._rebuild_relations_for_paths(connection, rebuild_only, test_dirs)
-
-            if parse_paths:
-                file_entities = self._workspace_file_entities(
-                    connection, parse_paths, WorkspaceOverviewService.scan_paths(self.project_root, parse_paths)
-                )
-                nontest_files = {
-                    entity["path"] for entity in file_entities if entity.get("kind") in ("file",)
-                }
-                scip = self._scip.index_paths(
-                    self.project_root,
-                    parse_paths,
-                    file_entities=[entity for entity in file_entities if entity.get("kind") == "file"],
-                    nontest_files=nontest_files,
-                )
-                self._replace_scip_for_paths(connection, parse_paths, scip)
-                for relation in scip.relations:
-                    self._insert_relation(connection, relation)
-                blind_rows = self._collect_blind_spots(parse_paths, nontest_files)
-                self._upsert_blind_spots_for_files(connection, parse_paths, blind_rows)
-
-            self._reconcile_annotations_after_refresh(connection, annotation_snapshots)
-            self._boundary.compute_metrics(connection, change_seq=self._latest_change_seq(connection))
-            self._refresh_semantic_map_candidates(connection, reason="incremental_refresh")
-            divergent = ModifyLoopService.list_divergent_nodes(connection)
-            if divergent:
-                ModifyLoopService.mark_drifted(connection, divergent)
-            for rel_path in normalized:
-                self._record_change(
-                    connection,
-                    "code_entity",
-                    WorkspaceOverviewService._entity_id("file", rel_path),
-                    "refresh",
-                    {"path": rel_path},
-                )
+            self._refresh_code_paths_in_connection(connection, normalized)
         result = {"refreshed_paths": normalized}
         self._log(
             "project_map_incremental_refresh",
@@ -546,6 +498,129 @@ class ProjectPlanStore:
             duration_ms=self._elapsed_ms(started),
         )
         return result
+
+    def apply_code_changed_batch(
+        self,
+        messages: list[tuple[str, list[str]]],
+    ) -> dict[str, list[str]]:
+        """Atomically refresh paths and persist one idempotency receipt per new message."""
+        message_ids = [message_id for message_id, _paths in messages]
+        if any(not message_id for message_id in message_ids) or len(set(message_ids)) != len(message_ids):
+            raise ValidationError(resource="project_map_message", message="Invalid message batch")
+        with self._connect() as connection:
+            existing: set[str] = set()
+            if message_ids:
+                placeholders = ",".join("?" for _item in message_ids)
+                existing = {
+                    str(row[0])
+                    for row in connection.execute(
+                        f"SELECT message_id FROM map_applied_messages WHERE message_id IN ({placeholders})",
+                        message_ids,
+                    ).fetchall()
+                }
+            fresh = [(message_id, paths) for message_id, paths in messages if message_id not in existing]
+            normalized = sorted(
+                {
+                    self._normalize_relative_path(path)
+                    for _message_id, paths in fresh
+                    for path in paths
+                }
+            )
+            if normalized:
+                self._refresh_code_paths_in_connection(connection, normalized)
+            connection.executemany(
+                "INSERT INTO map_applied_messages(message_id) VALUES (?)",
+                [(message_id,) for message_id, _paths in fresh],
+            )
+        applied = [message_id for message_id, _paths in fresh]
+        duplicate = [message_id for message_id in message_ids if message_id in existing]
+        self._log(
+            "project_map_message_batch",
+            "completed",
+            detail={
+                "message_count": len(messages),
+                "applied_count": len(applied),
+                "duplicate_count": len(duplicate),
+                "path_count": len(normalized),
+            },
+        )
+        return {
+            "applied_message_ids": applied,
+            "duplicate_message_ids": duplicate,
+            "refreshed_paths": normalized,
+        }
+
+    def _refresh_code_paths_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        normalized: list[str],
+    ) -> dict[str, list[str]]:
+        normalized_set = set(normalized)
+        parse_paths = [
+            rel_path
+            for rel_path in normalized
+            if self.project_root.joinpath(*rel_path.split("/")).is_file()
+        ]
+        test_dirs = self._declared_test_dirs(connection)
+        all_stale_ids = self._entity_ids_for_paths(connection, normalized)
+        rebuild_paths = sorted(
+            self._collect_relation_rebuild_paths(connection, all_stale_ids, normalized_set)
+        )
+        annotation_snapshots = self._collect_annotation_snapshots(connection, normalized)
+        for rel_path in normalized:
+            self._purge_path_artifacts(connection, rel_path)
+        connection.execute(
+            "DELETE FROM code_symbols WHERE def_entity_id NOT IN (SELECT id FROM code_entities)"
+        )
+        if parse_paths:
+            entities = WorkspaceOverviewService.scan_paths(self.project_root, parse_paths)
+            file_entities = self._workspace_file_entities(connection, normalized, entities)
+            index = self._indexer.run(
+                self.project_root,
+                file_entities=file_entities,
+                parse_paths=parse_paths,
+                test_dirs=test_dirs,
+            )
+            entities = self._apply_test_classification(entities, index.test_paths)
+            self._insert_code_entities(connection, entities, index.symbol_entities, index.relations)
+        rebuild_only = [path for path in rebuild_paths if path not in normalized_set]
+        if rebuild_only:
+            self._rebuild_relations_for_paths(connection, rebuild_only, test_dirs)
+        if parse_paths:
+            file_entities = self._workspace_file_entities(
+                connection,
+                parse_paths,
+                WorkspaceOverviewService.scan_paths(self.project_root, parse_paths),
+            )
+            nontest_files = {
+                entity["path"] for entity in file_entities if entity.get("kind") in ("file",)
+            }
+            scip = self._scip.index_paths(
+                self.project_root,
+                parse_paths,
+                file_entities=[entity for entity in file_entities if entity.get("kind") == "file"],
+                nontest_files=nontest_files,
+            )
+            self._replace_scip_for_paths(connection, parse_paths, scip)
+            for relation in scip.relations:
+                self._insert_relation(connection, relation)
+            blind_rows = self._collect_blind_spots(parse_paths, nontest_files)
+            self._upsert_blind_spots_for_files(connection, parse_paths, blind_rows)
+        self._reconcile_annotations_after_refresh(connection, annotation_snapshots)
+        self._boundary.compute_metrics(connection, change_seq=self._latest_change_seq(connection))
+        self._refresh_semantic_map_candidates(connection, reason="incremental_refresh")
+        divergent = ModifyLoopService.list_divergent_nodes(connection)
+        if divergent:
+            ModifyLoopService.mark_drifted(connection, divergent)
+        for rel_path in normalized:
+            self._record_change(
+                connection,
+                "code_entity",
+                WorkspaceOverviewService._entity_id("file", rel_path),
+                "refresh",
+                {"path": rel_path},
+            )
+        return {"refreshed_paths": normalized}
 
     def patch(self, patch: PlanPatchSchema) -> dict[str, Any]:
         """Apply one validated local patch; input is PlanPatchSchema and output lists changed IDs/events."""
@@ -606,6 +681,14 @@ class ProjectPlanStore:
             self._set_map_status(connection, status, reason=reason)
         self._log("project_map_status", status, detail={"reason": reason})
         return self.readiness(status)
+
+    def mark_map_degraded(self, *, reason: str) -> dict[str, Any]:
+        """Persist runtime degradation without creating a business change event."""
+        with self._connect() as connection:
+            self._set_metadata(connection, "scan_status", "stale")
+            self._set_metadata(connection, "readiness_reason", reason)
+        self._log("project_map_status", "stale", detail={"reason": reason})
+        return self.readiness("stale")
 
     def mark_semantic_scan_completed(self, *, run_id: str | None = None) -> dict[str, Any]:
         """Complete semantic scan; no input exits ready unless pending objections require arbitration."""
@@ -1458,6 +1541,15 @@ class ProjectPlanStore:
 
     def _initialize_metadata(self, connection: sqlite3.Connection) -> None:
         """Validate/write metadata; connection input exits with schema/project identity persisted."""
+        stored_kind = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'store_kind'"
+        ).fetchone()
+        if stored_kind is not None and stored_kind[0] != "plan":
+            raise ValidationError(
+                resource="project_map",
+                message="plan.db has the wrong store kind",
+                details={"expected": "plan", "actual": stored_kind[0]},
+            )
         stored_project = connection.execute(
             "SELECT value FROM metadata WHERE key = 'project_id'"
         ).fetchone()
@@ -1468,21 +1560,65 @@ class ProjectPlanStore:
                 details={"expected": self.project_id, "actual": stored_project[0]},
             )
         self._set_metadata(connection, "schema_version", SCHEMA_VERSION)
+        self._set_metadata(connection, "store_kind", "plan")
         self._set_metadata(connection, "project_id", self.project_id)
         if stored_project is None:
             self._set_metadata(connection, "scan_status", "not_scanned")
             self._set_metadata(connection, "semantic_scan_status", "not_started")
             self._set_metadata(connection, "readiness_reason", "not_scanned")
 
+    def _validate_existing_metadata(self) -> None:
+        """Reject a foreign existing DB through a read-only connection before plan DDL runs."""
+        if not self.database_path.is_file():
+            return
+        connection = sqlite3.connect(f"{self.database_path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            metadata_exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'metadata'"
+            ).fetchone()
+            if metadata_exists is None:
+                return
+            stored_kind = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'store_kind'"
+            ).fetchone()
+            if stored_kind is not None and stored_kind[0] != "plan":
+                raise ValidationError(
+                    resource="project_map",
+                    message="plan.db has the wrong store kind",
+                    details={"expected": "plan", "actual": stored_kind[0]},
+                )
+            stored_project = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'project_id'"
+            ).fetchone()
+            if stored_project is not None and stored_project[0] != self.project_id:
+                raise ValidationError(
+                    resource="project_map",
+                    message="plan.db belongs to another project",
+                    details={"expected": self.project_id, "actual": stored_project[0]},
+                )
+        finally:
+            connection.close()
+
     @staticmethod
     def _migrate_schema(connection: sqlite3.Connection) -> None:
         """Apply additive schema migrations for existing plan.db files."""
-        columns = {
+        objection_columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(map_objections)").fetchall()
         }
-        if "annotation_id" not in columns:
+        if "annotation_id" not in objection_columns:
             connection.execute("ALTER TABLE map_objections ADD COLUMN annotation_id TEXT")
+        receipt_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(child_result_receipts)"
+            ).fetchall()
+        }
+        if "result_json" not in receipt_columns:
+            connection.execute(
+                "ALTER TABLE child_result_receipts "
+                "ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}'"
+            )
 
     @staticmethod
     def _set_metadata(connection: sqlite3.Connection, key: str, value: str) -> None:
@@ -2316,11 +2452,91 @@ class ProjectPlanStore:
 
     def dispatch_child_agent(self, node_id: str, *, target_role: str) -> dict[str, Any]:
         with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT message_id FROM child_spawn_facts WHERE node_id = ?",
+                (node_id,),
+            ).fetchone()
+            spawn_message_id = (
+                str(existing[0]) if existing is not None else f"spawn-{uuid.uuid4()}"
+            )
             result = ModifyLoopService.dispatch_child_agent(
                 connection, node_id=node_id, target_role=target_role
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO child_spawn_facts(message_id, node_id, target_role) "
+                "VALUES (?, ?, ?)",
+                (spawn_message_id, node_id, target_role),
+            )
             self._record_change(connection, "plan_node", node_id, "dispatch", {"target_role": target_role})
-        return result
+        return {**result, "spawn_message_id": spawn_message_id}
+
+    def apply_child_result(
+        self,
+        *,
+        message_id: str,
+        node_id: str,
+        status: str,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Apply one terminal child result and receipt in the same plan transaction."""
+        if status not in {"completed", "failed", "cancelled"}:
+            raise ValidationError(
+                resource="child_result",
+                message="Unsupported child result status",
+                details={"status": status},
+            )
+        plan_status = "completed" if status == "completed" else "failed"
+        result_payload = result or {}
+        result_json = json.dumps(
+            result_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT node_id, result_status, result_json "
+                "FROM child_result_receipts WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "node_id": str(existing["node_id"]),
+                    "status": str(existing["result_status"]),
+                    "applied": False,
+                }
+            spawn = connection.execute(
+                "SELECT message_id FROM child_spawn_facts WHERE node_id = ?",
+                (node_id,),
+            ).fetchone()
+            if spawn is None or message_id != f"child-result-{spawn['message_id']}":
+                raise ValidationError(
+                    resource="child_result",
+                    message="Child result does not match a dispatched plan node",
+                    details={"message_id": message_id, "node_id": node_id},
+                )
+            connection.execute(
+                "UPDATE plan_nodes SET status = ? WHERE id = ? AND archived = 0",
+                (plan_status, node_id),
+            )
+            connection.execute(
+                "UPDATE child_spawn_facts SET status = ? WHERE node_id = ?",
+                (status, node_id),
+            )
+            connection.execute(
+                "INSERT INTO child_result_receipts"
+                "(message_id, node_id, result_status, result_json) "
+                "VALUES (?, ?, ?, ?)",
+                (message_id, node_id, status, result_json),
+            )
+            self._record_change(
+                connection,
+                "plan_node",
+                node_id,
+                "child_result",
+                {"message_id": message_id, "result_status": status},
+            )
+        return {"node_id": node_id, "status": status, "applied": True}
 
     def verify_node(
         self,
@@ -3480,6 +3696,7 @@ class ProjectPlanStore:
             action,
             status,
             node_id=node_id,
+            project_id=self.project_id,
             duration_ms=duration_ms,
             detail=safe_detail,
         )

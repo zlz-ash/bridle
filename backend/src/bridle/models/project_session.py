@@ -18,8 +18,8 @@ class ProjectSessionRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="planning")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
 
-    project: Mapped["ProjectRecord"] = relationship("ProjectRecord", back_populates="sessions")
-    messages: Mapped[list["ProjectMessageRecord"]] = relationship(
+    project: Mapped[ProjectRecord] = relationship("ProjectRecord", back_populates="sessions")
+    messages: Mapped[list[ProjectMessageRecord]] = relationship(
         "ProjectMessageRecord",
         back_populates="session",
         cascade="all, delete-orphan",
@@ -28,6 +28,3 @@ class ProjectSessionRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 from bridle.models.project import ProjectRecord  # noqa: E402
 from bridle.models.project_message import ProjectMessageRecord  # noqa: E402
-
-ProjectRecord
-ProjectMessageRecord

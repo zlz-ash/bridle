@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bridle.models.base import Base, UUIDPrimaryKeyMixin
@@ -22,12 +22,10 @@ class ProjectMessageRecord(UUIDPrimaryKeyMixin, Base):
     tool_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive)
 
-    session: Mapped["ProjectSessionRecord"] = relationship(
+    session: Mapped[ProjectSessionRecord] = relationship(
         "ProjectSessionRecord",
         back_populates="messages",
     )
 
 
 from bridle.models.project_session import ProjectSessionRecord  # noqa: E402
-
-ProjectSessionRecord

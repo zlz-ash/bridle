@@ -3,7 +3,7 @@
 <!-- DOC_ROLE: canonical -->
 <!-- READ_WHEN: 规划功能、测试合同、CI 用例或验收范围时 -->
 <!-- SKIP_WHEN: 只需要技术实现细节或运行命令时 -->
-<!-- PRIMARY_SOURCES: .ai-dev/spec/requirements.json, .ai-dev/docs/ln-110/context-store.json -->
+<!-- PRIMARY_SOURCES: .ai-dev/spec/requirements.json, .ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json, .ai-dev/docs/ln-110/context-store.json -->
 
 # 项目需求
 
@@ -13,7 +13,7 @@
 |---|---|
 | 工作区运行时 | [FR-BRD-001 到 FR-BRD-004](#functional-requirements) |
 | 项目地图 | [FR-BRD-010 到 FR-BRD-015](#functional-requirements) |
-| 会话与 Agent | [FR-BRD-020 到 FR-BRD-024](#functional-requirements) |
+| 会话与 Agent Runtime | [FR-BRD-020 到 FR-BRD-029](#functional-requirements) |
 | 前端体验 | [FR-BRD-030 到 FR-BRD-034](#functional-requirements) |
 | 错误、观测与安全 | [FR-BRD-040 到 FR-BRD-046](#functional-requirements) |
 | 地图与容器门禁 | [FR-CI-001 到 FR-CI-006](#functional-requirements) |
@@ -42,6 +42,11 @@
 | FR-BRD-022 | MUST | 用户消息和 Agent 回复必须通过 API 进入会话历史。 | `backend/src/bridle/features/sessions` | `/messages` 接收消息，`/converse` 产生对话输出，历史接口可再次读取。 |
 | FR-BRD-023 | SHOULD | 会话 API 应暴露当前运行时能力。 | `backend/src/bridle/features/sessions` | `/sessions/{session_id}/capabilities` 返回当前会话可用能力。 |
 | FR-BRD-024 | MUST | Agent provider 必须支持不依赖外部模型的本地替代实现。 | `backend/src/bridle/agent/providers` | 本地默认路径可使用 fake 或 stub provider 完成受控执行。 |
+| FR-BRD-025 | MUST | 父 Agent、子 Agent 与项目 Map Agent 必须复用统一 Runtime 实现，并把会话与 Runtime 事实持久化在既有应用数据库。 | `.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json` | 每个会话最多一个活动父 Runtime、每个项目最多一个活动 Map Runtime；子 Runtime 可并发；启动时遗留活动态改为 `INTERRUPTED`，父/子 Runtime 不自动恢复；关闭会话停止其父/子 Runtime 但保留会话、消息、记忆和运行历史。 |
+| FR-BRD-026 | MUST | Runtime 间通信必须使用每项目 `.bridle/mail.db` 的持久化 Mailbox，并提供至少一次交付。 | `.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json` | Mail 只保存 envelope、地址、单调序号、lease、ACK/NACK 与投递状态；claim、续租、ACK/NACK 均受 lease token 栅栏保护；重启或 lease 过期后消息可重领；队列满或处理失败时保留消息并进行有界频率的指数重试，不丢弃、不伪造 ACK、不转入 dead-letter。 |
+| FR-BRD-027 | MUST | `CodeChanged` 只能由 Bridle 正式单文件补丁提交边界生成，并通过独立 `.bridle/change_outbox.db` 可靠转发。 | `.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json` | 写文件前先持久化预留 outbox 容量；容量不足时拒绝或重试且不写文件；单文件使用临时文件、flush、fsync、replace 原子提交，成功文件各自产生事件；多文件不承诺全局原子性；IDE、Git、手工修改和 `.bridle/**` 变化不产生事件。 |
+| FR-BRD-028 | MUST | Map Runtime 必须按 Mail 序号批量消费 `CodeChanged`，并以地图事务保证副作用幂等。 | `.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json` | 同一批消息合并路径后，在 `.bridle/plan.db` 的一个事务中更新地图并记录所有 `message_id`；提交成功后才 ACK，重复投递不得重复增加 `change_seq`；失败时保留消息重试并把 Map 标记为 `degraded`；同代 Runtime 连续两次原子空检查后销毁，不使用 sleep/debounce。 |
+| FR-BRD-029 | MUST | 每代 Runtime 必须只看见创建时授权的 Tool/Skill 能力集合。 | `.ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json` | Host 创建每代 Runtime 时构造不可变能力注册表；未授权能力不进入上下文、manifest、prompt 或注册表，查询未知或未授权能力统一返回 `unknown capability`；调用时只查本代注册表，不逐次查询数据库/RBAC；撤权或策略变化时 Host 取消并销毁该代，父撤权级联子代，下一代获得新视图。 |
 | FR-BRD-030 | MUST | 前端必须通过 Vite 开发代理访问后端 API。 | `frontend/vite.config.ts` | `/api` 请求被转发到本地 Bridle 服务。 |
 | FR-BRD-031 | MUST | 前端必须组合项目地图、workspace 切换、会话输入和右侧检查器。 | `frontend/src/components`, `frontend/src/layout` | 用户可在同一项目界面浏览地图、切换 workspace、输入消息并查看检查信息。 |
 | FR-BRD-032 | SHOULD | 前端地图同步应支持分页、水位推进、重试和取消。 | `frontend/src/hooks` | 同步 hook 能继续分页，在失败后按合同重试，并在请求失效时终止旧请求。 |
@@ -69,14 +74,15 @@
 | 远程写入 | 创建 Issue、触发 GitHub Actions、提交、推送、PR 或发布不属于已授权功能范围。 |
 | CI Author | CI Author 的允许路径由 `.ai-dev/spec/requirements.json` 控制，不得修改产品代码或业务测试。 |
 | 状态证据 | “存在源码”只足以标记 Implemented；只有实际运行记录才能标记 Verified。 |
+| 本阶段排除项 | 不新增 Runtime/Mail UI 或远程 API，不引入远程 broker，不监听外部文件变化，不自动恢复父/子 Runtime，也不承诺多文件全局事务。 |
 
 ## Maintenance
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-07-13
 
 **Update Triggers:**
 
-- API、CLI、地图查询、会话行为、前端同步或容器边界发生变化。
+- API、CLI、地图查询、会话行为、Runtime/Mail/Outbox、能力隔离、前端同步或容器边界发生变化。
 - 需求基线新增、合并或废弃稳定 ID。
 - 已评审测试合同改变某个 CI CASE ID 的覆盖范围。
 

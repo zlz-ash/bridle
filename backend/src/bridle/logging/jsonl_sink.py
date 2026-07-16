@@ -20,15 +20,13 @@ class JsonlLogSink:
             from bridle.logging.jsonl import get_jsonl_logger
 
             logger = get_jsonl_logger()
+            payload = event.to_dict()
             logger.info(
                 event.action,
                 extra={
-                    "action": event.action,
-                    "status": event.status,
-                    "node_id": event.node_id,
-                    "run_id": event.run_id,
-                    "duration_ms": event.duration_ms,
-                    "detail": event.detail or None,
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"timestamp", "level"}
                 },
             )
             return
