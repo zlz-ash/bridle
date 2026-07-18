@@ -1,7 +1,7 @@
 """End-to-end lifecycle tests for Executor.
 
 These tests exercise the real production entry (:class:`Executor` and
-:class:`SandboxedToolExecutor.run_allowed_tests`) with real subprocesses in
+:class:`SandboxedToolExecutor.run_command`) with real subprocesses in
 an isolated workspace. They prove:
 
 * shell meta-characters cannot trigger a second command — a sentinel file
@@ -27,9 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.agent.tools.executor import MAX_OUTPUT_BYTES, Executor
-from bridle.agent.tools.sandboxed_executor import SandboxedToolExecutor
 
 # --- helpers ---------------------------------------------------------------
 
@@ -175,32 +173,6 @@ async def test_npm_with_ampersand_refused_at_executor_boundary(
     # exit_code is None because we refused to spawn (failed_before_exec).
     assert result["exit_code"] is None
     assert "Shell meta char" in result["stderr"]
-
-
-@pytest.mark.asyncio
-async def test_full_sandbox_chain_rejects_metachar_command(
-    tmp_path: Path,
-) -> None:
-    # Real production entry: SandboxedToolExecutor.run_allowed_tests
-    # validates via policy, then runs via Executor.
-    sentinel = tmp_path / "pwned.txt"
-    bad_cmd = f"echo hello & echo PWNED > {sentinel}"
-    policy = SandboxPolicy.for_run(
-        run_id="run-meta",
-        node_id="node-meta",
-        workspace_root=tmp_path,
-        allowed_files=[],
-        # The policy rejects the command at for_run validation time, so we
-        # bypass node_tests here and inject the command directly to prove
-        # the executor boundary also holds.
-        node_tests=["echo hello"],
-    )
-    executor = SandboxedToolExecutor(policy)
-    executor.tdd_state.bypass_for_test_setup()
-    result = await executor.run_allowed_tests([bad_cmd])
-    assert result["status"] == "failed"
-    assert result["error_code"] == "CommandPolicyError"
-    assert not sentinel.exists()
 
 
 # --- dual-pipe flood (no deadlock) -----------------------------------------

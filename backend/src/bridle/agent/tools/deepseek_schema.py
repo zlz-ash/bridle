@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 V1_TOOL_NAMES = (
-    "read_allowed_file",
-    "propose_file_patch",
-    "run_allowed_tests",
+    "run_command",
     "report_blocked",
-    "grep_code",
     "web_search",
 )
 
@@ -42,33 +39,10 @@ def build_deepseek_tools(
     """Build v1 tool definitions for DeepSeek chat completions."""
     tools = [
         _function_tool(
-            "read_allowed_file",
-            "Read one file that is explicitly allowed for this node run.",
-            {"path": {"type": "string"}},
-            ["path"],
-            strict=strict,
-        ),
-        _function_tool(
-            "propose_file_patch",
-            "Propose a patch for an allowed file without writing to disk.",
-            {
-                "path": {"type": "string"},
-                "change_type": {"type": "string"},
-                "diff": {"type": "string"},
-            },
-            ["path", "change_type", "diff"],
-            strict=strict,
-        ),
-        _function_tool(
-            "run_allowed_tests",
-            "Run test commands from the node allowlist via sandbox policy.",
-            {
-                "commands": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
-            ["commands"],
+            "run_command",
+            "Run an exploratory Bash command inside the isolated candidate container.",
+            {"command": {"type": "string"}},
+            ["command"],
             strict=strict,
         ),
         _function_tool(
@@ -79,18 +53,6 @@ def build_deepseek_tools(
                 "evidence": {"type": "object"},
             },
             ["reason", "evidence"],
-            strict=strict,
-        ),
-        _function_tool(
-            "grep_code",
-            "Search for text patterns in allowed source files.",
-            {
-                "query": {"type": "string"},
-                "path_glob": {"type": "string"},
-                "case_sensitive": {"type": "boolean"},
-                "max_results": {"type": "integer"},
-            },
-            ["query"],
             strict=strict,
         ),
         _function_tool(
@@ -108,8 +70,9 @@ def build_deepseek_tools(
             "read_project_map",
             "Read one bounded view from the project SQLite plan map.",
             {
-                "mode": {"type": "string", "enum": ["overview", "node", "children", "subgraph", "search"]},
+                "mode": {"type": "string", "enum": ["overview", "node", "children", "subgraph", "search", "execution"]},
                 "node_id": {"type": "string"},
+                "wait_id": {"type": "string"},
                 "parent_id": {"type": ["string", "null"]},
                 "query": {"type": "string"},
                 "cursor": {"type": "string"},
@@ -132,8 +95,8 @@ def build_deepseek_tools(
             strict=strict,
         ),
         _function_tool(
-            "select_node",
-            "Atomically start one runnable project plan node after user-confirmed execution.",
+            "execute_plan_node",
+            "Create or reuse a durable background plan-node workflow and return its wait signal.",
             {"node_id": {"type": "string"}},
             ["node_id"],
             strict=strict,

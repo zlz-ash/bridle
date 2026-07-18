@@ -1,12 +1,23 @@
 """Modify loop: dispatch, consistency gate, drift detection, module interfaces."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bridle.api.errors import ConflictError, ValidationError
+
+if TYPE_CHECKING:
+    from bridle.agent.runtime.mailbox import AgentAddress
+    from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
+    from bridle.features.project_map.store import ProjectPlanStore
+
+logger = logging.getLogger("bridle")
+StageRunner = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 CONSISTENCY_GATE_ERROR = "consistency_gate_failed"
 TDD_GATE_ERROR = "tdd_gate_failed"
@@ -30,6 +41,138 @@ EXTENDED_NODE_STATUSES = frozenset(
 )
 
 AUTO_ADOPT_CONFIDENCE = 0.9
+
+
+class PlanNodeExecutionCoordinator:
+    """Start durable node workflows in the background and forward terminal Mail once."""
+
+    def __init__(
+        self,
+        store: ProjectPlanStore,
+        mailbox: PersistentMailbox,
+        *,
+        owner: AgentAddress,
+        stage_runner: StageRunner,
+    ) -> None:
+        self._store = store
+        self._store.ensure_schema()
+        self._mailbox = mailbox
+        self._owner = owner
+        self._stage_runner = stage_runner
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def execute_plan_node(self, node_id: str) -> dict[str, Any]:
+        """Create/reuse durable waiting state, schedule work, and return without awaiting it."""
+        execution = self._store.create_node_execution(
+            node_id=node_id,
+            owner_address=self._owner.to_uri(),
+        )
+        self._schedule(execution)
+        return execution
+
+    async def recover(self) -> list[str]:
+        """Schedule every durable waiting execution after process restart."""
+        recovered: list[str] = []
+        for execution in self._store.list_active_node_executions():
+            if self._schedule(execution):
+                recovered.append(str(execution["execution_id"]))
+        return recovered
+
+    async def wait_for_idle(self) -> None:
+        """Wait for currently scheduled workflow tasks; persistence remains authoritative."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks.values()))
+
+    def forward_completion_mail(self) -> int:
+        """Idempotently forward pending terminal outbox rows to the persistent mailbox."""
+        from bridle.agent.runtime.mailbox import AgentAddress, MailEnvelope
+
+        forwarded = 0
+        source = AgentAddress(self._owner.project_id, "node-workflow", 1)
+        for item in self._store.list_pending_completion_outbox():
+            envelope = MailEnvelope(
+                message_id=item["message_id"],
+                message_type="node-workflow-result",
+                source=source,
+                target=AgentAddress.parse(item["owner_address"]),
+                payload=item["payload"],
+            )
+            result = self._mailbox.enqueue(envelope)
+            if result.status in {"inserted", "existing"}:
+                self._store.mark_completion_outbox_sent(item["wait_id"])
+                forwarded += 1
+                continue
+            self._store.mark_completion_outbox_attempt(
+                item["wait_id"],
+                error_code=f"mailbox_{result.status}",
+            )
+        return forwarded
+
+    def _schedule(self, execution: dict[str, Any]) -> bool:
+        execution_id = str(execution["execution_id"])
+        if execution["state"] != "waiting" or execution_id in self._tasks:
+            return False
+        task = asyncio.create_task(
+            self._run(execution),
+            name=f"node-workflow:{execution_id}",
+        )
+        self._tasks[execution_id] = task
+        return True
+
+    async def _run(self, execution: dict[str, Any]) -> None:
+        execution_id = str(execution["execution_id"])
+        try:
+            result = await self._stage_runner(dict(execution))
+            outcome = str(result.get("outcome") or "failed")
+            phases = [str(value) for value in result.get("phases") or [] if str(value)]
+            phase = phases[-1] if phases else str(execution["phase"])
+            self._store.complete_execution(
+                wait_id=str(execution["wait_id"]),
+                outcome=outcome,
+                result_ref=result.get("result_ref"),
+                phase=phase,
+            )
+            logger.info(
+                "node_workflow_finished",
+                extra={
+                    "action": "node_workflow_finished",
+                    "status": outcome,
+                    "node_id": execution["node_id"],
+                    "detail": {
+                        "execution_id": execution_id,
+                        "wait_id": execution["wait_id"],
+                        "phase": phase,
+                    },
+                },
+            )
+        except asyncio.CancelledError:
+            self._store.complete_execution(
+                wait_id=str(execution["wait_id"]),
+                outcome="cancelled",
+                result_ref=None,
+            )
+            raise
+        except Exception as exc:
+            self._store.complete_execution(
+                wait_id=str(execution["wait_id"]),
+                outcome="failed",
+                result_ref=None,
+            )
+            logger.exception(
+                "node_workflow_failed",
+                extra={
+                    "action": "node_workflow_failed",
+                    "status": "failed",
+                    "node_id": execution["node_id"],
+                    "detail": {
+                        "execution_id": execution_id,
+                        "wait_id": execution["wait_id"],
+                        "error_code": type(exc).__name__,
+                    },
+                },
+            )
+        finally:
+            self._tasks.pop(execution_id, None)
 
 
 class ModifyLoopService:
@@ -110,24 +253,6 @@ class ModifyLoopService:
                 message="Code exposes symbols not in module interface map",
                 error_code=CONSISTENCY_GATE_ERROR,
                 details={"node_id": node_id, "undeclared": sorted(undeclared)},
-            )
-
-    @staticmethod
-    def check_tdd_gate(*, has_red: bool, has_green: bool) -> None:
-        """Reject verifying when TDD preconditions are not met."""
-        if not has_red:
-            raise ConflictError(
-                resource="tdd_gate",
-                message="TDD gate requires a RED test run before implementation",
-                error_code=TDD_GATE_ERROR,
-                details={"has_red": has_red, "has_green": has_green},
-            )
-        if not has_green:
-            raise ConflictError(
-                resource="tdd_gate",
-                message="TDD gate requires a GREEN test run before completion",
-                error_code=TDD_GATE_ERROR,
-                details={"has_red": has_red, "has_green": has_green},
             )
 
     @staticmethod

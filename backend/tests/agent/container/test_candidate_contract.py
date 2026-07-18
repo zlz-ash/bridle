@@ -11,13 +11,11 @@ from bridle.agent.container.candidate_contract import (
     CandidateExecutionRequest,
     CandidateExecutionResult,
     compute_patches,
-    file_sha256,
     persist_result,
     snapshot_directory_hashes,
     validate_candidate_request,
 )
-from bridle.agent.safety.sandbox_policy import SandboxPolicy
-from bridle.agent.tools.sandboxed_executor import SandboxedToolExecutor, TDDStateTracker
+from bridle.agent.container.candidate_service import CandidateExecutionService
 
 
 def _formal_file_hashes(root: Path, rel_paths: list[str]) -> dict[str, str]:
@@ -27,6 +25,42 @@ def _formal_file_hashes(root: Path, rel_paths: list[str]) -> dict[str, str]:
         if path.is_file():
             out[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
     return out
+
+
+def test_candidate_request_round_trips_through_existing_workspace_manifest(
+    test_workspace: Path,
+) -> None:
+    source = test_workspace / "src" / "module.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = test_workspace / "tests" / "test_module.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_value():\n    assert True\n", encoding="utf-8")
+    setup = CandidateExecutionService(test_workspace).prepare_from_snapshot(
+        {
+            "module_id": "mod-roundtrip",
+            "node_id": "node-roundtrip",
+            "implementation_entities": [
+                {"entity_id": "entity-module", "path": "src/module.py"}
+            ],
+            "test_entities": [
+                {"entity_id": "entity-test-module", "path": "tests/test_module.py"}
+            ],
+            "test_commands": ["python -m pytest tests/test_module.py -q"],
+            "interfaces": [],
+            "test_dir": "tests",
+        },
+        run_id="run-roundtrip",
+        candidate_id="cand-roundtrip",
+        base_map_seq=7,
+    )
+
+    manifest = json.loads(setup.workspace.manifest_path.read_text(encoding="utf-8"))
+    restored = CandidateExecutionRequest.from_dict(manifest["candidate_request"])
+
+    assert restored == setup.request
+    assert restored.project_root == test_workspace.resolve()
+    restored.validate()
 
 
 class TestCandidateRequestValidation:
@@ -146,83 +180,6 @@ class TestCandidateRequestValidation:
         assert req_a.candidate_root == (
             test_workspace / ".bridle" / "runtime" / "modules" / "mod-a" / "candidates" / "reuse-me"
         )
-
-
-class TestFormalProjectIsolationRegression:
-    """Prove that writing through SandboxPolicy with formal workspace_root mutates the project."""
-
-    @pytest.mark.asyncio
-    async def test_patch_via_formal_workspace_root_changes_project_hash(
-        self, test_workspace: Path
-    ) -> None:
-        src = test_workspace / "src"
-        src.mkdir(parents=True)
-        target = src / "module.py"
-        target.write_text("before\n", encoding="utf-8")
-        before = file_sha256(target)
-
-        policy = SandboxPolicy.for_run(
-            run_id="run-regression",
-            node_id="n1",
-            workspace_root=test_workspace,
-            allowed_files=["src/module.py"],
-            node_tests=[],
-        )
-        executor = SandboxedToolExecutor(policy)
-        executor.tdd_state = TDDStateTracker()
-        executor.tdd_state.disable_enforcement()
-
-        diff = (
-            "--- a/src/module.py\n"
-            "+++ b/src/module.py\n"
-            "@@ -1 +1 @@\n"
-            "-before\n"
-            "+after\n"
-        )
-        await executor.propose_file_patch("src/module.py", diff, "modify")
-
-        after = file_sha256(target)
-        assert before != after
-        assert target.read_text(encoding="utf-8") == "after\n"
-
-    @pytest.mark.asyncio
-    async def test_patch_via_candidate_workspace_leaves_formal_unchanged(
-        self, test_workspace: Path
-    ) -> None:
-        formal = test_workspace / "src" / "module.py"
-        formal.parent.mkdir(parents=True)
-        formal.write_text("formal-before\n", encoding="utf-8")
-        before_formal = file_sha256(formal)
-
-        candidate_root = (
-            test_workspace / ".bridle" / "runtime" / "modules" / "iso-mod" / "candidates" / "iso-1"
-        )
-        candidate_project = candidate_root / "project" / "src" / "module.py"
-        candidate_project.parent.mkdir(parents=True)
-        candidate_project.write_text("candidate-before\n", encoding="utf-8")
-
-        policy = SandboxPolicy.for_run(
-            run_id="run-candidate",
-            node_id="n1",
-            workspace_root=candidate_root / "project",
-            allowed_files=["src/module.py"],
-            node_tests=[],
-        )
-        executor = SandboxedToolExecutor(policy)
-        executor.tdd_state = TDDStateTracker()
-        executor.tdd_state.disable_enforcement()
-
-        diff = (
-            "--- a/src/module.py\n"
-            "+++ b/src/module.py\n"
-            "@@ -1 +1 @@\n"
-            "-candidate-before\n"
-            "+candidate-after\n"
-        )
-        await executor.propose_file_patch("src/module.py", diff, "modify")
-
-        assert file_sha256(formal) == before_formal
-        assert candidate_project.read_text(encoding="utf-8") == "candidate-after\n"
 
 
 class TestCandidateResultContract:

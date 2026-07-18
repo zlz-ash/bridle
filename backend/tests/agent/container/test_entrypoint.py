@@ -9,11 +9,21 @@ from pathlib import Path
 import pytest
 
 from bridle.agent.container import entrypoint
+from bridle.agent.container.candidate_contract import (
+    FrozenTestContract,
+    TestCaseSnapshot,
+    TestCommandSnapshot,
+    TestFileSnapshot,
+)
 from bridle.agent.container.container_control import (
     CONTROL_ENVELOPE_PREFIX,
     parse_control_envelope_from_exec_output,
 )
 from bridle.agent.container.entrypoint import run_container_task
+from bridle.agent.container.red_classification import (
+    RedClassification,
+    classify_red_verification,
+)
 
 
 def _candidate_layout(module_root, candidate_id: str = "cand-1"):
@@ -24,11 +34,18 @@ def _candidate_layout(module_root, candidate_id: str = "cand-1"):
     return candidate_rel, candidate_root
 
 
-def _write_request(candidate_root: Path, commands: list[dict], write_set: list[str] | None = None) -> None:
+def _write_request(
+    candidate_root: Path,
+    commands: list[dict],
+    write_set: list[str] | None = None,
+    *,
+    red_verification: bool = False,
+) -> None:
     payload = {
         "schema": "bridle.container_test_request/v1",
         "commands": commands,
         "write_set": write_set or [],
+        "red_verification": red_verification,
     }
     (candidate_root / "diagnostics" / "test-request.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -67,6 +84,85 @@ class TestContainerEntrypoint:
         assert exit_code == 7
         assert manifest["status"] == "failed"
         assert manifest["error_code"] == "test_failed"
+
+    def test_red_run_executes_target_failure_then_green_baseline_before_classification(
+        self,
+        tmp_path,
+    ) -> None:
+        module_root = tmp_path / "module"
+        module_root.mkdir()
+        candidate_rel, candidate_root = _candidate_layout(module_root)
+        tests = candidate_root / "project" / "tests"
+        tests.mkdir(parents=True)
+        (tests / "test_target.py").write_text(
+            "def test_requested():\n    assert False\n",
+            encoding="utf-8",
+        )
+        (tests / "test_baseline.py").write_text(
+            "def test_existing():\n    assert True\n",
+            encoding="utf-8",
+        )
+        target = {
+            "command_id": "cmd-target",
+            "argv": [sys.executable, "-m", "pytest", "tests/test_target.py", "-q"],
+            "raw_command": "python -m pytest tests/test_target.py -q",
+        }
+        baseline = {
+            "command_id": "cmd-baseline",
+            "argv": [sys.executable, "-m", "pytest", "tests/test_baseline.py", "-q"],
+            "raw_command": "python -m pytest tests/test_baseline.py -q",
+        }
+        _write_request(
+            candidate_root,
+            [target, baseline],
+            write_set=[],
+            red_verification=True,
+        )
+        contract = FrozenTestContract.freeze(
+            test_files=(
+                TestFileSnapshot(path="tests/test_target.py", sha256="target"),
+                TestFileSnapshot(path="tests/test_baseline.py", sha256="baseline"),
+            ),
+            cases=(
+                TestCaseSnapshot(
+                    case_id="case-target",
+                    node_id="tests/test_target.py::test_requested",
+                ),
+                TestCaseSnapshot(
+                    case_id="case-baseline",
+                    node_id="tests/test_baseline.py::test_existing",
+                ),
+            ),
+            commands=tuple(
+                TestCommandSnapshot(
+                    command_id=str(command["command_id"]),
+                    argv=tuple(str(arg) for arg in command["argv"]),
+                    raw_command=str(command["raw_command"]),
+                    test_entity_id="node-red",
+                    map_seq=1,
+                )
+                for command in (target, baseline)
+            ),
+            expected_failure_case_ids=("case-target",),
+            baseline_hash="baseline-v1",
+            map_seq=1,
+            boundary_fingerprint="boundary-v1",
+            image_version="image-v1",
+        )
+
+        exit_code = run_container_task(module_root, candidate_rel=candidate_rel)
+        manifest = json.loads(
+            (candidate_root / "output" / "manifest.json").read_text(encoding="utf-8")
+        )
+        classification = classify_red_verification(contract, manifest)
+
+        assert exit_code == 1
+        assert [item["command_id"] for item in manifest["results"]] == [
+            "cmd-target",
+            "cmd-baseline",
+        ]
+        assert classification.classification is RedClassification.EXPECTED_RED
+        assert classification.failed_case_ids == ("case-target",)
 
     def test_timeout_output_is_serializable(self, tmp_path, monkeypatch) -> None:
         module_root = tmp_path / "module"
@@ -157,6 +253,72 @@ class TestContainerEntrypoint:
         assert exit_code == 0, manifest
         assert manifest["status"] == "completed"
         assert manifest["out_of_scope_changes"] == []
+
+    def test_pytest_results_include_exact_case_outcomes(self, tmp_path) -> None:
+        module_root = tmp_path / "module"
+        module_root.mkdir()
+        candidate_rel, candidate_root = _candidate_layout(module_root)
+        tests = candidate_root / "project" / "tests"
+        tests.mkdir(parents=True)
+        (tests / "test_cases.py").write_text(
+            "def test_existing_behavior():\n    assert True\n\n"
+            "def test_requested_change():\n    assert False\n",
+            encoding="utf-8",
+        )
+        _write_request(
+            candidate_root,
+            [
+                {
+                    "command_id": "cmd-cases",
+                    "argv": [sys.executable, "-m", "pytest", "tests/test_cases.py", "-q"],
+                    "raw_command": "python -m pytest tests/test_cases.py -q",
+                }
+            ],
+            write_set=["tests/test_cases.py"],
+        )
+
+        exit_code = run_container_task(module_root, candidate_rel=candidate_rel)
+        manifest = json.loads((candidate_root / "output" / "manifest.json").read_text(encoding="utf-8"))
+        case_results = {
+            item["node_id"]: item
+            for item in manifest["results"][0]["case_results"]
+        }
+
+        assert exit_code == 1
+        assert case_results["tests/test_cases.py::test_existing_behavior"]["outcome"] == "passed"
+        failed = case_results["tests/test_cases.py::test_requested_change"]
+        assert failed["outcome"] == "failed"
+        assert failed["phase"] == "call"
+        assert failed["failure_type"] == "AssertionError"
+        assert manifest["results"][0]["collection_errors"] == []
+
+    def test_pytest_collection_errors_are_structured(self, tmp_path) -> None:
+        module_root = tmp_path / "module"
+        module_root.mkdir()
+        candidate_rel, candidate_root = _candidate_layout(module_root)
+        tests = candidate_root / "project" / "tests"
+        tests.mkdir(parents=True)
+        (tests / "test_invalid.py").write_text("def broken(:\n", encoding="utf-8")
+        _write_request(
+            candidate_root,
+            [
+                {
+                    "command_id": "cmd-invalid",
+                    "argv": [sys.executable, "-m", "pytest", "tests/test_invalid.py", "-q"],
+                    "raw_command": "python -m pytest tests/test_invalid.py -q",
+                }
+            ],
+            write_set=["tests/test_invalid.py"],
+        )
+
+        exit_code = run_container_task(module_root, candidate_rel=candidate_rel)
+        manifest = json.loads((candidate_root / "output" / "manifest.json").read_text(encoding="utf-8"))
+        errors = manifest["results"][0]["collection_errors"]
+
+        assert exit_code != 0
+        assert errors
+        assert errors[0]["node_id"].endswith("tests/test_invalid.py")
+        assert "SyntaxError" in errors[0]["message"]
 
     def test_unknown_schema_fails_closed(self, tmp_path) -> None:
         module_root = tmp_path / "module"

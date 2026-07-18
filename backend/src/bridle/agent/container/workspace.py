@@ -206,6 +206,25 @@ class ContainerWorkspaceBuilder:
             readonly_files=list(readonly_context),
         )
 
+    def persist_candidate_request(
+        self,
+        workspace: ContainerWorkspaceResult,
+        request: Any,
+    ) -> None:
+        """Atomically bind the execution request to the existing workspace manifest."""
+        manifest = json.loads(workspace.manifest_path.read_text(encoding="utf-8"))
+        if (
+            manifest.get("candidate_id") != request.candidate_id
+            or manifest.get("module_id") != request.module_id
+            or manifest.get("node_id") != request.node_id
+            or manifest.get("run_id") != request.run_id
+        ):
+            raise ValueError("candidate_workspace_request_identity_mismatch")
+        manifest["candidate_request"] = request.to_dict()
+        tmp_manifest = workspace.manifest_path.with_suffix(".json.tmp")
+        self._write_json(tmp_manifest, manifest)
+        tmp_manifest.replace(workspace.manifest_path)
+
     def _candidate_paths(self, root: Path) -> dict[str, Path]:
         return {
             "baseline": root / "baseline",

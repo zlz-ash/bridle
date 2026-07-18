@@ -59,6 +59,80 @@ class AgentContainerBackend:
     def orchestrator(self) -> ContainerOrchestrator:
         return self._orchestrator
 
+    def run_command_in_candidate(
+        self,
+        *,
+        candidate_root: Path,
+        module_root: Path,
+        candidate_rel: str,
+        run_id: str,
+        node_id: str,
+        module_id: str,
+        boundary_fingerprint: str,
+        command: str,
+        write_set: list[str],
+        map_seq: int,
+        timeout_seconds: int = 300,
+        network_allowed: bool = False,
+        image: str = "bridle-agent:local",
+        image_version: str = "local",
+    ) -> dict[str, Any]:
+        logger.info(
+            "container_command_started",
+            extra={
+                "action": "container_command_started",
+                "status": "started",
+                "detail": {"run_id": run_id, "node_id": node_id, "module_id": module_id},
+            },
+        )
+        request_manifest = {
+            "schema": "bridle.container_test_request/v1",
+            "commands": [
+                {
+                    "command_id": "exploratory-command",
+                    "argv": ["bash", "-lc", command],
+                    "raw_command": command,
+                    "test_entity_id": "exploratory-command",
+                    "map_seq": map_seq,
+                }
+            ],
+            "write_set": write_set,
+            "map_seq": map_seq,
+            "test_entity_id": "exploratory-command",
+            "red_verification": False,
+            "protected_hashes": {
+                "baseline": tree_hashes(candidate_root.resolve() / "baseline"),
+                "mocks": tree_hashes(candidate_root.resolve() / "mocks"),
+            },
+        }
+        result = self.run_tests_in_candidate(
+            candidate_root=candidate_root,
+            module_root=module_root,
+            candidate_rel=candidate_rel,
+            run_id=run_id,
+            node_id=node_id,
+            module_id=module_id,
+            boundary_fingerprint=boundary_fingerprint,
+            test_commands=[],
+            write_set=write_set,
+            test_entity_id="exploratory-command",
+            map_seq=map_seq,
+            timeout_seconds=timeout_seconds,
+            network_allowed=network_allowed,
+            image=image,
+            image_version=image_version,
+            _request_manifest=request_manifest,
+        )
+        logger.info(
+            "container_command_completed",
+            extra={
+                "action": "container_command_completed",
+                "status": "completed",
+                "detail": {"run_id": run_id, "node_id": node_id, "module_id": module_id},
+            },
+        )
+        return result
+
     def run_tests_in_candidate(
         self,
         *,
@@ -78,26 +152,32 @@ class AgentContainerBackend:
         image: str = "bridle-agent:local",
         image_version: str = "local",
         replace_container: bool = False,
+        red_verification: bool = False,
+        _request_manifest: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         candidate_root = candidate_root.resolve()
         module_root = module_root.resolve()
         diag_dir = candidate_root / "diagnostics"
-        approved = TestCommandCompiler.compile_commands(
-            test_commands=test_commands,
-            test_entity_id=test_entity_id,
-            map_seq=map_seq,
-        )
-        request_manifest = {
-            "schema": "bridle.container_test_request/v1",
-            "commands": TestCommandCompiler.manifest_commands(approved),
-            "write_set": write_set,
-            "map_seq": map_seq,
-            "test_entity_id": test_entity_id,
-            "protected_hashes": {
-                "baseline": tree_hashes(candidate_root / "baseline"),
-                "mocks": tree_hashes(candidate_root / "mocks"),
-            },
-        }
+        if _request_manifest is None:
+            approved = TestCommandCompiler.compile_commands(
+                test_commands=test_commands,
+                test_entity_id=test_entity_id,
+                map_seq=map_seq,
+            )
+            request_manifest = {
+                "schema": "bridle.container_test_request/v1",
+                "commands": TestCommandCompiler.manifest_commands(approved),
+                "write_set": write_set,
+                "map_seq": map_seq,
+                "test_entity_id": test_entity_id,
+                "red_verification": red_verification,
+                "protected_hashes": {
+                    "baseline": tree_hashes(candidate_root / "baseline"),
+                    "mocks": tree_hashes(candidate_root / "mocks"),
+                },
+            }
+        else:
+            request_manifest = _request_manifest
         diag_dir.mkdir(parents=True, exist_ok=True)
         (diag_dir / "test-request.json").write_text(json.dumps(request_manifest, indent=2), encoding="utf-8")
         resolved_image_id = resolve_image_identity(image)

@@ -143,16 +143,9 @@ class ToolBudgetTracker:
         }
 
     def note_tool_result(self, tool_name: str, result: dict[str, Any]) -> None:
-        if tool_name == "propose_file_patch":
-            applied = result.get("applied_path") or (result.get("patch") or {}).get("path")
-            if applied:
-                path = str(applied)
-                if path not in self.changed_files:
-                    self.changed_files.append(path)
-        if tool_name != "run_allowed_tests":
+        if tool_name != "run_command":
             return
-        results = result.get("results") or []
-        target = results[-1] if results else {}
+        target = result
         self.last_test_result = {
             "exit_code": target.get("exit_code"),
             "timed_out": bool(target.get("timed_out", False)),

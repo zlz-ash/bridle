@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
+import time
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
@@ -14,6 +16,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import bridle.database as database_module
 import bridle.logging.facade as logging_facade_module
+from bridle.agent.container.candidate_service import CandidateExecutionService
+from bridle.agent.container.container_service import configure_runner
 from bridle.agent.runtime.agent_runtime import RuntimeRole, RuntimeState
 from bridle.agent.runtime.change_outbox import (
     AtomicPatchCommitter,
@@ -23,6 +27,11 @@ from bridle.agent.runtime.change_outbox import (
 from bridle.agent.runtime.host import AgentRuntimeHost
 from bridle.agent.runtime.input_relay import RuntimeInputRelay
 from bridle.agent.runtime.mailbox import AgentAddress, MailEnvelope
+from bridle.agent.runtime.modification_workflow import (
+    ModificationEvent,
+    ModificationState,
+    ModificationWorkflow,
+)
 from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
 from bridle.agent.runtime.project_map_agent import ProjectRuntimeShutdownError
 from bridle.agent.runtime.project_registry import (
@@ -43,6 +52,11 @@ from bridle.models.project_message import ProjectMessageRecord
 from bridle.models.project_runtime_recovery import ProjectRuntimeRecoveryRecord
 from bridle.models.project_session import ProjectSessionRecord
 from tests.agent.runtime.test_agent_runtime_host import _database, _grant
+from tests.helpers.verification_fixtures import (
+    PassingStructuredRunner,
+    advance_to_implementing,
+    freeze_contract_for_candidate_identity,
+)
 
 
 @pytest_asyncio.fixture
@@ -63,6 +77,104 @@ class _CaptureSink:
         self.events.append(event)
         if event.action == "app.runtime_shutdown_forced":
             self.forced.set()
+
+
+def _prepare_implementing_candidate(
+    store: ProjectPlanStore,
+    node_id: str,
+    candidate_id: str,
+):
+    safe_name = hashlib.sha256(node_id.encode("utf-8")).hexdigest()[:6]
+    source_path = f"src/{safe_name}.py"
+    test_path = f"tests/test_{safe_name}.py"
+    source = store.project_root / source_path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = store.project_root / test_path
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text(
+        f"def test_{safe_name}():\n    assert True\n",
+        encoding="utf-8",
+    )
+    command = f"python -m pytest {test_path} -q"
+    snapshot = {
+        "module_id": f"m-{safe_name}",
+        "node_id": node_id,
+        "implementation_entities": [{"entity_id": f"impl-{node_id}", "path": source_path}],
+        "test_entities": [{"entity_id": f"test-{node_id}", "path": test_path}],
+        "test_commands": [command],
+        "interfaces": [],
+        "test_dir": "tests",
+    }
+    setup = CandidateExecutionService(store.project_root).prepare_from_snapshot(
+        snapshot,
+        run_id=f"setup-{node_id}",
+        candidate_id=candidate_id,
+        base_map_seq=1,
+    )
+    workflow = ModificationWorkflow(store)
+    contract = freeze_contract_for_candidate_identity(
+        workflow,
+        node_id,
+        project_root=store.project_root,
+        test_commands=[command],
+        test_paths=[test_path],
+        map_seq=setup.request.base_map_seq,
+        boundary_fingerprint=setup.request.boundary_fingerprint,
+        image_version=setup.request.image_version,
+    )
+    advance_to_implementing(workflow, node_id, contract)
+    return setup, contract, workflow
+
+
+def _persist_final_run(
+    store: ProjectPlanStore,
+    workflow: ModificationWorkflow,
+    *,
+    node_id: str,
+    candidate_id: str,
+    contract_version: str,
+    run_id: str,
+) -> dict:
+    submitted = workflow.apply(
+        node_id,
+        event=ModificationEvent.SUBMITTED,
+        event_id=f"setup:{node_id}:submitted",
+        payload={"candidate_id": candidate_id},
+    )
+    run = store.enqueue_verification_run(
+        run_id=run_id,
+        node_id=node_id,
+        phase="final",
+        source_revision=int(submitted["revision"]),
+        contract_version=contract_version,
+        candidate_id=candidate_id,
+    )
+    workflow.apply(
+        node_id,
+        event=ModificationEvent.FINAL_VERIFICATION_STARTED,
+        event_id=f"verification:{run_id}:started",
+        payload={"verification_run_id": run_id, "phase": "final"},
+    )
+    return run
+
+
+async def _wait_for_modification_state(
+    workflow: ModificationWorkflow,
+    node_id: str,
+    state: ModificationState,
+    *,
+    timeout: float = 2.0,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while workflow.get(node_id)["state"] != state.value:
+        if loop.time() >= deadline:
+            pytest.fail(
+                f"modification state did not reach {state.value}: "
+                f"{workflow.get(node_id)['state']}"
+            )
+        await asyncio.sleep(0.01)
 
 
 def _receipt_exists(root: Path, message_id: str) -> bool:
@@ -284,6 +396,161 @@ async def test_lifespan_recovers_pending_map_mail_before_requests(
         assert registry.generation(project_id) == 1
 
     assert registry.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_lifespan_recovers_verification_without_new_request(
+    tmp_path: Path,
+    runtime_db,
+) -> None:
+    project_id = "project-verification-recovery"
+    store = ProjectPlanStore(tmp_path, project_id=project_id)
+    store.initialize(scan_if_created=False)
+    fixtures = {}
+    for label, short_id in (
+        ("queued", "q"),
+        ("deferred", "d"),
+        ("expired-running", "r"),
+    ):
+        node_id = f"node-verification-{label}"
+        candidate_id = f"c-{short_id}"
+        setup, contract, workflow = _prepare_implementing_candidate(
+            store,
+            node_id,
+            candidate_id,
+        )
+        run = _persist_final_run(
+            store,
+            workflow,
+            node_id=node_id,
+            candidate_id=candidate_id,
+            contract_version=contract.contract_version,
+            run_id=f"verify-{label}",
+        )
+        fixtures[label] = {
+            "node_id": node_id,
+            "candidate_id": candidate_id,
+            "candidate_root": setup.workspace.root,
+            "run_id": run["run_id"],
+        }
+
+    now = time.time()
+    deferred_claim = store.claim_verification_run(
+        str(fixtures["deferred"]["run_id"]),
+        now_timestamp=now,
+        lease_seconds=60,
+    )
+    assert deferred_claim is not None
+    deferred = store.defer_verification_run(
+        str(fixtures["deferred"]["run_id"]),
+        lease_token=str(deferred_claim["lease_token"]),
+        error_code="container_temporarily_unavailable",
+        now_timestamp=now,
+    )
+    future_deadline = float(deferred["next_retry_at"])
+    assert future_deadline > time.time()
+    expired = store.claim_verification_run(
+        str(fixtures["expired-running"]["run_id"]),
+        now_timestamp=now - 120,
+        lease_seconds=1,
+    )
+    assert expired is not None
+    assert float(expired["lease_expires_at"]) < time.time()
+
+    runner = PassingStructuredRunner(tmp_path)
+    configure_runner(tmp_path, runner)
+    del workflow, store, setup, contract, run
+    from bridle.agent.runtime import gateway
+    _engine, sessions = runtime_db
+    async with sessions() as db:
+        db.add(ProjectRecord(id=project_id, path=str(tmp_path), name="verification"))
+        await db.commit()
+    registry = ProjectRuntimeRegistry(runtime_host=AgentRuntimeHost(sessions))
+    app = create_app(
+        test_workspace=str(tmp_path),
+        runtime_lifecycle=RuntimeSessionLifecycle(sessions),
+        project_runtime_registry=registry,
+    )
+
+    async with app.router.lifespan_context(app):
+        reopened = ProjectPlanStore.open_existing(tmp_path)
+        reopened_workflow = ModificationWorkflow(reopened)
+        for fixture in fixtures.values():
+            await _wait_for_modification_state(
+                reopened_workflow,
+                str(fixture["node_id"]),
+                ModificationState.READY_TO_PUBLISH,
+                timeout=4.0,
+            )
+            result_path = Path(fixture["candidate_root"]) / "result.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            assert result["candidate_id"] == fixture["candidate_id"]
+            assert result["status"] == "ready"
+        assert {item["candidate_id"] for item in runner.executions} == {
+            fixture["candidate_id"] for fixture in fixtures.values()
+        }
+        deferred_execution = next(
+            item
+            for item in runner.executions
+            if item["candidate_id"] == fixtures["deferred"]["candidate_id"]
+        )
+        assert float(deferred_execution["executed_at"]) >= future_deadline
+
+    assert gateway._verification_loops == {}
+    assert not any(
+        task.get_name().startswith("verification-loop:") and not task.done()
+        for task in asyncio.all_tasks()
+    )
+
+
+@pytest.mark.asyncio
+async def test_running_verification_loop_discovers_persisted_trigger_without_new_request(
+    tmp_path: Path,
+    runtime_db,
+) -> None:
+    project_id = "project-verification-running-loop"
+    store = ProjectPlanStore(tmp_path, project_id=project_id)
+    store.initialize(scan_if_created=False)
+    node_id = "node-verification-running-loop"
+    candidate_id = "c-loop"
+    setup, _contract, workflow = _prepare_implementing_candidate(
+        store,
+        node_id,
+        candidate_id,
+    )
+    runner = PassingStructuredRunner(tmp_path)
+    configure_runner(tmp_path, runner)
+    candidate_root = setup.workspace.root
+    del workflow, store, setup
+    _engine, sessions = runtime_db
+    async with sessions() as db:
+        db.add(ProjectRecord(id=project_id, path=str(tmp_path), name="verification-loop"))
+        await db.commit()
+    registry = ProjectRuntimeRegistry(runtime_host=AgentRuntimeHost(sessions))
+    app = create_app(
+        test_workspace=str(tmp_path),
+        runtime_lifecycle=RuntimeSessionLifecycle(sessions),
+        project_runtime_registry=registry,
+    )
+
+    async with app.router.lifespan_context(app):
+        independent_store = ProjectPlanStore.open_existing(tmp_path)
+        independent_workflow = ModificationWorkflow(independent_store)
+        independent_workflow.apply(
+            node_id,
+            event=ModificationEvent.SUBMITTED,
+            event_id=f"independent:{node_id}:submitted",
+            payload={"candidate_id": candidate_id},
+        )
+        await _wait_for_modification_state(
+            independent_workflow,
+            node_id,
+            ModificationState.READY_TO_PUBLISH,
+        )
+        result = json.loads((candidate_root / "result.json").read_text(encoding="utf-8"))
+        assert result["candidate_id"] == candidate_id
+        assert result["status"] == "ready"
+        assert len(runner.executions) == 1
 
 
 @pytest.mark.asyncio

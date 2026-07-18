@@ -19,14 +19,14 @@ from bridle.features.project_map.indexer.blind_spot_detector import BlindSpotDet
 from bridle.features.project_map.indexer.scip_indexer import ScipIndexer
 from bridle.features.project_map.indexer.treesitter_indexer import TreeSitterIndexer
 from bridle.features.project_map.map_query_service import SUPPORTED_RISKS, MapQueryService
-from bridle.features.project_map.modify_loop_service import ModifyLoopService
+from bridle.features.project_map.modify_loop_service import TDD_GATE_ERROR, ModifyLoopService
 from bridle.features.project_map.patch_schemas import PlanPatchSchema
 from bridle.features.project_map.runtime_feedback import RuntimeFeedbackService
 from bridle.features.project_map.semantic_synthesis_service import SemanticSynthesisService
 from bridle.features.workspace.overview_service import WorkspaceOverviewService
 from bridle.logging.facade import LoggingFacade, get_logging_facade
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "8"
 MAX_PAGE_LIMIT = 200
 MAX_SUBGRAPH_DEPTH = 5
 NODE_STATUSES = {
@@ -305,6 +305,144 @@ CREATE TABLE IF NOT EXISTS interface_mock_artifacts (
     payload                TEXT NOT NULL DEFAULT '{}',
     created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS modification_workflows (
+    node_id               TEXT PRIMARY KEY,
+    state                 TEXT NOT NULL,
+    revision              INTEGER NOT NULL,
+    test_contract_version TEXT,
+    updated_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS modification_events (
+    sequence   INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   TEXT NOT NULL UNIQUE,
+    node_id    TEXT NOT NULL,
+    event      TEXT NOT NULL,
+    from_state TEXT,
+    to_state   TEXT NOT NULL,
+    revision   INTEGER NOT NULL,
+    payload    TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_modification_events_node_sequence
+    ON modification_events(node_id, sequence);
+CREATE TABLE IF NOT EXISTS test_contracts (
+    node_id             TEXT NOT NULL,
+    contract_version    TEXT NOT NULL,
+    snapshot            TEXT NOT NULL,
+    state               TEXT NOT NULL CHECK(state IN ('frozen', 'invalidated')),
+    invalidation_reason TEXT,
+    frozen_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    invalidated_at      TEXT,
+    PRIMARY KEY(node_id, contract_version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_test_contracts_active_node
+    ON test_contracts(node_id) WHERE state = 'frozen';
+CREATE TABLE IF NOT EXISTS verification_runs (
+    sequence         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           TEXT NOT NULL UNIQUE,
+    node_id          TEXT NOT NULL,
+    phase            TEXT NOT NULL CHECK(phase IN ('red', 'final')),
+    source_revision  INTEGER NOT NULL,
+    contract_version TEXT NOT NULL,
+    candidate_id     TEXT,
+    state            TEXT NOT NULL CHECK(state IN ('queued', 'running', 'completed', 'failed')),
+    attempt          INTEGER NOT NULL DEFAULT 0,
+    next_retry_at    REAL,
+    max_attempts     INTEGER NOT NULL DEFAULT 5 CHECK(max_attempts >= 1),
+    terminal_reason  TEXT,
+    lease_token      TEXT,
+    lease_expires_at REAL,
+    outcome          TEXT,
+    error_code       TEXT,
+    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at     TEXT,
+    UNIQUE(node_id, phase, source_revision, contract_version)
+);
+CREATE INDEX IF NOT EXISTS ix_verification_runs_recovery
+    ON verification_runs(state, lease_expires_at, sequence);
+CREATE INDEX IF NOT EXISTS ix_verification_runs_node_sequence
+    ON verification_runs(node_id, sequence);
+CREATE TABLE IF NOT EXISTS verification_evidence (
+    node_id       TEXT NOT NULL,
+    evidence_seq  INTEGER NOT NULL,
+    event         TEXT NOT NULL,
+    payload       TEXT NOT NULL,
+    previous_hash TEXT,
+    evidence_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(node_id, evidence_seq)
+);
+CREATE TABLE IF NOT EXISTS stage_events (
+    sequence       INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id       TEXT NOT NULL,
+    node_id        TEXT NOT NULL,
+    candidate_id   TEXT,
+    submission_id  TEXT,
+    run_id         TEXT,
+    wait_id        TEXT,
+    message_id     TEXT,
+    stage          TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    attempt        INTEGER NOT NULL,
+    started_at     TEXT,
+    ended_at       TEXT,
+    duration_ms    INTEGER,
+    error_code     TEXT,
+    retry_reason   TEXT,
+    artifact_ref   TEXT,
+    cleanup_status TEXT,
+    detail         TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_stage_events_trace_sequence
+    ON stage_events(trace_id, sequence);
+CREATE TABLE IF NOT EXISTS node_executions (
+    execution_id  TEXT PRIMARY KEY,
+    wait_id       TEXT NOT NULL UNIQUE,
+    node_id       TEXT NOT NULL,
+    owner_address TEXT NOT NULL,
+    state         TEXT NOT NULL CHECK(state IN ('waiting', 'ended')),
+    phase         TEXT NOT NULL,
+    revision      INTEGER NOT NULL,
+    outcome       TEXT CHECK(outcome IN ('completed', 'failed', 'blocked', 'cancelled')),
+    result_ref    TEXT,
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at      TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_node_executions_active_node
+    ON node_executions(node_id) WHERE state = 'waiting';
+CREATE TABLE IF NOT EXISTS wait_signals (
+    wait_id      TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL UNIQUE,
+    node_id      TEXT NOT NULL,
+    state        TEXT NOT NULL CHECK(state IN ('waiting', 'ended')),
+    phase        TEXT NOT NULL,
+    revision     INTEGER NOT NULL,
+    outcome      TEXT CHECK(outcome IN ('completed', 'failed', 'blocked', 'cancelled')),
+    result_ref   TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at     TEXT,
+    FOREIGN KEY(execution_id) REFERENCES node_executions(execution_id)
+);
+CREATE TABLE IF NOT EXISTS completion_outbox (
+    wait_id       TEXT PRIMARY KEY,
+    execution_id  TEXT NOT NULL,
+    owner_address TEXT NOT NULL,
+    message_id    TEXT NOT NULL UNIQUE,
+    payload        TEXT NOT NULL,
+    state          TEXT NOT NULL CHECK(state IN ('pending', 'sent')),
+    attempt        INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at        TEXT,
+    FOREIGN KEY(wait_id) REFERENCES wait_signals(wait_id),
+    FOREIGN KEY(execution_id) REFERENCES node_executions(execution_id)
+);
+CREATE INDEX IF NOT EXISTS ix_completion_outbox_state_created
+    ON completion_outbox(state, created_at, wait_id);
 """
 
 
@@ -355,7 +493,637 @@ class ProjectPlanStore:
             connection.close()
         if row is None or not str(row[0]):
             raise ValidationError(resource="project_map", message="plan.db project_id is missing")
-        return cls(root, project_id=str(row[0]), facade=facade)
+        store = cls(root, project_id=str(row[0]), facade=facade)
+        store.ensure_schema()
+        return store
+
+    def ensure_schema(self) -> None:
+        """Create or migrate only the project-local SQLite schema."""
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._validate_existing_metadata()
+        with self._connect() as connection:
+            connection.executescript(_SCHEMA)
+            self._initialize_metadata(connection)
+            self._migrate_schema(connection)
+
+    def append_evidence(
+        self,
+        *,
+        node_id: str,
+        event: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append one authoritative verification event to the node-local hash chain."""
+        started = time.perf_counter()
+        safe_payload = self._sanitize_evidence_payload(node_id=node_id, payload=payload)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT evidence_seq, evidence_hash FROM verification_evidence "
+                "WHERE node_id = ? ORDER BY evidence_seq DESC LIMIT 1",
+                (node_id,),
+            ).fetchone()
+            evidence_seq = int(previous["evidence_seq"]) + 1 if previous else 1
+            previous_hash = str(previous["evidence_hash"]) if previous else None
+            evidence_hash = self._evidence_hash(
+                node_id=node_id,
+                evidence_seq=evidence_seq,
+                event=event,
+                payload=safe_payload,
+                previous_hash=previous_hash,
+            )
+            connection.execute(
+                "INSERT INTO verification_evidence("
+                "node_id, evidence_seq, event, payload, previous_hash, evidence_hash"
+                ") VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    node_id,
+                    evidence_seq,
+                    event,
+                    self._canonical_json(safe_payload),
+                    previous_hash,
+                    evidence_hash,
+                ),
+            )
+        record = {
+            "node_id": node_id,
+            "evidence_seq": evidence_seq,
+            "event": event,
+            "payload": safe_payload,
+            "previous_hash": previous_hash,
+            "evidence_hash": evidence_hash,
+        }
+        self._log(
+            "verification_evidence_append",
+            "completed",
+            node_id=node_id,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            detail={"evidence_seq": evidence_seq, "event": event},
+        )
+        return record
+
+    def list_evidence(self, node_id: str) -> list[dict[str, Any]]:
+        """Return one node's evidence chain in append order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT node_id, evidence_seq, event, payload, previous_hash, "
+                "evidence_hash, created_at FROM verification_evidence "
+                "WHERE node_id = ? ORDER BY evidence_seq",
+                (node_id,),
+            ).fetchall()
+        return [
+            {
+                "node_id": str(row["node_id"]),
+                "evidence_seq": int(row["evidence_seq"]),
+                "event": str(row["event"]),
+                "payload": json.loads(str(row["payload"])),
+                "previous_hash": row["previous_hash"],
+                "evidence_hash": str(row["evidence_hash"]),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def validate_evidence_chain(self, node_id: str) -> dict[str, Any]:
+        """Validate one node's evidence and return the first broken contract boundary."""
+        started = time.perf_counter()
+        records = self.list_evidence(node_id)
+        previous_hash: str | None = None
+        first_break: dict[str, Any] | None = None
+        publication: dict[str, Any] | None = None
+        for record in records:
+            payload = record["payload"]
+            artifact_ref = str(payload.get("artifact_ref") or "")
+            if not payload.get("required_command_ids"):
+                first_break = self._evidence_break(
+                    record, error_code="required_command_missing"
+                )
+                break
+            artifact_error = self._validate_evidence_artifact(payload)
+            if artifact_error is not None:
+                first_break = self._evidence_break(record, error_code=artifact_error)
+                break
+            if record["previous_hash"] != previous_hash:
+                first_break = self._evidence_break(
+                    record, error_code="evidence_previous_hash_mismatch"
+                )
+                break
+            expected_hash = self._evidence_hash(
+                node_id=node_id,
+                evidence_seq=record["evidence_seq"],
+                event=record["event"],
+                payload=payload,
+                previous_hash=previous_hash,
+            )
+            if record["evidence_hash"] != expected_hash:
+                first_break = self._evidence_break(
+                    record, error_code="evidence_hash_mismatch"
+                )
+                break
+            previous_hash = record["evidence_hash"]
+            if record["event"] == "published":
+                publication = {
+                    "submission_id": payload.get("submission_id"),
+                    "candidate_code_hash": payload.get("candidate_code_hash"),
+                    "changed_paths": payload.get("changed_paths", []),
+                    "artifact_ref": artifact_ref,
+                }
+        valid = first_break is None
+        result = {
+            "valid": valid,
+            "node_id": node_id,
+            "event_count": len(records),
+            "latest_evidence_hash": records[-1]["evidence_hash"] if records else None,
+            "first_break": first_break,
+            "publication": publication,
+        }
+        self._log(
+            "verification_evidence_validate",
+            "completed" if valid else "failed",
+            node_id=node_id,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            detail={
+                "event_count": len(records),
+                "error_code": first_break["error_code"] if first_break else None,
+            },
+        )
+        return result
+
+    def record_stage_event(
+        self,
+        *,
+        trace_id: str,
+        node_id: str,
+        candidate_id: str | None,
+        submission_id: str | None,
+        run_id: str | None,
+        wait_id: str | None,
+        message_id: str | None,
+        stage: str,
+        status: str,
+        attempt: int,
+        started_at: str | None,
+        ended_at: str | None,
+        duration_ms: int | None,
+        error_code: str | None,
+        retry_reason: str | None,
+        artifact_ref: str | None,
+        cleanup_status: str | None,
+        detail: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Persist one sanitized workflow stage event in the project fact source."""
+        started = time.perf_counter()
+        safe_detail = self._sanitize_stage_detail(detail or {})
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO stage_events("
+                "trace_id, node_id, candidate_id, submission_id, run_id, wait_id, "
+                "message_id, stage, status, attempt, started_at, ended_at, duration_ms, "
+                "error_code, retry_reason, artifact_ref, cleanup_status, detail"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace_id,
+                    node_id,
+                    candidate_id,
+                    submission_id,
+                    run_id,
+                    wait_id,
+                    message_id,
+                    stage,
+                    status,
+                    attempt,
+                    started_at,
+                    ended_at,
+                    duration_ms,
+                    error_code,
+                    retry_reason,
+                    artifact_ref,
+                    cleanup_status,
+                    self._canonical_json(safe_detail),
+                ),
+            )
+            sequence = int(cursor.lastrowid)
+        record = {
+            "sequence": sequence,
+            "trace_id": trace_id,
+            "node_id": node_id,
+            "candidate_id": candidate_id,
+            "submission_id": submission_id,
+            "run_id": run_id,
+            "wait_id": wait_id,
+            "message_id": message_id,
+            "stage": stage,
+            "status": status,
+            "attempt": attempt,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_ms": duration_ms,
+            "error_code": error_code,
+            "retry_reason": retry_reason,
+            "artifact_ref": artifact_ref,
+            "cleanup_status": cleanup_status,
+            "detail": safe_detail,
+        }
+        self._log(
+            "workflow_stage_event_record",
+            "completed",
+            node_id=node_id,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            detail={
+                "trace_id": trace_id,
+                "sequence": sequence,
+                "stage": stage,
+                "stage_status": status,
+                "attempt": attempt,
+                "error_code": error_code,
+            },
+        )
+        return record
+
+    def list_stage_events(self, trace_id: str) -> list[dict[str, Any]]:
+        """Return a durable workflow timeline ordered by its global append sequence."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM stage_events WHERE trace_id = ? ORDER BY sequence",
+                (trace_id,),
+            ).fetchall()
+        events = [
+            {
+                "sequence": int(row["sequence"]),
+                "trace_id": str(row["trace_id"]),
+                "node_id": str(row["node_id"]),
+                "candidate_id": row["candidate_id"],
+                "submission_id": row["submission_id"],
+                "run_id": row["run_id"],
+                "wait_id": row["wait_id"],
+                "message_id": row["message_id"],
+                "stage": str(row["stage"]),
+                "status": str(row["status"]),
+                "attempt": int(row["attempt"]),
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
+                "duration_ms": row["duration_ms"],
+                "error_code": row["error_code"],
+                "retry_reason": row["retry_reason"],
+                "artifact_ref": row["artifact_ref"],
+                "cleanup_status": row["cleanup_status"],
+                "detail": json.loads(str(row["detail"])),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+        self._log(
+            "workflow_stage_timeline_read",
+            "completed",
+            node_id=events[0]["node_id"] if events else None,
+            detail={"trace_id": trace_id, "event_count": len(events)},
+        )
+        return events
+
+    def create_node_execution(
+        self,
+        *,
+        node_id: str,
+        owner_address: str,
+    ) -> dict[str, Any]:
+        """Create or reuse the one active execution and durable wait for a node."""
+        started = time.perf_counter()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                self._execution_select_sql()
+                + " WHERE e.node_id = ? AND e.state = 'waiting'",
+                (node_id,),
+            ).fetchone()
+            if existing is not None:
+                record = self._node_execution_from_row(existing)
+            else:
+                execution_id = f"execution-{uuid.uuid4().hex}"
+                wait_id = f"wait-{uuid.uuid4().hex}"
+                connection.execute(
+                    "INSERT INTO node_executions("
+                    "execution_id, wait_id, node_id, owner_address, state, phase, revision"
+                    ") VALUES (?, ?, ?, ?, 'waiting', 'queued', 1)",
+                    (execution_id, wait_id, node_id, owner_address),
+                )
+                connection.execute(
+                    "INSERT INTO wait_signals("
+                    "wait_id, execution_id, node_id, state, phase, revision"
+                    ") VALUES (?, ?, ?, 'waiting', 'queued', 1)",
+                    (wait_id, execution_id, node_id),
+                )
+                row = connection.execute(
+                    self._execution_select_sql() + " WHERE w.wait_id = ?",
+                    (wait_id,),
+                ).fetchone()
+                assert row is not None
+                record = self._node_execution_from_row(row)
+        self._log(
+            "node_execution_create",
+            "completed",
+            node_id=node_id,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            detail={
+                "execution_id": record["execution_id"],
+                "wait_id": record["wait_id"],
+                "state": record["state"],
+                "reused": existing is not None,
+            },
+        )
+        return record
+
+    def complete_execution(
+        self,
+        *,
+        wait_id: str,
+        outcome: str,
+        result_ref: str | None,
+        phase: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically end execution and wait state and create one completion outbox row."""
+        if outcome not in {"completed", "failed", "blocked", "cancelled"}:
+            raise ValidationError(
+                resource="node_execution",
+                message="Invalid terminal execution outcome",
+            )
+        started = time.perf_counter()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                self._execution_select_sql() + " WHERE w.wait_id = ?",
+                (wait_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(resource="wait_signal", message="wait signal not found")
+            current = self._node_execution_from_row(row)
+            if current["state"] == "ended":
+                if current["outcome"] != outcome or current["result_ref"] != result_ref:
+                    raise ConflictError(
+                        resource="node_execution",
+                        message="execution already ended with another outcome",
+                        error_code="execution_terminal_conflict",
+                    )
+                record = current
+            else:
+                terminal_phase = phase or current["phase"]
+                connection.execute(
+                    "UPDATE node_executions SET state = 'ended', phase = ?, outcome = ?, "
+                    "result_ref = ?, updated_at = CURRENT_TIMESTAMP, ended_at = CURRENT_TIMESTAMP "
+                    "WHERE execution_id = ? AND state = 'waiting'",
+                    (terminal_phase, outcome, result_ref, current["execution_id"]),
+                )
+                connection.execute(
+                    "UPDATE wait_signals SET state = 'ended', phase = ?, outcome = ?, "
+                    "result_ref = ?, updated_at = CURRENT_TIMESTAMP, ended_at = CURRENT_TIMESTAMP "
+                    "WHERE wait_id = ? AND state = 'waiting'",
+                    (terminal_phase, outcome, result_ref, wait_id),
+                )
+                payload = {
+                    "wait_id": wait_id,
+                    "execution_id": current["execution_id"],
+                    "node_id": current["node_id"],
+                    "state": "ended",
+                    "outcome": outcome,
+                    "result_ref": result_ref,
+                    "revision": current["revision"],
+                }
+                connection.execute(
+                    "INSERT OR IGNORE INTO completion_outbox("
+                    "wait_id, execution_id, owner_address, message_id, payload, state"
+                    ") VALUES (?, ?, ?, ?, ?, 'pending')",
+                    (
+                        wait_id,
+                        current["execution_id"],
+                        current["owner_address"],
+                        f"node-workflow-result:{wait_id}",
+                        self._canonical_json(payload),
+                    ),
+                )
+                ended_row = connection.execute(
+                    self._execution_select_sql() + " WHERE w.wait_id = ?",
+                    (wait_id,),
+                ).fetchone()
+                assert ended_row is not None
+                record = self._node_execution_from_row(ended_row)
+        self._log(
+            "node_execution_complete",
+            "completed",
+            node_id=record["node_id"],
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            detail={
+                "execution_id": record["execution_id"],
+                "wait_id": wait_id,
+                "outcome": record["outcome"],
+                "result_ref": record["result_ref"],
+            },
+        )
+        return record
+
+    def read_execution(self, wait_id: str) -> dict[str, Any] | None:
+        """Read a wait without dispatching, retrying, or changing execution state."""
+        with self._connect() as connection:
+            row = connection.execute(
+                self._execution_select_sql() + " WHERE w.wait_id = ?",
+                (wait_id,),
+            ).fetchone()
+        return self._node_execution_from_row(row) if row is not None else None
+
+    def list_active_node_executions(self) -> list[dict[str, Any]]:
+        """List durable waiting executions for process-restart recovery."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                self._execution_select_sql()
+                + " WHERE e.state = 'waiting' ORDER BY e.created_at, e.execution_id"
+            ).fetchall()
+        return [self._node_execution_from_row(row) for row in rows]
+
+    def list_pending_completion_outbox(self) -> list[dict[str, Any]]:
+        """List terminal notifications that have not reached the persistent mailbox."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT wait_id, execution_id, owner_address, message_id, payload, attempt "
+                "FROM completion_outbox WHERE state = 'pending' "
+                "ORDER BY created_at, wait_id"
+            ).fetchall()
+        return [
+            {
+                "wait_id": str(row["wait_id"]),
+                "execution_id": str(row["execution_id"]),
+                "owner_address": str(row["owner_address"]),
+                "message_id": str(row["message_id"]),
+                "payload": json.loads(str(row["payload"])),
+                "attempt": int(row["attempt"]),
+            }
+            for row in rows
+        ]
+
+    def mark_completion_outbox_sent(self, wait_id: str) -> None:
+        """Mark a completion delivered only after mailbox insertion or idempotent existence."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE completion_outbox SET state = 'sent', attempt = attempt + 1, "
+                "updated_at = CURRENT_TIMESTAMP, sent_at = CURRENT_TIMESTAMP "
+                "WHERE wait_id = ? AND state = 'pending'",
+                (wait_id,),
+            )
+        self._log(
+            "completion_outbox_forward",
+            "completed",
+            detail={"wait_id": wait_id},
+        )
+
+    def mark_completion_outbox_attempt(self, wait_id: str, *, error_code: str) -> None:
+        """Record a failed forward while leaving the durable outbox pending."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE completion_outbox SET attempt = attempt + 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE wait_id = ? AND state = 'pending'",
+                (wait_id,),
+            )
+        self._log(
+            "completion_outbox_forward",
+            "retry",
+            detail={"wait_id": wait_id, "error_code": error_code},
+        )
+
+    @staticmethod
+    def _execution_select_sql() -> str:
+        return (
+            "SELECT w.wait_id, e.execution_id, e.node_id, e.owner_address, "
+            "w.state, w.phase, w.revision, w.outcome, w.result_ref "
+            "FROM wait_signals w JOIN node_executions e "
+            "ON e.execution_id = w.execution_id"
+        )
+
+    @staticmethod
+    def _node_execution_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "wait_id": str(row["wait_id"]),
+            "execution_id": str(row["execution_id"]),
+            "node_id": str(row["node_id"]),
+            "owner_address": str(row["owner_address"]),
+            "state": str(row["state"]),
+            "phase": str(row["phase"]),
+            "revision": int(row["revision"]),
+            "outcome": row["outcome"],
+            "result_ref": row["result_ref"],
+        }
+
+    @staticmethod
+    def _sanitize_stage_detail(detail: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "preview",
+            "container_id",
+            "command_id",
+            "classification",
+            "evidence_hash",
+            "candidate_code_hash",
+            "submission_revision",
+            "required_command_ids",
+            "changed_paths",
+            "exit_code",
+            "duration_ms",
+            "event_count",
+            "error_code",
+            "cleanup_error",
+            "message_type",
+        }
+        safe_detail = {key: detail[key] for key in allowed if key in detail}
+        preview = safe_detail.get("preview")
+        if isinstance(preview, str):
+            safe_detail["preview"] = preview[:2048]
+        return safe_detail
+
+    @staticmethod
+    def _canonical_json(value: dict[str, Any]) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def _evidence_hash(
+        cls,
+        *,
+        node_id: str,
+        evidence_seq: int,
+        event: str,
+        payload: dict[str, Any],
+        previous_hash: str | None,
+    ) -> str:
+        material = cls._canonical_json(
+            {
+                "node_id": node_id,
+                "evidence_seq": evidence_seq,
+                "event": event,
+                "payload": payload,
+                "previous_hash": previous_hash,
+            }
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    def _sanitize_evidence_payload(
+        self,
+        *,
+        node_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        allowed = {
+            "run_id",
+            "node_id",
+            "candidate_id",
+            "submission_id",
+            "contract_version",
+            "test_code_hash",
+            "candidate_code_hash",
+            "required_command_ids",
+            "map_seq",
+            "boundary_fingerprint",
+            "image_version",
+            "exit_code",
+            "duration_ms",
+            "classification",
+            "changed_paths",
+            "artifact_ref",
+            "artifact_digest",
+        }
+        safe_payload = {key: payload[key] for key in allowed if key in payload}
+        if safe_payload.get("node_id") != node_id:
+            raise ValidationError(
+                resource="verification_evidence",
+                message="evidence node_id does not match the chain node",
+            )
+        if not safe_payload.get("required_command_ids"):
+            raise ValidationError(
+                resource="verification_evidence",
+                message="required_command_ids must not be empty",
+            )
+        artifact_error = self._validate_evidence_artifact(safe_payload)
+        if artifact_error is not None:
+            raise ValidationError(resource="verification_evidence", message=artifact_error)
+        return safe_payload
+
+    def _validate_evidence_artifact(self, payload: dict[str, Any]) -> str | None:
+        artifact_ref = str(payload.get("artifact_ref") or "")
+        artifact_digest = str(payload.get("artifact_digest") or "")
+        if not artifact_ref or not artifact_digest:
+            return "artifact_reference_missing"
+        artifact_path = (self.project_root / artifact_ref).resolve()
+        try:
+            artifact_path.relative_to(self.project_root)
+        except ValueError:
+            return "artifact_reference_invalid"
+        if not artifact_path.is_file():
+            return "artifact_missing"
+        actual_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        if actual_digest != artifact_digest:
+            return "artifact_digest_mismatch"
+        return None
+
+    @staticmethod
+    def _evidence_break(record: dict[str, Any], *, error_code: str) -> dict[str, Any]:
+        return {
+            "evidence_seq": record["evidence_seq"],
+            "error_code": error_code,
+            "artifact_ref": record["payload"].get("artifact_ref"),
+        }
 
     def initialize(self, *, scan_if_created: bool = True) -> dict[str, Any]:
         """Open/create the DB and first-scan a workspace; output reports creation and scan state."""
@@ -365,11 +1133,7 @@ class ProjectPlanStore:
         self._log("project_map_initialize", "started", detail={"created": created})
 
         try:
-            self._validate_existing_metadata()
-            with self._connect() as connection:
-                connection.executescript(_SCHEMA)
-                self._initialize_metadata(connection)
-                self._migrate_schema(connection)
+            self.ensure_schema()
             if created and scan_if_created:
                 self.rescan()
             self._recover_interrupted_semantic_scan()
@@ -1619,6 +2383,97 @@ class ProjectPlanStore:
                 "ALTER TABLE child_result_receipts "
                 "ADD COLUMN result_json TEXT NOT NULL DEFAULT '{}'"
             )
+        workflow_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(modification_workflows)"
+            ).fetchall()
+        }
+        if "test_contract_version" not in workflow_columns:
+            connection.execute(
+                "ALTER TABLE modification_workflows ADD COLUMN test_contract_version TEXT"
+            )
+        verification_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(verification_runs)"
+            ).fetchall()
+        }
+        if verification_columns and {
+            "next_retry_at",
+            "max_attempts",
+            "terminal_reason",
+        } - verification_columns:
+            connection.execute(
+                "ALTER TABLE verification_runs RENAME TO verification_runs_v6"
+            )
+            connection.execute("DROP INDEX IF EXISTS ix_verification_runs_recovery")
+            connection.execute("DROP INDEX IF EXISTS ix_verification_runs_node_sequence")
+            connection.execute(
+                """
+                CREATE TABLE verification_runs (
+                    sequence         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id           TEXT NOT NULL UNIQUE,
+                    node_id          TEXT NOT NULL,
+                    phase            TEXT NOT NULL CHECK(phase IN ('red', 'final')),
+                    source_revision  INTEGER NOT NULL,
+                    contract_version TEXT NOT NULL,
+                    candidate_id     TEXT,
+                    state            TEXT NOT NULL CHECK(
+                        state IN ('queued', 'running', 'completed', 'failed')
+                    ),
+                    attempt          INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at    REAL,
+                    max_attempts     INTEGER NOT NULL DEFAULT 5 CHECK(max_attempts >= 1),
+                    terminal_reason  TEXT,
+                    lease_token      TEXT,
+                    lease_expires_at REAL,
+                    outcome          TEXT,
+                    error_code       TEXT,
+                    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at     TEXT,
+                    UNIQUE(node_id, phase, source_revision, contract_version)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO verification_runs(
+                    sequence, run_id, node_id, phase, source_revision,
+                    contract_version, candidate_id, state, attempt,
+                    lease_token, lease_expires_at, outcome, error_code,
+                    created_at, updated_at, completed_at
+                )
+                SELECT
+                    sequence, run_id, node_id, phase, source_revision,
+                    contract_version, candidate_id, state, attempt,
+                    lease_token, lease_expires_at, outcome, error_code,
+                    created_at, updated_at, completed_at
+                FROM verification_runs_v6
+                """
+            )
+            connection.execute("DROP TABLE verification_runs_v6")
+            connection.execute(
+                "CREATE INDEX ix_verification_runs_recovery ON verification_runs("
+                "state, next_retry_at, lease_expires_at, sequence)"
+            )
+            connection.execute(
+                "CREATE INDEX ix_verification_runs_node_sequence ON "
+                "verification_runs(node_id, sequence)"
+            )
+        verification_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(verification_runs)"
+            ).fetchall()
+        }
+        if "next_retry_at" in verification_columns:
+            connection.execute("DROP INDEX IF EXISTS ix_verification_runs_recovery")
+            connection.execute(
+                "CREATE INDEX ix_verification_runs_recovery ON verification_runs("
+                "state, next_retry_at, lease_expires_at, sequence)"
+            )
 
     @staticmethod
     def _set_metadata(connection: sqlite3.Connection, key: str, value: str) -> None:
@@ -2450,6 +3305,1077 @@ class ProjectPlanStore:
         with self._connect() as connection:
             return {"node_ids": ModifyLoopService.list_divergent_nodes(connection)}
 
+    def get_active_test_contract(self, node_id: str) -> dict[str, Any] | None:
+        """Read the only currently frozen test contract for one node."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT node_id, contract_version, snapshot, state, invalidation_reason, "
+                "frozen_at, invalidated_at FROM test_contracts "
+                "WHERE node_id = ? AND state = 'frozen'",
+                (node_id,),
+            ).fetchone()
+        return None if row is None else self._test_contract_from_row(row)
+
+    def get_test_contract(self, node_id: str, contract_version: str) -> dict[str, Any] | None:
+        """Read one immutable test contract version, including invalidated versions."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT node_id, contract_version, snapshot, state, invalidation_reason, "
+                "frozen_at, invalidated_at FROM test_contracts "
+                "WHERE node_id = ? AND contract_version = ?",
+                (node_id, contract_version),
+            ).fetchone()
+        return None if row is None else self._test_contract_from_row(row)
+
+    def freeze_test_contract(
+        self,
+        node_id: str,
+        *,
+        contract_version: str,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one immutable contract version without replacing its history."""
+        started = time.perf_counter()
+        serialized = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            if str(snapshot.get("contract_version") or "") != contract_version:
+                raise ValidationError(
+                    resource="test_contract",
+                    message="Test contract snapshot version does not match",
+                    details={"node_id": node_id, "contract_version": contract_version},
+                )
+            snapshot_payload = dict(snapshot)
+            snapshot_payload.pop("contract_version", None)
+            computed_version = hashlib.sha256(
+                json.dumps(
+                    snapshot_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if computed_version != contract_version:
+                raise ValidationError(
+                    resource="test_contract",
+                    message="Test contract content hash does not match its version",
+                    details={"node_id": node_id, "contract_version": contract_version},
+                )
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT snapshot, state FROM test_contracts "
+                    "WHERE node_id = ? AND contract_version = ?",
+                    (node_id, contract_version),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing["snapshot"]) != serialized:
+                        raise ConflictError(
+                            resource="test_contract",
+                            message="Test contract version is bound to another snapshot",
+                            error_code="test_contract_version_conflict",
+                            details={"node_id": node_id, "contract_version": contract_version},
+                        )
+                    if str(existing["state"]) != "frozen":
+                        raise ConflictError(
+                            resource="test_contract",
+                            message="Invalidated test contract versions cannot be frozen again",
+                            error_code="test_contract_version_invalidated",
+                            details={"node_id": node_id, "contract_version": contract_version},
+                        )
+                    result = {
+                        "node_id": node_id,
+                        "contract_version": contract_version,
+                        "state": "frozen",
+                        "applied": False,
+                    }
+                    self._log(
+                        "test_contract_freeze",
+                        "reused",
+                        node_id=node_id,
+                        duration_ms=self._elapsed_ms(started),
+                        detail=result,
+                    )
+                    return result
+                active = connection.execute(
+                    "SELECT contract_version FROM test_contracts "
+                    "WHERE node_id = ? AND state = 'frozen'",
+                    (node_id,),
+                ).fetchone()
+                if active is not None:
+                    raise ConflictError(
+                        resource="test_contract",
+                        message="Another frozen test contract must be invalidated first",
+                        error_code="test_contract_active_conflict",
+                        details={
+                            "node_id": node_id,
+                            "contract_version": str(active["contract_version"]),
+                        },
+                    )
+                connection.execute(
+                    "INSERT INTO test_contracts"
+                    "(node_id, contract_version, snapshot, state) VALUES (?, ?, ?, 'frozen')",
+                    (node_id, contract_version, serialized),
+                )
+                self._record_change(
+                    connection,
+                    "test_contract",
+                    f"{node_id}:{contract_version}",
+                    "freeze",
+                    {"node_id": node_id, "contract_version": contract_version},
+                )
+            result = {
+                "node_id": node_id,
+                "contract_version": contract_version,
+                "state": "frozen",
+                "applied": True,
+            }
+            self._log(
+                "test_contract_freeze",
+                "completed",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail=result,
+            )
+            return result
+        except (ConflictError, ValidationError) as exc:
+            self._log(
+                "test_contract_freeze",
+                "rejected",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail={
+                    "contract_version": contract_version,
+                    "error_code": exc.api_error.code,
+                },
+            )
+            raise
+
+    def invalidate_test_contract(
+        self,
+        node_id: str,
+        *,
+        contract_version: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Permanently invalidate one contract version while retaining its snapshot."""
+        started = time.perf_counter()
+        normalized_reason = str(reason).strip()
+        try:
+            if not normalized_reason:
+                raise ValidationError(
+                    resource="test_contract",
+                    message="Test contract invalidation reason is required",
+                )
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT state, invalidation_reason FROM test_contracts "
+                    "WHERE node_id = ? AND contract_version = ?",
+                    (node_id, contract_version),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(
+                        resource="test_contract",
+                        message="Test contract not found",
+                        details={"node_id": node_id, "contract_version": contract_version},
+                    )
+                if str(row["state"]) == "invalidated":
+                    result = {
+                        "node_id": node_id,
+                        "contract_version": contract_version,
+                        "state": "invalidated",
+                        "reason": str(row["invalidation_reason"] or ""),
+                        "applied": False,
+                    }
+                    self._log(
+                        "test_contract_invalidate",
+                        "reused",
+                        node_id=node_id,
+                        duration_ms=self._elapsed_ms(started),
+                        detail=result,
+                    )
+                    return result
+                connection.execute(
+                    "UPDATE test_contracts SET state = 'invalidated', invalidation_reason = ?, "
+                    "invalidated_at = CURRENT_TIMESTAMP "
+                    "WHERE node_id = ? AND contract_version = ? AND state = 'frozen'",
+                    (normalized_reason, node_id, contract_version),
+                )
+                self._record_change(
+                    connection,
+                    "test_contract",
+                    f"{node_id}:{contract_version}",
+                    "invalidate",
+                    {
+                        "node_id": node_id,
+                        "contract_version": contract_version,
+                        "reason": normalized_reason,
+                    },
+                )
+            result = {
+                "node_id": node_id,
+                "contract_version": contract_version,
+                "state": "invalidated",
+                "reason": normalized_reason,
+                "applied": True,
+            }
+            self._log(
+                "test_contract_invalidate",
+                "completed",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail=result,
+            )
+            return result
+        except (ConflictError, NotFoundError, ValidationError) as exc:
+            self._log(
+                "test_contract_invalidate",
+                "rejected",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail={
+                    "contract_version": contract_version,
+                    "error_code": exc.api_error.code,
+                },
+            )
+            raise
+
+    @staticmethod
+    def _test_contract_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "node_id": str(row["node_id"]),
+            "contract_version": str(row["contract_version"]),
+            "snapshot": json.loads(str(row["snapshot"])),
+            "state": str(row["state"]),
+            "invalidation_reason": (
+                None if row["invalidation_reason"] is None else str(row["invalidation_reason"])
+            ),
+            "frozen_at": str(row["frozen_at"]),
+            "invalidated_at": (
+                None if row["invalidated_at"] is None else str(row["invalidated_at"])
+            ),
+        }
+
+    def get_modification_workflow(self, node_id: str) -> dict[str, Any] | None:
+        """Read one persisted modification gate without advancing it."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT node_id, state, revision, test_contract_version, updated_at "
+                "FROM modification_workflows WHERE node_id = ?",
+                (node_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "node_id": str(row["node_id"]),
+            "state": str(row["state"]),
+            "revision": int(row["revision"]),
+            "test_contract_version": (
+                None
+                if row["test_contract_version"] is None
+                else str(row["test_contract_version"])
+            ),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def list_modification_events(self, node_id: str) -> list[dict[str, Any]]:
+        """Return the durable audit trail for one modification workflow."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT sequence, event_id, node_id, event, from_state, to_state, "
+                "revision, payload, created_at FROM modification_events "
+                "WHERE node_id = ? ORDER BY sequence",
+                (node_id,),
+            ).fetchall()
+        return [
+            {
+                "sequence": int(row["sequence"]),
+                "event_id": str(row["event_id"]),
+                "node_id": str(row["node_id"]),
+                "event": str(row["event"]),
+                "from_state": None if row["from_state"] is None else str(row["from_state"]),
+                "to_state": str(row["to_state"]),
+                "revision": int(row["revision"]),
+                "payload": json.loads(str(row["payload"])),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def list_modification_workflows(self, *, states: set[str]) -> list[dict[str, Any]]:
+        """List persisted workflows in recoverable states without mutating them."""
+        if not states:
+            return []
+        placeholders = ",".join("?" for _ in states)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT node_id, state, revision, test_contract_version, updated_at "
+                f"FROM modification_workflows WHERE state IN ({placeholders}) "
+                "ORDER BY updated_at, node_id",
+                tuple(sorted(states)),
+            ).fetchall()
+        return [
+            {
+                "node_id": str(row["node_id"]),
+                "state": str(row["state"]),
+                "revision": int(row["revision"]),
+                "test_contract_version": (
+                    None
+                    if row["test_contract_version"] is None
+                    else str(row["test_contract_version"])
+                ),
+                "updated_at": str(row["updated_at"]),
+            }
+            for row in rows
+        ]
+
+    def enqueue_verification_run(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        phase: str,
+        source_revision: int,
+        contract_version: str,
+        candidate_id: str | None = None,
+        max_attempts: int = 5,
+    ) -> dict[str, Any]:
+        """Persist one idempotent authoritative verification intent."""
+        started = time.perf_counter()
+        if phase not in {"red", "final"}:
+            raise ValidationError(
+                resource="verification_run",
+                message="Verification phase is invalid",
+                details={"phase": phase},
+            )
+        if max_attempts < 1:
+            raise ValidationError(
+                resource="verification_run",
+                message="Verification retry limit is invalid",
+                details={"max_attempts": max_attempts},
+            )
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM verification_runs "
+                "WHERE node_id = ? AND phase = ? AND source_revision = ? "
+                "AND contract_version = ?",
+                (node_id, phase, source_revision, contract_version),
+            ).fetchone()
+            if existing is not None:
+                result = self._verification_run_from_row(existing)
+                if (
+                    result["run_id"] != run_id
+                    or result["contract_version"] != contract_version
+                    or result["candidate_id"] != candidate_id
+                    or result["max_attempts"] != max_attempts
+                ):
+                    raise ConflictError(
+                        resource="verification_run",
+                        message="Verification source event is already bound to another run",
+                        error_code="verification_run_conflict",
+                        details={
+                            "node_id": node_id,
+                            "phase": phase,
+                            "source_revision": source_revision,
+                        },
+                    )
+                self._log(
+                    "verification_run_enqueue",
+                    "reused",
+                    node_id=node_id,
+                    duration_ms=self._elapsed_ms(started),
+                    detail=self._verification_log_detail(result),
+                )
+                return result
+            connection.execute(
+                "INSERT INTO verification_runs"
+                "(run_id, node_id, phase, source_revision, contract_version, "
+                "candidate_id, state, max_attempts) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)",
+                (
+                    run_id,
+                    node_id,
+                    phase,
+                    source_revision,
+                    contract_version,
+                    candidate_id,
+                    max_attempts,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        result = self._verification_run_from_row(row)
+        self._log(
+            "verification_run_enqueue",
+            "completed",
+            node_id=node_id,
+            duration_ms=self._elapsed_ms(started),
+            detail=self._verification_log_detail(result),
+        )
+        return result
+
+    def get_verification_run(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return None if row is None else self._verification_run_from_row(row)
+
+    def latest_verification_run(self, node_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE node_id = ? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (node_id,),
+            ).fetchone()
+        return None if row is None else self._verification_run_from_row(row)
+
+    def claim_verification_run(
+        self,
+        run_id: str,
+        *,
+        now_timestamp: float,
+        lease_seconds: int,
+    ) -> dict[str, Any] | None:
+        """Claim a queued or lease-expired verification run exactly once per lease."""
+        started = time.perf_counter()
+        lease_token = f"verification-lease-{uuid.uuid4()}"
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(
+                    resource="verification_run",
+                    message="Verification run not found",
+                    details={"run_id": run_id},
+                )
+            current = self._verification_run_from_row(row)
+            if current["state"] in {"completed", "failed"} or (
+                current["state"] == "running"
+                and current["lease_expires_at"] is not None
+                and float(current["lease_expires_at"]) > now_timestamp
+            ) or (
+                current["state"] == "queued"
+                and current["next_retry_at"] is not None
+                and float(current["next_retry_at"]) > now_timestamp
+            ):
+                return None
+            connection.execute(
+                "UPDATE verification_runs SET state = 'running', attempt = attempt + 1, "
+                "lease_token = ?, lease_expires_at = ?, error_code = NULL, "
+                "next_retry_at = NULL, terminal_reason = NULL, "
+                "updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
+                (lease_token, now_timestamp + lease_seconds, run_id),
+            )
+            claimed = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert claimed is not None
+        result = self._verification_run_from_row(claimed)
+        self._log(
+            "verification_run_claim",
+            "completed",
+            node_id=result["node_id"],
+            duration_ms=self._elapsed_ms(started),
+            detail=self._verification_log_detail(result),
+        )
+        return result
+
+    def defer_verification_run(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        error_code: str,
+        now_timestamp: float | None = None,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any]:
+        """Return a temporarily unavailable authoritative run to the durable queue."""
+        now = time.time() if now_timestamp is None else now_timestamp
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFoundError(
+                    resource="verification_run",
+                    message="Verification run not found",
+                    details={"run_id": run_id},
+                )
+            current = self._verification_run_from_row(row)
+            retry_limit = current["max_attempts"] if max_attempts is None else max_attempts
+            if retry_limit < 1:
+                raise ValidationError(
+                    resource="verification_run",
+                    message="Verification retry limit is invalid",
+                    details={"max_attempts": retry_limit},
+                )
+            exhausted = current["attempt"] >= retry_limit
+            next_retry_at = (
+                None
+                if exhausted
+                else now + min(float(2 ** max(current["attempt"] - 1, 0)), 60.0)
+            )
+            updated = connection.execute(
+                "UPDATE verification_runs SET state = ?, lease_token = NULL, "
+                "lease_expires_at = NULL, next_retry_at = ?, max_attempts = ?, "
+                "terminal_reason = ?, error_code = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE run_id = ? AND state = 'running' AND lease_token = ?",
+                (
+                    "failed" if exhausted else "queued",
+                    next_retry_at,
+                    retry_limit,
+                    "verification_retry_exhausted" if exhausted else None,
+                    error_code,
+                    run_id,
+                    lease_token,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ConflictError(
+                    resource="verification_run",
+                    message="Verification lease is no longer owned",
+                    error_code="verification_lease_lost",
+                    details={"run_id": run_id},
+                )
+            if exhausted:
+                self._block_verification_workflow_after_retry_exhaustion(
+                    connection,
+                    run=current,
+                    error_code=error_code,
+                )
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        result = self._verification_run_from_row(row)
+        self._log(
+            (
+                "verification_run_retry_exhausted"
+                if result["state"] == "failed"
+                else "verification_run_defer"
+            ),
+            "blocked" if result["state"] == "failed" else "retry",
+            node_id=result["node_id"],
+            detail=self._verification_log_detail(result),
+        )
+        return result
+
+    def renew_verification_lease(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        now_timestamp: float,
+        lease_seconds: int,
+    ) -> dict[str, Any]:
+        """Extend a still-owned, unexpired verification lease atomically."""
+        if lease_seconds < 1:
+            raise ValidationError(
+                resource="verification_run",
+                message="Verification lease duration is invalid",
+                details={"lease_seconds": lease_seconds},
+            )
+        started = time.perf_counter()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                "UPDATE verification_runs SET lease_expires_at = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE run_id = ? "
+                "AND state = 'running' AND lease_token = ? "
+                "AND lease_expires_at IS NOT NULL AND lease_expires_at > ?",
+                (
+                    now_timestamp + lease_seconds,
+                    run_id,
+                    lease_token,
+                    now_timestamp,
+                ),
+            )
+            if updated.rowcount != 1:
+                row = connection.execute(
+                    "SELECT run_id FROM verification_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(
+                        resource="verification_run",
+                        message="Verification run not found",
+                        details={"run_id": run_id},
+                    )
+                raise ConflictError(
+                    resource="verification_run",
+                    message="Verification lease is no longer owned",
+                    error_code="verification_lease_lost",
+                    details={"run_id": run_id},
+                )
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        result = self._verification_run_from_row(row)
+        self._log(
+            "verification_run_lease_renew",
+            "completed",
+            node_id=result["node_id"],
+            duration_ms=self._elapsed_ms(started),
+            detail=self._verification_log_detail(result),
+        )
+        return result
+
+    def _block_verification_workflow_after_retry_exhaustion(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        run: dict[str, Any],
+        error_code: str,
+    ) -> None:
+        from bridle.agent.runtime.modification_workflow import (
+            ModificationEvent,
+            ModificationState,
+        )
+
+        node_id = str(run["node_id"])
+        phase = str(run["phase"])
+        expected_state = {
+            "red": ModificationState.RED_VERIFYING.value,
+            "final": ModificationState.FINAL_VERIFYING.value,
+        }[phase]
+        workflow = connection.execute(
+            "SELECT state, revision, test_contract_version "
+            "FROM modification_workflows WHERE node_id = ?",
+            (node_id,),
+        ).fetchone()
+        if workflow is None or str(workflow["state"]) != expected_state:
+            raise ConflictError(
+                resource="modification_workflow",
+                message="Verification workflow is no longer active",
+                error_code="verification_workflow_state_conflict",
+                details={
+                    "node_id": node_id,
+                    "phase": phase,
+                    "expected_state": expected_state,
+                    "actual_state": None if workflow is None else str(workflow["state"]),
+                },
+            )
+        current_revision = int(workflow["revision"])
+        revision = current_revision + 1
+        target_state = ModificationState.VERIFICATION_BLOCKED.value
+        updated = connection.execute(
+            "UPDATE modification_workflows SET state = ?, revision = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE node_id = ? AND revision = ?",
+            (target_state, revision, node_id, current_revision),
+        )
+        if updated.rowcount != 1:
+            raise ConflictError(
+                resource="modification_workflow",
+                message="Modification workflow changed concurrently",
+                error_code="modification_revision_conflict",
+                details={"node_id": node_id, "actual_revision": current_revision},
+            )
+        event = ModificationEvent.VERIFICATION_RETRY_EXHAUSTED.value
+        event_id = f"verification:{run['run_id']}:retry-exhausted"
+        payload = {
+            "verification_run_id": str(run["run_id"]),
+            "phase": phase,
+            "status": "blocked",
+            "error_code": error_code,
+            "terminal_reason": "verification_retry_exhausted",
+        }
+        contract_version = workflow["test_contract_version"]
+        if contract_version is not None:
+            payload["test_contract_version"] = str(contract_version)
+        connection.execute(
+            "INSERT INTO modification_events"
+            "(event_id, node_id, event, from_state, to_state, revision, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                event_id,
+                node_id,
+                event,
+                expected_state,
+                target_state,
+                revision,
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        self._record_change(
+            connection,
+            "modification_workflow",
+            node_id,
+            "transition",
+            {
+                "event": event,
+                "event_id": event_id,
+                "from_state": expected_state,
+                "to_state": target_state,
+                "revision": revision,
+                "test_contract_version": (
+                    None if contract_version is None else str(contract_version)
+                ),
+            },
+        )
+
+    def next_verification_retry_at(self) -> float | None:
+        """Return the nearest durable retry deadline for background scheduling."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT MIN(next_retry_at) FROM verification_runs "
+                "WHERE state = 'queued' AND next_retry_at IS NOT NULL"
+            ).fetchone()
+        return None if row is None or row[0] is None else float(row[0])
+
+    def complete_verification_run(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        outcome: dict[str, Any],
+        error_code: str | None,
+    ) -> dict[str, Any]:
+        """Persist the only authoritative result accepted for one source event."""
+        safe_outcome = json.dumps(
+            outcome,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                "UPDATE verification_runs SET state = 'completed', outcome = ?, "
+                "error_code = ?, lease_token = NULL, lease_expires_at = NULL, "
+                "updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP "
+                "WHERE run_id = ? AND state = 'running' AND lease_token = ?",
+                (safe_outcome, error_code, run_id, lease_token),
+            )
+            if updated.rowcount != 1:
+                current = connection.execute(
+                    "SELECT * FROM verification_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if current is not None and str(current["state"]) == "completed":
+                    return self._verification_run_from_row(current)
+                raise ConflictError(
+                    resource="verification_run",
+                    message="Verification lease is no longer owned",
+                    error_code="verification_lease_lost",
+                    details={"run_id": run_id},
+                )
+            row = connection.execute(
+                "SELECT * FROM verification_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        result = self._verification_run_from_row(row)
+        self._log(
+            "verification_run_complete",
+            "completed",
+            node_id=result["node_id"],
+            detail=self._verification_log_detail(result),
+        )
+        return result
+
+    @staticmethod
+    def _verification_run_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "sequence": int(row["sequence"]),
+            "run_id": str(row["run_id"]),
+            "node_id": str(row["node_id"]),
+            "phase": str(row["phase"]),
+            "source_revision": int(row["source_revision"]),
+            "contract_version": str(row["contract_version"]),
+            "candidate_id": (
+                None if row["candidate_id"] is None else str(row["candidate_id"])
+            ),
+            "state": str(row["state"]),
+            "attempt": int(row["attempt"]),
+            "next_retry_at": (
+                None if row["next_retry_at"] is None else float(row["next_retry_at"])
+            ),
+            "max_attempts": int(row["max_attempts"]),
+            "terminal_reason": (
+                None if row["terminal_reason"] is None else str(row["terminal_reason"])
+            ),
+            "lease_token": None if row["lease_token"] is None else str(row["lease_token"]),
+            "lease_expires_at": (
+                None if row["lease_expires_at"] is None else float(row["lease_expires_at"])
+            ),
+            "outcome": None if row["outcome"] is None else json.loads(str(row["outcome"])),
+            "error_code": None if row["error_code"] is None else str(row["error_code"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+            "completed_at": (
+                None if row["completed_at"] is None else str(row["completed_at"])
+            ),
+        }
+
+    @staticmethod
+    def _verification_log_detail(run: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "run_id": run["run_id"],
+            "phase": run["phase"],
+            "source_revision": run["source_revision"],
+            "contract_version": run["contract_version"],
+            "candidate_id": run["candidate_id"],
+            "state": run["state"],
+            "attempt": run["attempt"],
+            "next_retry_at": run["next_retry_at"],
+            "max_attempts": run["max_attempts"],
+            "terminal_reason": run["terminal_reason"],
+            "error_code": run["error_code"],
+        }
+
+    def apply_modification_transition(
+        self,
+        node_id: str,
+        *,
+        event: str,
+        event_id: str,
+        allowed_from: set[str | None],
+        to_state: str,
+        expected_revision: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically append one idempotent modification transition."""
+        started = time.perf_counter()
+        current_state: str | None = None
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing_event = connection.execute(
+                    "SELECT node_id, event, to_state, revision, payload "
+                    "FROM modification_events WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+                if existing_event is not None:
+                    if (
+                        str(existing_event["node_id"]) != node_id
+                        or str(existing_event["event"]) != event
+                        or str(existing_event["to_state"]) != to_state
+                    ):
+                        raise ConflictError(
+                            resource="modification_workflow",
+                            message="Modification event ID is already bound to another transition",
+                            error_code="modification_event_conflict",
+                            details={"event_id": event_id, "node_id": node_id},
+                        )
+                    existing_payload = json.loads(str(existing_event["payload"]))
+                    result = {
+                        "node_id": node_id,
+                        "state": str(existing_event["to_state"]),
+                        "revision": int(existing_event["revision"]),
+                        "test_contract_version": existing_payload.get(
+                            "test_contract_version"
+                        ),
+                        "applied": False,
+                    }
+                    self._log(
+                        "modification_transition",
+                        "reused",
+                        node_id=node_id,
+                        duration_ms=self._elapsed_ms(started),
+                        detail={"event": event, "event_id": event_id, **result},
+                    )
+                    return result
+
+                current = connection.execute(
+                    "SELECT state, revision, test_contract_version "
+                    "FROM modification_workflows WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                current_state = None if current is None else str(current["state"])
+                current_revision = 0 if current is None else int(current["revision"])
+                current_contract_version = (
+                    None
+                    if current is None or current["test_contract_version"] is None
+                    else str(current["test_contract_version"])
+                )
+                if expected_revision is not None and expected_revision != current_revision:
+                    raise ConflictError(
+                        resource="modification_workflow",
+                        message="Modification workflow revision changed",
+                        error_code="modification_revision_conflict",
+                        details={
+                            "node_id": node_id,
+                            "expected_revision": expected_revision,
+                            "actual_revision": current_revision,
+                        },
+                    )
+                if current_state not in allowed_from:
+                    raise ConflictError(
+                        resource="modification_workflow",
+                        message="Modification transition is not allowed from the current state",
+                        error_code="modification_transition_invalid",
+                        details={
+                            "node_id": node_id,
+                            "event": event,
+                            "from_state": current_state,
+                            "allowed_from": sorted(value for value in allowed_from if value is not None),
+                        },
+                    )
+
+                safe_payload = dict(payload or {})
+                next_contract_version = current_contract_version
+                if event in {"test_contract_approved", "red_allowed"}:
+                    active_contract = connection.execute(
+                        "SELECT contract_version FROM test_contracts "
+                        "WHERE node_id = ? AND state = 'frozen'",
+                        (node_id,),
+                    ).fetchone()
+                    if active_contract is None:
+                        raise ConflictError(
+                            resource="test_contract",
+                            message="A frozen test contract is required for this transition",
+                            error_code="test_contract_required",
+                            details={"node_id": node_id, "event": event},
+                        )
+                    active_contract_version = str(active_contract["contract_version"])
+                    if event == "test_contract_approved":
+                        next_contract_version = active_contract_version
+                    elif current_contract_version != active_contract_version:
+                        raise ConflictError(
+                            resource="test_contract",
+                            message="The approved frozen test contract is no longer current",
+                            error_code="test_contract_stale",
+                            details={
+                                "node_id": node_id,
+                                "approved_contract_version": current_contract_version,
+                                "active_contract_version": active_contract_version,
+                            },
+                        )
+                    safe_payload["test_contract_version"] = active_contract_version
+                elif event in {"invalid_test", "baseline_expired"}:
+                    if current_contract_version is not None:
+                        connection.execute(
+                            "UPDATE test_contracts SET state = 'invalidated', "
+                            "invalidation_reason = ?, invalidated_at = CURRENT_TIMESTAMP "
+                            "WHERE node_id = ? AND contract_version = ? AND state = 'frozen'",
+                            (event, node_id, current_contract_version),
+                        )
+                        safe_payload["invalidated_contract_version"] = current_contract_version
+                    next_contract_version = None
+                elif next_contract_version is not None:
+                    safe_payload["test_contract_version"] = next_contract_version
+
+                revision = current_revision + 1
+                if current is None:
+                    connection.execute(
+                        "INSERT INTO modification_workflows"
+                        "(node_id, state, revision, test_contract_version) VALUES (?, ?, ?, ?)",
+                        (node_id, to_state, revision, next_contract_version),
+                    )
+                else:
+                    updated = connection.execute(
+                        "UPDATE modification_workflows SET state = ?, revision = ?, "
+                        "test_contract_version = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE node_id = ? AND revision = ?",
+                        (
+                            to_state,
+                            revision,
+                            next_contract_version,
+                            node_id,
+                            current_revision,
+                        ),
+                    )
+                    if updated.rowcount != 1:
+                        raise ConflictError(
+                            resource="modification_workflow",
+                            message="Modification workflow changed concurrently",
+                            error_code="modification_revision_conflict",
+                            details={"node_id": node_id, "actual_revision": current_revision},
+                        )
+                connection.execute(
+                    "INSERT INTO modification_events"
+                    "(event_id, node_id, event, from_state, to_state, revision, payload) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event_id,
+                        node_id,
+                        event,
+                        current_state,
+                        to_state,
+                        revision,
+                        json.dumps(
+                            safe_payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    ),
+                )
+                self._record_change(
+                    connection,
+                    "modification_workflow",
+                    node_id,
+                    "transition",
+                    {
+                        "event": event,
+                        "event_id": event_id,
+                        "from_state": current_state,
+                        "to_state": to_state,
+                        "revision": revision,
+                        "test_contract_version": next_contract_version,
+                    },
+                )
+            result = {
+                "node_id": node_id,
+                "state": to_state,
+                "revision": revision,
+                "test_contract_version": next_contract_version,
+                "applied": True,
+            }
+            self._log(
+                "modification_transition",
+                "completed",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail={
+                    "event": event,
+                    "event_id": event_id,
+                    "from_state": current_state,
+                    **result,
+                },
+            )
+            return result
+        except ConflictError as exc:
+            self._log(
+                "modification_transition",
+                "rejected",
+                node_id=node_id,
+                duration_ms=self._elapsed_ms(started),
+                detail={
+                    "event": event,
+                    "event_id": event_id,
+                    "from_state": current_state,
+                    "to_state": to_state,
+                    "error_code": exc.api_error.code,
+                },
+            )
+            raise
+
     def dispatch_child_agent(self, node_id: str, *, target_role: str) -> dict[str, Any]:
         with self._connect() as connection:
             existing = connection.execute(
@@ -2543,10 +4469,8 @@ class ProjectPlanStore:
         node_id: str,
         *,
         exposed_symbols: set[str] | None = None,
-        has_red: bool = False,
-        has_green: bool = False,
     ) -> dict[str, Any]:
-        """Run dual gates; on success mark completed, else failed."""
+        """Complete a node only from persisted READY_TO_PUBLISH evidence."""
         try:
             with self._connect() as connection:
                 ModifyLoopService.check_consistency_gate(
@@ -2554,21 +4478,38 @@ class ProjectPlanStore:
                     node_id=node_id,
                     exposed_symbols=exposed_symbols or set(),
                 )
-                ModifyLoopService.check_tdd_gate(has_red=has_red, has_green=has_green)
+                modification = connection.execute(
+                    "SELECT state, revision FROM modification_workflows WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                modification_state = None if modification is None else str(modification["state"])
+                if modification_state not in {"READY_TO_PUBLISH", "PUBLISHED"}:
+                    raise ConflictError(
+                        resource="modification_workflow",
+                        message="Node verification requires persisted READY_TO_PUBLISH evidence",
+                        error_code=TDD_GATE_ERROR,
+                        details={
+                            "node_id": node_id,
+                            "modification_state": modification_state,
+                            "revision": None if modification is None else int(modification["revision"]),
+                        },
+                    )
                 connection.execute(
                     "UPDATE plan_nodes SET status = 'completed' WHERE id = ?", (node_id,)
                 )
                 self._record_change(connection, "plan_node", node_id, "verify_passed", {})
         except ConflictError as exc:
             with self._connect() as connection:
-                connection.execute(
-                    "UPDATE plan_nodes SET status = 'failed' WHERE id = ?", (node_id,)
-                )
+                operation = "verify_blocked" if exc.api_error.code == TDD_GATE_ERROR else "verify_failed"
+                if operation == "verify_failed":
+                    connection.execute(
+                        "UPDATE plan_nodes SET status = 'failed' WHERE id = ?", (node_id,)
+                    )
                 self._record_change(
                     connection,
                     "plan_node",
                     node_id,
-                    "verify_failed",
+                    operation,
                     {"error": exc.api_error.code},
                 )
             raise
