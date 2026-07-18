@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import ipaddress
+import json
 import os
 import socket
+import sys
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,8 @@ app = typer.Typer(name="bridle", help="Project-map runtime for Bridle workspaces
 
 obs_app = typer.Typer(name="obs", help="Observability diagnostics")
 app.add_typer(obs_app, name="obs")
+code_app = typer.Typer(name="code", help="Deterministic candidate code observation")
+app.add_typer(code_app, name="code")
 
 _LANGFUSE_SDK_METHODS = (
     "start_observation",
@@ -76,6 +80,111 @@ def version() -> None:
     from bridle import __version__
 
     typer.echo(f"bridle {__version__}")
+
+
+def get_control_service(workspace: Path):
+    """Return the shared application-service facade for one workspace."""
+    from bridle.features.project_map.service import ControlService
+
+    return ControlService(workspace)
+
+
+def _read_control_payload() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("control_payload_must_be_object")
+    return parsed
+
+
+def _invoke_control(operation: str, workspace: Path, *, json_output: bool) -> None:
+    try:
+        payload = _read_control_payload()
+        result = get_control_service(workspace).invoke(operation, payload)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        result = {
+            "status": "failed",
+            "operation": operation,
+            "error_code": "invalid_control_input",
+            "message": str(exc),
+            "changed_ids": [],
+            "artifact_ref": None,
+        }
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, default=str))
+    else:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if result.get("status") != "completed":
+        raise typer.Exit(code=2)
+
+
+@code_app.command("inspect")
+def code_inspect(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Inspect bounded candidate code metadata."""
+    _invoke_control("code.inspect", workspace, json_output=json_output)
+
+
+@code_app.command("search")
+def code_search(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Search bounded candidate code metadata."""
+    _invoke_control("code.search", workspace, json_output=json_output)
+
+
+@code_app.command("graph")
+def code_graph(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Read a bounded code graph slice."""
+    _invoke_control("code.graph", workspace, json_output=json_output)
+
+
+def _control_command(operation: str, workspace: Path, json_output: bool) -> None:
+    _invoke_control(operation, workspace, json_output=json_output)
+
+
+@app.command("plan")
+def plan_command(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Read or query the project plan through the shared control service."""
+    _control_command("plan", workspace, json_output)
+
+
+@app.command("agent")
+def agent_command(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Read agent workflow events through the shared control service."""
+    _control_command("agent", workspace, json_output)
+
+
+@app.command("candidate")
+def candidate_command(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Read candidate submission summaries through the shared control service."""
+    _control_command("candidate", workspace, json_output)
+
+
+@app.command("verify")
+def verify_command(
+    workspace: Path = typer.Option(..., "--workspace", "-w", exists=True, file_okay=False),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Read verification status through the shared control service."""
+    _control_command("verify", workspace, json_output)
 
 
 def _run_asyncio_blocking(coro_factory: Callable[[], Coroutine[Any, Any, None]]) -> None:

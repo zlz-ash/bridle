@@ -12,12 +12,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bridle.agent.container.candidate_contract import (
-    CandidateExecutionResult,
-    compute_patches,
-    persist_result,
-    snapshot_directory_hashes,
-)
+from bridle.agent.container.candidate_contract import FrozenTestContract
 from bridle.agent.container.candidate_service import CandidateExecutionService
 from bridle.agent.container.container_service import get_shared_container_backend
 from bridle.agent.container.test_backend import ModuleContainerTestBackend
@@ -34,6 +29,11 @@ from bridle.agent.runtime.authorization import (
 from bridle.agent.runtime.change_outbox import ChangeOutbox, ChangeOutboxForwarder
 from bridle.agent.runtime.host import AgentRuntimeHost
 from bridle.agent.runtime.mailbox import AgentAddress, MailEnvelope
+from bridle.agent.runtime.modification_workflow import (
+    ModificationEvent,
+    ModificationState,
+    ModificationWorkflow,
+)
 from bridle.agent.runtime.parent_child_runtime import ParentChildRuntimeCoordinator
 from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
 from bridle.agent.runtime.project_registry import (
@@ -44,6 +44,10 @@ from bridle.agent.runtime.project_registry import (
 from bridle.agent.runtime.role_policy import RuntimeRolePolicy
 from bridle.agent.runtime.schemas import AgentContext
 from bridle.agent.runtime.session_runtime_lifecycle import RuntimeSessionLifecycle
+from bridle.agent.runtime.verification_orchestrator import (
+    CandidateVerificationExecutor,
+    VerificationOrchestrator,
+)
 from bridle.agent.skills.registry import SkillRegistry
 from bridle.api.errors import ConflictError
 from bridle.features.project_map.patch_schemas import PlanPatchSchema
@@ -478,6 +482,82 @@ _outbox_forwarders: dict[tuple[str, str], _OutboxForwarderHandle] = {}
 _outbox_forwarder_lock = asyncio.Lock()
 
 
+@dataclass
+class _VerificationLoopHandle:
+    stop: asyncio.Event
+    wake: asyncio.Event
+    task: asyncio.Task[None]
+
+
+_verification_loops: dict[tuple[str, str], _VerificationLoopHandle] = {}
+_verification_loop_lock = asyncio.Lock()
+
+
+def _verification_executor_for(store: ProjectPlanStore) -> CandidateVerificationExecutor:
+    return CandidateVerificationExecutor(store)
+
+
+async def _ensure_verification_loop(
+    *,
+    store: ProjectPlanStore,
+    project_id: str,
+) -> _VerificationLoopHandle:
+    key = (str(store.project_root), project_id)
+    async with _verification_loop_lock:
+        current = _verification_loops.get(key)
+        if current is not None and not current.task.done():
+            return current
+        stop = asyncio.Event()
+        wake = asyncio.Event()
+        orchestrator = VerificationOrchestrator(
+            store,
+            _verification_executor_for(store),
+        )
+
+        async def run() -> None:
+            while not stop.is_set():
+                try:
+                    await orchestrator.recover()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    get_logging_facade().error_event(
+                        "verification_loop_failed",
+                        "retry",
+                        project_id=project_id,
+                        error_code=type(exc).__name__,
+                        detail={"reason": "verification_recovery_failed"},
+                    )
+                next_retry_at = orchestrator.next_retry_at()
+                delay = 1.0
+                if next_retry_at is not None:
+                    delay = min(delay, max(0.0, next_retry_at - time.time()))
+                if delay <= 0:
+                    await asyncio.sleep(0)
+                    continue
+                stop_wait = asyncio.create_task(stop.wait())
+                wake_wait = asyncio.create_task(wake.wait())
+                done, pending = await asyncio.wait(
+                    {stop_wait, wake_wait},
+                    timeout=delay,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                if wake_wait in done:
+                    wake.clear()
+
+        task = asyncio.create_task(
+            run(),
+            name=f"verification-loop:{project_id}",
+        )
+        handle = _VerificationLoopHandle(stop=stop, wake=wake, task=task)
+        _verification_loops[key] = handle
+        return handle
+
+
 async def _ensure_change_outbox_forwarder(
     *,
     project_path: str,
@@ -538,6 +618,9 @@ async def recover_project_runtime(
         store.overview()
     else:
         store.initialize(scan_if_created=False)
+    verification = VerificationOrchestrator(store, _verification_executor_for(store))
+    await verification.recover()
+    await _ensure_verification_loop(store=store, project_id=project_id)
     outbox = ChangeOutbox(root, project_id=project_id, facade=facade)
     outbox.recover()
     mailbox = PersistentMailbox(
@@ -675,6 +758,30 @@ async def shutdown_gateway_runtimes():
     registry = get_project_runtime_registry()
     await registry.begin_shutdown()
     failures: list[ProjectRuntimeStopFailure] = []
+    async with _verification_loop_lock:
+        verification_loops = list(_verification_loops.items())
+        _verification_loops.clear()
+    for _, handle in verification_loops:
+        handle.stop.set()
+        handle.wake.set()
+    if verification_loops:
+        loop_results = await asyncio.gather(
+            *(handle.task for _, handle in verification_loops),
+            return_exceptions=True,
+        )
+        for ((_, project_id), _), result in zip(
+            verification_loops,
+            loop_results,
+            strict=True,
+        ):
+            if isinstance(result, BaseException):
+                failures.append(
+                    ProjectRuntimeStopFailure(
+                        project_id,
+                        "verification_loop_stop_failed",
+                        type(result).__name__,
+                    )
+                )
     async with _outbox_forwarder_lock:
         forwarders = list(_outbox_forwarders.items())
         _outbox_forwarders.clear()
@@ -945,11 +1052,34 @@ class AgentGateway:
                         error_code=str(snapshot["error_code"]),
                         details=snapshot.get("detail") or {},
                     )
+                active_contract_row = store.get_active_test_contract(
+                    execution_node["id"]
+                )
+                test_contract = (
+                    None
+                    if active_contract_row is None
+                    else FrozenTestContract.from_dict(active_contract_row["snapshot"])
+                )
+                modification = store.get_modification_workflow(execution_node["id"])
+                formal_contract_active = bool(
+                    test_contract is not None
+                    and modification is not None
+                    and modification["state"]
+                    in {
+                        ModificationState.RED_VERIFYING.value,
+                        ModificationState.IMPLEMENTING.value,
+                    }
+                )
+                candidate_base_map_seq = (
+                    test_contract.map_seq
+                    if formal_contract_active and test_contract is not None
+                    else store.latest_change_seq()
+                )
                 candidate_service = CandidateExecutionService(session.project_path)
                 candidate_setup = candidate_service.prepare(
                     run_id=session_id,
                     node=execution_node,
-                    base_map_seq=store.latest_change_seq(),
+                    base_map_seq=candidate_base_map_seq,
                     readonly_files=readonly_files,
                     map_snapshot=snapshot,
                 )
@@ -966,13 +1096,30 @@ class AgentGateway:
                         "node_id": execution_node["id"],
                         "candidate_id": candidate_id,
                         "module_id": candidate_setup.module_id,
+                        "base_map_seq": candidate_base_map_seq,
                     },
                 )
-                approved_commands = TestCommandCompiler.compile_commands(
-                    test_commands=node_tests,
-                    test_entity_id=execution_node["id"],
-                    map_seq=store.latest_change_seq(),
+                red_verification = bool(
+                    test_contract is not None
+                    and modification is not None
+                    and modification["state"] == ModificationState.RED_VERIFYING.value
                 )
+                if red_verification and test_contract is not None:
+                    node_tests = [command.raw_command for command in test_contract.commands]
+                    required_command_ids = [
+                        command.command_id for command in test_contract.commands
+                    ]
+                    test_map_seq = test_contract.map_seq
+                else:
+                    approved_commands = TestCommandCompiler.compile_commands(
+                        test_commands=node_tests,
+                        test_entity_id=execution_node["id"],
+                        map_seq=candidate_base_map_seq,
+                    )
+                    required_command_ids = [
+                        command.command_id for command in approved_commands
+                    ]
+                    test_map_seq = candidate_base_map_seq
                 container_backend = get_shared_container_backend(session.project_path)
                 container_test_backend = ModuleContainerTestBackend(
                     container_backend,
@@ -982,8 +1129,10 @@ class AgentGateway:
                     candidate_rel=candidate_setup.workspace.candidate_rel,
                     test_entity_id=execution_node["id"],
                     required_commands=node_tests,
-                    required_command_ids=[cmd.command_id for cmd in approved_commands],
-                    map_seq=store.latest_change_seq(),
+                    required_command_ids=required_command_ids,
+                    map_seq=test_map_seq,
+                    test_contract=test_contract,
+                    red_verification=red_verification,
                 )
             context_node = execution_node or {
                 "id": "project-runtime",
@@ -1003,6 +1152,7 @@ class AgentGateway:
                 "run_id": session_id,
                 "node_id": context_node["id"],
                 "workspace_root": workspace_root,
+                "project_root": session.project_path,
                 "project_id": session.project_id,
                 "agent_id": f"session-{session_id}",
                 "generation": parent_generation,
@@ -1052,52 +1202,12 @@ class AgentGateway:
                         cursor=arguments.get("cursor"),
                         limit=limit,
                     )
+                if mode == "execution":
+                    wait_id = str(arguments.get("wait_id", "")).strip()
+                    if not wait_id:
+                        raise ValueError("wait_id is required")
+                    return store.read_execution(wait_id)
                 raise ValueError("Unsupported project map read mode")
-
-            async def read_code_map(arguments: dict) -> dict:
-                """Progressive code-map queries with budget enforcement."""
-                RuntimeRolePolicy.require(session.role, "read_code_map")
-                mode = str(arguments.get("mode", "neighbors"))
-                max_nodes = max(1, min(int(arguments.get("max_nodes", 50)), 200))
-                entity_id = str(arguments.get("entity_id", "")).strip()
-                seed_id = arguments.get("seed_id")
-                mapping_seed = None
-                if session.role == "mapping":
-                    if not seed_id:
-                        raise ConflictError(
-                            resource="map_blind_spot",
-                            message="Mapping queries require an open blind spot seed",
-                            error_code="blind_spot_seed_required",
-                        )
-                    mapping_seed = str(seed_id)
-                if mode == "node":
-                    return store.map_get_node(entity_id, mapping_seed=mapping_seed)
-                if mode == "neighbors":
-                    return store.map_neighbors(
-                        entity_id,
-                        kinds=arguments.get("kinds"),
-                        max_nodes=max_nodes,
-                        mapping_seed=mapping_seed,
-                    )
-                if mode == "subgraph":
-                    depth = max(0, min(int(arguments.get("depth", 1)), 5))
-                    return store.map_subgraph(
-                        entity_id,
-                        depth=depth,
-                        max_nodes=max_nodes,
-                        kinds=arguments.get("kinds"),
-                        mapping_seed=mapping_seed,
-                    )
-                if mode == "read_span":
-                    max_tokens = max(500, min(int(arguments.get("max_tokens", 8000)), 32000))
-                    return store.map_read_span(entity_id, max_tokens=max_tokens, mapping_seed=mapping_seed)
-                if mode == "blind_spots":
-                    return store.map_blind_spots(
-                        seed_id=str(seed_id) if seed_id else None,
-                        max_nodes=max_nodes,
-                        require_seed=session.role == "mapping",
-                    )
-                raise ValueError("Unsupported code map read mode")
 
             async def propose_semantic_annotation(arguments: dict) -> dict:
                 RuntimeRolePolicy.require(session.role, "propose_semantic_annotation")
@@ -1272,9 +1382,9 @@ class AgentGateway:
                 patch = PlanPatchSchema.model_validate(arguments)
                 return await PlanService.patch_current(db, session.project_id, patch)
 
-            async def select_node(arguments: dict) -> dict:
-                """Confirm this turn's node; tool input exits without changing its fixed sandbox."""
-                RuntimeRolePolicy.require(session.role, "select_node")
+            async def execute_plan_node(arguments: dict) -> dict:
+                """Create/reuse the fixed node's durable wait and return without awaiting work."""
+                RuntimeRolePolicy.require(session.role, "execute_plan_node")
                 requested_id = str(arguments.get("node_id", "")).strip()
                 if not requested_id:
                     raise ValueError("node_id is required")
@@ -1284,15 +1394,17 @@ class AgentGateway:
                         message="Cannot switch execution nodes during an active turn",
                         error_code="execution_node_switch_forbidden",
                     )
-                return execution_node
+                return store.create_node_execution(
+                    node_id=requested_id,
+                    owner_address=parent_address.to_uri(),
+                )
 
             runtime_tool_handlers = {
                 "read_project_map": read_project_map,
-                "read_code_map": read_code_map,
                 "propose_semantic_annotation": propose_semantic_annotation,
                 "dispatch_child_agent": dispatch_child_agent,
                 "patch_plan_nodes": patch_plan_nodes,
-                "select_node": select_node,
+                "execute_plan_node": execute_plan_node,
             }
             provider_config = AgentProviderFactory.get_config()
             parent_ready = asyncio.Event()
@@ -1350,15 +1462,51 @@ class AgentGateway:
                             await child_handle.task
                     finally:
                         await runtime_host.destroy(child_handle)
-            if candidate_setup is not None:
-                AgentGateway._persist_candidate_outcome(
-                    candidate_setup=candidate_setup,
-                    execution_node=execution_node,
-                    container_test_backend=container_test_backend,
-                    session_id=session_id,
-                    project_id=session.project_id,
-                    facade=facade,
-                )
+            if candidate_setup is not None and execution_node is not None:
+                workflow = ModificationWorkflow(store)
+                current = workflow.current(execution_node["id"])
+                if (
+                    current is not None
+                    and current["state"] == ModificationState.IMPLEMENTING.value
+                ):
+                    submitted = workflow.apply(
+                        execution_node["id"],
+                        event=ModificationEvent.SUBMITTED,
+                        event_id=f"candidate:{candidate_setup.candidate_id}:submitted",
+                        expected_revision=int(current["revision"]),
+                        payload={"candidate_id": candidate_setup.candidate_id},
+                    )
+                    verification_loop = await _ensure_verification_loop(
+                        store=store,
+                        project_id=session.project_id,
+                    )
+                    verification_loop.wake.set()
+                    facade.info_event(
+                        "candidate_submitted",
+                        "completed",
+                        session_id=session_id,
+                        detail={
+                            "project_id": session.project_id,
+                            "node_id": execution_node["id"],
+                            "candidate_id": candidate_setup.candidate_id,
+                            "revision": submitted["revision"],
+                        },
+                    )
+                else:
+                    facade.info_event(
+                        "candidate_submission_skipped",
+                        "skipped",
+                        session_id=session_id,
+                        error_code="candidate_workflow_not_implementing",
+                        detail={
+                            "project_id": session.project_id,
+                            "node_id": execution_node["id"],
+                            "candidate_id": candidate_setup.candidate_id,
+                            "workflow_state": (
+                                None if current is None else current["state"]
+                            ),
+                        },
+                    )
             facade.info_event(
                 "project_agent_turn",
                 "completed",
@@ -1376,16 +1524,6 @@ class AgentGateway:
             )
             return assistant
         except Exception as exc:
-            if candidate_setup is not None:
-                AgentGateway._persist_candidate_outcome(
-                    candidate_setup=candidate_setup,
-                    execution_node=execution_node,
-                    container_test_backend=container_test_backend,
-                    session_id=session_id,
-                    project_id=session.project_id,
-                    facade=facade,
-                    fallback_error_code=type(exc).__name__,
-                )
             facade.info_event(
                 "project_agent_turn",
                 "failed",
@@ -1396,72 +1534,4 @@ class AgentGateway:
                 detail={"project_id": session.project_id, "role": session.role},
             )
             raise
-
-    @staticmethod
-    def _persist_candidate_outcome(
-        *,
-        candidate_setup,
-        execution_node: dict | None,
-        container_test_backend: ModuleContainerTestBackend | None,
-        session_id: str,
-        project_id: str,
-        facade,
-        fallback_error_code: str | None = None,
-    ) -> None:
-        base_hashes = snapshot_directory_hashes(
-            candidate_setup.workspace.baseline_dir,
-            list(candidate_setup.request.write_set),
-        )
-        candidate_hashes = snapshot_directory_hashes(
-            candidate_setup.workspace.project_dir,
-            list(candidate_setup.request.write_set),
-        )
-        changed, patches = compute_patches(
-            base_hashes=base_hashes,
-            candidate_hashes=candidate_hashes,
-            write_set=list(candidate_setup.request.write_set),
-        )
-        evidence = container_test_backend.collect_evidence() if container_test_backend else None
-        if fallback_error_code:
-            status = "blocked"
-            error_code = fallback_error_code
-            event = "candidate_blocked"
-        elif evidence and evidence.all_required_passed and evidence.required_command_ids:
-            status = "ready"
-            error_code = None
-            event = "candidate_ready"
-        else:
-            status = "blocked"
-            error_code = (evidence.error_code if evidence else None) or "verification_incomplete"
-            event = "candidate_blocked"
-        container_info: dict = {}
-        if evidence and evidence.container_runs:
-            container_info = dict(evidence.container_runs[-1])
-        result = CandidateExecutionResult(
-            status=status,
-            changed_paths=tuple(changed),
-            patches=tuple(patches),
-            base_hashes=base_hashes,
-            candidate_hashes=candidate_hashes,
-            test_results=tuple(evidence.test_runs if evidence else ()),
-            container=container_info,
-            diagnostic_path=str(candidate_setup.workspace.diagnostics_dir),
-            error_code=error_code,
-            candidate_id=candidate_setup.candidate_id,
-            base_map_seq=candidate_setup.request.base_map_seq,
-            verification=evidence.to_dict() if evidence else None,
-        )
-        persist_result(result, candidate_setup.workspace.root)
-        facade.info_event(
-            event,
-            "completed" if status == "ready" else "failed",
-            session_id=session_id,
-            detail={
-                "project_id": project_id,
-                "node_id": execution_node["id"] if execution_node else None,
-                "candidate_id": candidate_setup.candidate_id,
-                "changed_count": len(changed),
-                "error_code": error_code,
-            },
-        )
 

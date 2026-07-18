@@ -630,7 +630,7 @@ async def test_module_test_backend_rejects_disallowed_command_before_runner() ->
         module_root="/tmp/m",
         candidate_rel="candidates/c1",
         test_entity_id="node-1",
-        required_commands=[allowed_cmd],
+        required_commands=["echo forbidden"],
         required_command_ids=[approved[0].command_id],
     )
     policy = SandboxPolicy.for_run(
@@ -640,7 +640,7 @@ async def test_module_test_backend_rejects_disallowed_command_before_runner() ->
         allowed_files=[],
         node_tests=[allowed_cmd],
     )
-    result = await backend.run_allowed_tests(["echo forbidden"], policy=policy)
+    result = await backend.run_authoritative_tests(policy=policy)
     assert result["status"] == "failed"
     assert result["error_code"] == "CommandPolicyError"
     mock_backend.run_tests_in_candidate.assert_not_called()
@@ -676,7 +676,7 @@ async def test_module_test_backend_rejects_unknown_pytest_path() -> None:
         module_root="/tmp/m",
         candidate_rel="candidates/c1",
         test_entity_id="node-1",
-        required_commands=[allowed_cmd],
+        required_commands=["python -m pytest tests/other.py -q"],
         required_command_ids=[approved[0].command_id],
     )
     policy = SandboxPolicy.for_run(
@@ -686,10 +686,7 @@ async def test_module_test_backend_rejects_unknown_pytest_path() -> None:
         allowed_files=[],
         node_tests=[allowed_cmd],
     )
-    result = await backend.run_allowed_tests(
-        ["python -m pytest tests/other.py -q"],
-        policy=policy,
-    )
+    result = await backend.run_authoritative_tests(policy=policy)
     assert result["status"] == "failed"
     assert result["error_code"] == "CommandPolicyError"
     mock_backend.run_tests_in_candidate.assert_not_called()

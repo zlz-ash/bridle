@@ -1,190 +1,51 @@
-"""SandboxedToolExecutor - policy-gated tools for one agent run."""
+"""Container-bound model tools for one agent run."""
 from __future__ import annotations
 
-import fnmatch
+import json
 import os
 import time
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
 
-from bridle.agent.runtime.change_outbox import (
-    AtomicPatchCommitter,
-    ChangeCorrelation,
-    ChangeOutbox,
-    ChangeOutboxError,
-)
 from bridle.agent.safety.sandbox_policy import SandboxPolicy
-from bridle.agent.tools.executor import Executor
-from bridle.agent.tools.proposal_path_validator import ProposalPathValidator
-from bridle.agent.tools.tdd_paths import is_test_path
-from bridle.agent.tools.test_command_policy import parse_command_argv
-from bridle.agent.tools.unified_diff import ValidationResult
 from bridle.logging.jsonl import log_event
 from bridle.observability import get_observability
 
-STDOUT_PREVIEW_LIMIT = 2048
-SANDBOX_ENV_ALLOWLIST = frozenset({
-    "COMSPEC",
-    "PATH",
-    "PATHEXT",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
-    "TEMP",
-    "TMP",
-    "WINDIR",
-})
-
-
-class TDDStateTracker:
-    """Single-node-run state for TDD enforcement on propose_file_patch.
-
-    Tracks whether the agent has (1) patched at least one test file and
-    (2) run the test command at least once with a failing result. Used by
-    ``SandboxedToolExecutor`` to refuse implementation-file patches before
-    those preconditions are met.
-
-    Scope: one tracker per ``SandboxedToolExecutor`` instance -i.e. per
-    Agent run. Cross-run state never leaks.
-    """
-
-    def __init__(self) -> None:
-        self.has_test_patch_applied: bool = False
-        self.has_red_test_run: bool = False
-        self.has_green_test_run: bool = False
-
-    def record_test_patch(self) -> None:
-        self.has_test_patch_applied = True
-
-    def record_test_run(self, *, all_passed: bool, any_failed: bool) -> None:
-        if any_failed:
-            self.has_red_test_run = True
-        if all_passed:
-            self.has_green_test_run = True
-
-    def disable_enforcement(self) -> None:
-        """Disable the TDD gate on this executor.
-
-        Two legitimate use cases:
-
-        1. **Trusted batch apply** (production) -when the backend stages a
-           proposal returned by the agent, the patch order is already final
-           and re-enforcing TDD here would reject ``src/`` patches just
-           because the staging executor never ran the tests itself.
-        2. **Test setup** -``pytest`` fixtures whose subject is unrelated
-           to the TDD gate (path validation, diff parsing, command policy)
-           don't need to re-enact the red-green ritual.
-
-        Both cases share the same mechanic: flip the preconditions to True.
-        """
-        self.has_test_patch_applied = True
-        self.has_red_test_run = True
-
-    # Backwards-compatible alias kept for existing tests that imported the
-    # previous name. New callers should prefer ``disable_enforcement``.
-    bypass_for_test_setup = disable_enforcement
-
 
 class SandboxedToolExecutor:
-    """Execute sandbox tools with audit logging."""
+    """Execute the minimal model tool set with structured audit logging."""
 
-    stdout_preview_limit = STDOUT_PREVIEW_LIMIT
-
-    def __init__(
-        self,
-        policy: SandboxPolicy,
-        *,
-        test_backend: Any | None = None,
-        project_id: str | None = None,
-        agent_id: str | None = None,
-        generation: int = 1,
-        trace_id: str | None = None,
-        formal_workspace: bool = False,
-    ) -> None:
+    def __init__(self, policy: SandboxPolicy, *, test_backend: Any | None = None) -> None:
         self.policy = policy
         self._test_backend = test_backend
-        runs_root = policy.workspace_root / ".bridle-runs"
-        self._executor = Executor(
-            workspace=str(policy.workspace_root),
-            runs_dir=str(runs_root),
-        )
-        self._env = _sandbox_env(policy)
-        self._staged_patches: dict[str, dict[str, str]] = {}
-        self._granted_files: set[str] = set()
-        self._access_records: list[dict[str, Any]] = []
-        self._access_dedupe: dict[str, dict[str, Any]] = {}
-        self._patch_committer: AtomicPatchCommitter | None = None
-        self._change_correlation: ChangeCorrelation | None = None
-        if formal_workspace:
-            resolved_project_id = project_id or policy.run_id
-            self._change_correlation = ChangeCorrelation(
-                trace_id=trace_id or f"patch-{policy.run_id}",
-                project_id=resolved_project_id,
-                agent_id=agent_id or policy.node_id,
-                generation=generation,
-            )
-            self._patch_committer = AtomicPatchCommitter(
-                ChangeOutbox(policy.workspace_root, project_id=resolved_project_id)
-            )
-        self.tdd_state = TDDStateTracker()
 
-    @property
-    def effective_policy(self) -> SandboxPolicy:
-        if self._granted_files:
-            return self.policy.with_granted_files(self._granted_files)
-        return self.policy
-
-    def consume_access_records(self) -> list[dict[str, Any]]:
-        records = list(self._access_records)
-        self._access_records.clear()
-        return records
-
-    async def read_allowed_file(self, path: str) -> dict[str, Any]:
-        return await self._tool_call(
-            "read_allowed_file",
-            {"path": path},
-            self._read_allowed_file_impl(path),
-        )
-
-    async def propose_file_patch(
+    async def run_command(
         self,
-        path: str,
-        diff: str,
-        change_type: str,
+        command: str,
+        *,
+        authority: str | None = None,
+        command_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._tool_call(
-            "propose_file_patch",
-            {"path": path, "change_type": change_type, "diff_len": len(diff)},
-            self._propose_file_patch_impl(path, diff, change_type),
+            "run_command",
+            {"command_length": len(command)},
+            self._run_command_impl(
+                command,
+                authority=authority,
+                command_id=command_id,
+            ),
         )
 
-    async def run_allowed_tests(self, commands: list[str]) -> dict[str, Any]:
-        return await self._tool_call(
-            "run_allowed_tests",
-            {"command_count": len(commands)},
-            self._run_allowed_tests_impl(commands),
-        )
-
-    async def report_blocked(self, reason: str, evidence: dict | None = None) -> dict[str, Any]:
+    async def report_blocked(
+        self,
+        reason: str,
+        evidence: dict | None = None,
+    ) -> dict[str, Any]:
         return await self._tool_call(
             "report_blocked",
             {"reason": reason},
             self._report_blocked_impl(reason, evidence),
-        )
-
-    async def grep_code(
-        self,
-        query: str,
-        *,
-        path_glob: str | None = None,
-        case_sensitive: bool = False,
-        max_results: int = 20,
-    ) -> dict[str, Any]:
-        return await self._tool_call(
-            "grep_code",
-            {"query_len": len(query), "path_glob": path_glob, "max_results": max_results},
-            self._grep_code_impl(query, path_glob=path_glob, case_sensitive=case_sensitive, max_results=max_results),
         )
 
     async def web_search(
@@ -201,7 +62,11 @@ class SandboxedToolExecutor:
                 "domain_count": len(allowed_domains) if allowed_domains else 0,
                 "max_results": max_results,
             },
-            self._web_search_impl(query, allowed_domains=allowed_domains, max_results=max_results),
+            self._web_search_impl(
+                query,
+                allowed_domains=allowed_domains,
+                max_results=max_results,
+            ),
         )
 
     async def _report_blocked_impl(
@@ -210,43 +75,6 @@ class SandboxedToolExecutor:
         evidence: dict | None,
     ) -> dict[str, Any]:
         return _completed({"reason": reason, "evidence": evidence or {}})
-
-    async def _grep_code_impl(
-        self,
-        query: str,
-        *,
-        path_glob: str | None = None,
-        case_sensitive: bool = False,
-        max_results: int = 20,
-    ) -> dict[str, Any]:
-        active = self.effective_policy
-        capped = min(max(1, max_results), 50)
-        matches: list[dict] = []
-        total_matches = 0
-        for rel_path in sorted(active.allowed_files):
-            if path_glob and not fnmatch.fnmatch(rel_path, path_glob):
-                continue
-            resolved = active.resolve_read_path(rel_path)
-            if resolved is None or not resolved.is_file():
-                continue
-            try:
-                content = resolved.read_text(encoding="utf-8", errors="strict")
-            except (UnicodeDecodeError, ValueError):
-                continue
-            if "\x00" in content:
-                continue
-            for line_no, line in enumerate(content.splitlines(), start=1):
-                hay = line if case_sensitive else line.lower()
-                needle = query if case_sensitive else query.lower()
-                if needle in hay:
-                    total_matches += 1
-                    if len(matches) < capped:
-                        preview = line[:200]
-                        matches.append({"path": rel_path, "line_number": line_no, "preview": preview})
-        result: dict[str, Any] = {"matches": matches, "total_matches": total_matches}
-        if total_matches > capped:
-            result["truncated"] = True
-        return _completed(result)
 
     async def _web_search_impl(
         self,
@@ -258,46 +86,66 @@ class SandboxedToolExecutor:
         if not self.policy.network_allowed:
             return _failed("NetworkDisabled", ["Network access is disabled in sandbox policy"])
         capped = min(max(1, max_results), 10)
-        proxy_url = os.environ.get("HTTPS_PROXY", os.environ.get("HTTP_PROXY", "http://127.0.0.1:7890"))
+        proxy_url = os.environ.get(
+            "HTTPS_PROXY",
+            os.environ.get("HTTP_PROXY", "http://127.0.0.1:7890"),
+        )
         try:
             encoded_query = urllib.parse.quote_plus(query)
-            url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_redirect=1"
-            proxy_handler = urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url})
+            url = (
+                "https://api.duckduckgo.com/"
+                f"?q={encoded_query}&format=json&no_redirect=1"
+            )
+            proxy_handler = urllib.request.ProxyHandler(
+                {"https": proxy_url, "http": proxy_url}
+            )
             opener = urllib.request.build_opener(proxy_handler)
-            req = urllib.request.Request(url, headers={"User-Agent": "BridleAgent/1.0"})
-            import json as _json
-            with opener.open(req, timeout=15) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-            data = _json.loads(body)
+            request = urllib.request.Request(
+                url,
+                headers={"User-Agent": "BridleAgent/1.0"},
+            )
+            with opener.open(request, timeout=15) as response:
+                body = response.read().decode("utf-8", errors="replace")
+            data = json.loads(body)
         except Exception as exc:
-            return _failed("WebSearchError", [f"Search request failed: {type(exc).__name__}"])
-        results: list[dict] = []
+            return _failed(
+                "WebSearchError",
+                [f"Search request failed: {type(exc).__name__}"],
+            )
+        results: list[dict[str, Any]] = []
         for item in data.get("RelatedTopics", []):
             if len(results) >= capped:
                 break
             if not isinstance(item, dict):
                 continue
-            title = item.get("Text", "")[:200]
-            url_val = item.get("FirstURL", "")
-            if not url_val:
+            title = str(item.get("Text", ""))[:200]
+            url_value = str(item.get("FirstURL", ""))
+            if not url_value:
                 continue
-            from urllib.parse import urlparse as _urlparse
-            domain = _urlparse(url_val).netloc
+            domain = urllib.parse.urlparse(url_value).netloc
             if allowed_domains and domain not in allowed_domains:
                 continue
-            results.append({"title": title, "url": url_val, "snippet": title[:150], "domain": domain})
-        abstract = data.get("Abstract", "")
-        abstract_url = data.get("AbstractURL", "")
-        if abstract and abstract_url and len(results) < capped:
-            from urllib.parse import urlparse as _urlparse
-            domain = _urlparse(abstract_url).netloc
-            if not allowed_domains or domain in allowed_domains:
-                results.append({
-                    "title": abstract[:200],
-                    "url": abstract_url,
-                    "snippet": abstract[:150],
+            results.append(
+                {
+                    "title": title,
+                    "url": url_value,
+                    "snippet": title[:150],
                     "domain": domain,
-                })
+                }
+            )
+        abstract = str(data.get("Abstract", ""))
+        abstract_url = str(data.get("AbstractURL", ""))
+        if abstract and abstract_url and len(results) < capped:
+            domain = urllib.parse.urlparse(abstract_url).netloc
+            if not allowed_domains or domain in allowed_domains:
+                results.append(
+                    {
+                        "title": abstract[:200],
+                        "url": abstract_url,
+                        "snippet": abstract[:150],
+                        "domain": domain,
+                    }
+                )
         return _completed({"search_results": results, "result_count": len(results)})
 
     async def _tool_call(
@@ -330,16 +178,15 @@ class SandboxedToolExecutor:
                     "exit_code": result.get("exit_code"),
                 },
             )
-            # Full-fidelity upload -pass complete tool input + tool result
-            # (not the summary projection) so Langfuse shows the real argument
-            # values and tool output that the agent received.
             get_observability().record_tool_call(
                 tool_name=tool_name,
                 input_summary=dict(input_summary),
                 output_summary=dict(result),
                 duration_ms=duration_ms,
                 status=status,
-                error_code=str(result.get("error_code")) if result.get("error_code") else None,
+                error_code=(
+                    str(result.get("error_code")) if result.get("error_code") else None
+                ),
                 metadata={"run_id": self.policy.run_id, "node_id": self.policy.node_id},
             )
             result["duration_ms"] = duration_ms
@@ -372,452 +219,38 @@ class SandboxedToolExecutor:
                 "duration_ms": duration_ms,
             }
 
-    async def _read_allowed_file_impl(self, path: str) -> dict[str, Any]:
-        errors = self.effective_policy.validate_read_path(path)
-        if errors:
-            return _failed("PathBoundaryError", errors)
-        resolved = self.effective_policy.resolve_read_path(path)
-        if resolved is None or not resolved.is_file():
-            return _failed("FileNotFound", [f"File not found: {path}"])
-        content = resolved.read_text(encoding="utf-8", errors="replace")
-        return _completed({"path": path, "content": content, "size": len(content)})
-
-    async def _propose_file_patch_impl(
+    async def _run_command_impl(
         self,
-        path: str,
-        diff: str,
-        change_type: str,
-    ) -> dict[str, Any]:
-        if change_type not in ("modify", "add", "remove"):
-            return _failed("InvalidChangeType", [f"Unsupported change_type: {change_type}"])
-
-        # TDD enforcement -refuse to patch implementation files until the
-        # agent has (a) patched at least one test file and (b) run the tests
-        # to confirm a RED state. The error messages are written as next-step
-        # instructions because deepseek tool-calling self-corrects from them.
-        target_is_test = is_test_path(path)
-        if not target_is_test:
-            if not self.tdd_state.has_test_patch_applied:
-                return _failed(
-                    "TDD_TEST_REQUIRED_FIRST",
-                    [
-                        "Cannot patch implementation file before writing tests. "
-                        "Workflow: (1) propose_file_patch a test file under "
-                        "tests/ first; (2) run_allowed_tests to confirm it "
-                        "fails (RED); (3) only then propose_file_patch the "
-                        "implementation file. Switch your next call to a "
-                        "tests/ path."
-                    ],
-                )
-            if not self.tdd_state.has_red_test_run:
-                return _failed(
-                    "TDD_RED_REQUIRED",
-                    [
-                        "Cannot patch implementation file yet. You have "
-                        "written tests but have not confirmed they actually "
-                        "fail. Call run_allowed_tests now; you must see at "
-                        "least one failing test before implementing. If "
-                        "tests already pass without the implementation, your "
-                        "tests are not covering the new behaviour -revise "
-                        "the test file first."
-                    ],
-                )
-
-        access_event: dict[str, Any] | None = None
-        policy = self.effective_policy
-        errors = policy.validate_patch_path(path)
-        if errors:
-            only_not_allowed = (
-                len(errors) == 1 and "not in allowed_files" in errors[0]
-            )
-            if only_not_allowed:
-                access_event = self._attempt_file_access_grant(
-                    path,
-                    change_type=change_type,
-                    reason="propose_file_patch",
-                )
-                if access_event and access_event.get("status") == "auto_approved":
-                    policy = self.effective_policy
-                    errors = policy.validate_patch_path(path)
-                elif access_event and access_event.get("status") == "pending_manual":
-                    return _failed(
-                        "AccessRequestRequired",
-                        [str(access_event.get("decision_reason", "Manual approval required"))],
-                        access_request=access_event,
-                    )
-            if errors:
-                return _failed("PathBoundaryError", errors)
-
-        from bridle.agent.tools.unified_diff import validate_patch_for_path
-        resolved = policy.resolve_read_path(path)
-        file_exists = resolved is not None and resolved.is_file()
-        original_text = None
-        if file_exists:
-            original_text = resolved.read_text(encoding="utf-8", errors="replace")
-        validation = validate_patch_for_path(
-            path, change_type, diff,
-            original_text=original_text, file_exists=file_exists,
-        )
-        if not validation.valid:
-            messages = [validation.error]
-            if validation.recovery_hint:
-                messages.append(f"recovery_hint: {validation.recovery_hint}")
-            return _failed("InvalidDiff", messages)
-        norm = ProposalPathValidator.normalize_workspace_relative(path)
-        apply_error = self._apply_patch_to_workspace(norm, change_type, validation, policy)
-        if apply_error is not None:
-            return apply_error
-        patch = {
-            "path": norm,
-            "change_type": change_type,
-            "diff": diff,
-            "applied": True,
-            "staged": True,
-        }
-        self._staged_patches[norm] = {
-            "path": norm,
-            "change_type": change_type,
-            "diff": diff,
-        }
-        if target_is_test:
-            self.tdd_state.record_test_patch()
-        result_payload: dict[str, Any] = {
-            "patch": patch,
-            "patch_staged": True,
-            "patch_applied": True,
-            "applied_path": norm,
-            "sandbox_workspace": str(self.policy.workspace_root),
-            "sandbox_inputs": self._sandbox_inputs_snapshot(policy),
-        }
-        if access_event is not None:
-            result_payload["access_request"] = access_event
-        if validation.dry_run is not None:
-            dr = validation.dry_run
-            result_payload["dry_run"] = {
-                "valid": dr.valid,
-                "hunk_count": dr.hunk_count,
-                "added_lines": dr.added_lines,
-                "removed_lines": dr.removed_lines,
-            }
-        log_event(
-            "sandbox_patch_applied",
-            "completed",
-            run_id=self.policy.run_id,
-            node_id=self.policy.node_id,
-            detail={
-                "applied_path": norm,
-                "change_type": change_type,
-                "sandbox_workspace": str(self.policy.workspace_root),
-                "sandbox_input_count": len(result_payload["sandbox_inputs"]),
-            },
-        )
-        return _completed(result_payload)
-
-    def _attempt_file_access_grant(
-        self,
-        path: str,
+        command: str,
         *,
-        change_type: str,
-        reason: str,
-    ) -> dict[str, Any] | None:
-        from bridle.agent.tools.file_access_request import evaluate_file_access
-
-        decision = evaluate_file_access(
-            path,
-            workspace_root=self.policy.workspace_root,
-            allowed_files=self.effective_policy.allowed_files,
-        )
-        dedupe_key = f"{decision.normalized_path}:{decision.risk_level}"
-        if dedupe_key in self._access_dedupe:
-            return self._access_dedupe[dedupe_key]
-
-        status = "auto_approved" if decision.auto_approve else "pending_manual"
-        record = decision.to_request_payload(
-            change_type=change_type,
-            reason=reason,
-            evidence={},
-            node_id=self.policy.node_id,
-            run_id=self.policy.run_id,
-            status=status,
-        )
-        self._access_dedupe[dedupe_key] = record
-        self._access_records.append(record)
-        action = (
-            "sandbox_file_access_auto_approved"
-            if decision.auto_approve
-            else "sandbox_file_access_pending_manual"
-        )
-        log_event(
-            action,
-            status,
-            run_id=self.policy.run_id,
-            node_id=self.policy.node_id,
-            detail={
-                "requested_path": decision.requested_path,
-                "normalized_path": decision.normalized_path,
-                "risk_level": decision.risk_level,
-            },
-        )
-        if decision.auto_approve:
-            self._granted_files.add(decision.normalized_path)
-        return record
-
-    def _resolve_patch_target(self, norm_path: str, policy: SandboxPolicy | None = None) -> Path | None:
-        active = policy or self.effective_policy
-        errors = active.validate_patch_path(norm_path)
-        if errors:
-            return None
-        parts = norm_path.split("/")
-        return self.policy.workspace_root.joinpath(*parts)
-
-    def _sandbox_inputs_snapshot(self, policy: SandboxPolicy | None = None) -> list[str]:
-        active = policy or self.effective_policy
-        present: set[str] = set()
-        for rel in active.allowed_files:
-            target = self._resolve_patch_target(rel, active)
-            if target is not None and target.is_file():
-                present.add(rel)
-        return sorted(present)
-
-    def _apply_patch_to_workspace(
-        self,
-        norm_path: str,
-        change_type: str,
-        validation: ValidationResult,
-        policy: SandboxPolicy | None = None,
-    ) -> dict[str, Any] | None:
-        target = self._resolve_patch_target(norm_path, policy)
-        if target is None:
-            return _failed("PatchApplyError", [f"Cannot resolve sandbox path: {norm_path}"])
-        dry_run = validation.dry_run
-        if dry_run is None or not dry_run.valid:
-            return _failed("PatchApplyError", ["Patch validation missing dry-run result"])
-        if self._patch_committer is not None and self._change_correlation is not None:
-            try:
-                result = self._patch_committer.commit(
-                    norm_path,
-                    change_type=change_type,  # type: ignore[arg-type]
-                    new_text=None if change_type == "remove" else dry_run.new_text,
-                    correlation=self._change_correlation,
-                )
-            except ChangeOutboxError as exc:
-                return _failed("PatchApplyError", [exc.error_code])
-            if result.status != "ready":
-                return _failed(
-                    "PatchApplyError",
-                    [result.error_code or result.status],
-                )
-            return None
-        try:
-            if change_type == "remove":
-                if target.is_file():
-                    target.unlink()
-                return None
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(dry_run.new_text, encoding="utf-8")
-            return None
-        except OSError as exc:
-            return _failed("PatchApplyError", [f"Failed to apply patch to sandbox: {exc}"])
-
-    async def _run_allowed_tests_impl(self, commands: list[str]) -> dict[str, Any]:
-        results: list[dict] = []
-        for cmd in commands:
-            policy_errors = self.policy.validate_test_command(cmd)
-            if policy_errors:
-                log_event(
-                    "sandbox_command_rejected",
-                    "rejected",
-                    run_id=self.policy.run_id,
-                    node_id=self.policy.node_id,
-                    detail={
-                        "command": cmd,
-                        "errors": policy_errors,
-                        "cwd": str(self.policy.workspace_root),
-                    },
-                )
-                results.append({
-                    "command": cmd,
-                    "policy_rejected": True,
-                    "errors": policy_errors,
-                    "exit_code": None,
-                    "stdout_preview": "",
-                    "stderr_preview": "",
-                })
-                self.tdd_state.record_test_run(all_passed=False, any_failed=True)
-                return _failed("CommandPolicyError", policy_errors, results=results)
-
-        if self._test_backend is not None:
-            raw = await self._test_backend.run_allowed_tests(commands, policy=self.policy)
-            results = raw.get("results") or []
-            if raw.get("status") != "completed":
-                any_failed = True
-                all_passed = False
-                self.tdd_state.record_test_run(all_passed=all_passed, any_failed=any_failed)
-                failed: dict[str, Any] = {
-                    "status": "failed",
-                    "error_code": raw.get("error_code") or "TestCommandFailed",
-                    "results": results,
-                }
-                if raw.get("retryable"):
-                    failed["retryable"] = True
-                    failed["next_action"] = "patch_code_then_rerun_tests"
-                return failed
-            self.tdd_state.record_test_run(all_passed=True, any_failed=False)
-            return _completed({"results": results})
-
-        results: list[dict] = []
-        for cmd in commands:
-            policy_errors = self.policy.validate_test_command(cmd)
-            if policy_errors:
-                log_event(
-                    "sandbox_command_rejected",
-                    "rejected",
-                    run_id=self.policy.run_id,
-                    node_id=self.policy.node_id,
-                    detail={
-                        "command": cmd,
-                        "errors": policy_errors,
-                        "cwd": str(self.policy.workspace_root),
-                    },
-                )
-                results.append({
-                    "command": cmd,
-                    "policy_rejected": True,
-                    "errors": policy_errors,
-                    "exit_code": None,
-                    "stdout_preview": "",
-                    "stderr_preview": "",
-                })
-                return _failed("CommandPolicyError", policy_errors, results=results)
-
-            if _is_python_test_command(cmd):
-                exec_result = await self._executor.run_python_command(
-                    cmd,
-                    run_id=self.policy.run_id,
-                    timeout_seconds=self.policy.command_timeout_seconds,
-                    env=self._env,
-                )
-            else:
-                exec_result = await self._executor.run_command(
-                    cmd,
-                    run_id=self.policy.run_id,
-                    timeout_seconds=self.policy.command_timeout_seconds,
-                    env=self._env,
-                )
-            results.append({
-                "command": cmd,
-                "policy_rejected": False,
-                "exit_code": exec_result.get("exit_code"),
-                "duration_ms": exec_result.get("duration_ms"),
-                "stdout_preview": _preview(exec_result.get("stdout", "")),
-                "stderr_preview": _preview(exec_result.get("stderr", "")),
-                "stdout_path": exec_result.get("stdout_path"),
-                "stderr_path": exec_result.get("stderr_path"),
-                "timed_out": exec_result.get("timed_out", False),
-            })
-            if exec_result.get("exit_code") != 0 or exec_result.get("timed_out"):
-                # Mark RED for the TDD gate even on timeout -the agent has
-                # demonstrated the failing-test signal it needs to proceed.
-                self.tdd_state.record_test_run(all_passed=False, any_failed=True)
-                failed_result: dict[str, Any] = {
-                    "status": "failed",
-                    "error_code": "TestCommandFailed",
-                    "results": results,
-                }
-                if exec_result.get("timed_out"):
-                    failed_result["timed_out"] = True
-                    failed_result["error_code"] = "TestCommandTimeout"
-                else:
-                    failed_result["retryable"] = True
-                    failed_result["next_action"] = "patch_code_then_rerun_tests"
-                return failed_result
-        # All commands passed ->GREEN.
-        self.tdd_state.record_test_run(all_passed=True, any_failed=False)
-        return _completed({"results": results})
-
-
-def _preview(text: str) -> str:
-    if len(text) <= STDOUT_PREVIEW_LIMIT:
-        return text
-    return text[:STDOUT_PREVIEW_LIMIT] + "\n...[truncated]"
-
-
-def _find_venv_scripts_dir(start: Path) -> Path | None:
-    current = start.resolve()
-    for _ in range(12):
-        scripts = current / ".venv" / "Scripts"
-        if scripts.is_dir():
-            return scripts
-        if current.parent == current:
-            break
-        current = current.parent
-    return None
-
-
-def _sandbox_env(policy: SandboxPolicy) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for key in SANDBOX_ENV_ALLOWLIST:
-        value = os.environ.get(key)
-        if value:
-            env[key] = value
-
-    venv_scripts = _find_venv_scripts_dir(policy.workspace_root)
-    if venv_scripts is not None:
-        existing = env.get("PATH", "")
-        env["PATH"] = str(venv_scripts) + (os.pathsep + existing if existing else "")
-
-    tmp_dir = policy.workspace_root / ".bridle" / "tmp" / policy.run_id
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    env["TEMP"] = str(tmp_dir)
-    env["TMP"] = str(tmp_dir)
-    return env
-
-
-def sandbox_results_to_command_results(result: dict[str, Any]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
-    for item in result.get("results", []) or []:
-        stdout = item.get("stdout_preview", "")
-        stderr = item.get("stderr_preview", "")
-        converted.append({
-            "exit_code": item.get("exit_code") if item.get("exit_code") is not None else -1,
-            "duration_ms": item.get("duration_ms", 0),
-            "stdout": stdout,
-            "stderr": stderr,
-            "stdout_path": item.get("stdout_path"),
-            "stderr_path": item.get("stderr_path"),
-            "policy_rejected": item.get("policy_rejected", False),
-            "timed_out": item.get("timed_out", False),
-        })
-    return converted
-
-
-def _is_python_test_command(command: str) -> bool:
-    try:
-        parsed = parse_command_argv(command)
-    except ValueError:
-        return False
-    return parsed.argv[0].lower() in {"python", "pytest"}
+        authority: str | None,
+        command_id: str | None,
+    ) -> dict[str, Any]:
+        if authority is not None or command_id is not None:
+            return {
+                "status": "failed",
+                "authority": "exploratory",
+                "error_code": "exploratory_authority_fixed",
+            }
+        if not command.strip():
+            return {
+                "status": "failed",
+                "authority": "exploratory",
+                "error_code": "command_required",
+            }
+        if self._test_backend is None:
+            return {
+                "status": "failed",
+                "authority": "exploratory",
+                "error_code": "container_backend_required",
+            }
+        raw = await self._test_backend.run_command(command, policy=self.policy)
+        return {**raw, "authority": "exploratory"}
 
 
 def _completed(payload: dict) -> dict[str, Any]:
     return {"status": "completed", **payload}
 
 
-def _failed(
-    error_code: str,
-    errors: list[str],
-    *,
-    results: list | None = None,
-    access_request: dict | None = None,
-) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "status": "failed",
-        "error_code": error_code,
-        "errors": errors,
-    }
-    if results is not None:
-        out["results"] = results
-    if access_request is not None:
-        out["access_request"] = access_request
-    return out
-
+def _failed(error_code: str, errors: list[str]) -> dict[str, Any]:
+    return {"status": "failed", "error_code": error_code, "errors": errors}

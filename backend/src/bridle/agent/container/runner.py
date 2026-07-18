@@ -284,6 +284,7 @@ class FakeContainerRunner:
                 child_env[key] = str(value)
             child_env["BRIDLE_SLOT_ROOT"] = str(request.module_mount_root)
             child_env["BRIDLE_TASK_TIMEOUT"] = str(timeout_seconds)
+            child_env["BRIDLE_FAKE_CONTAINER_RUNNER"] = "1"
             child_env["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.run(
                 [sys.executable, "-m", "bridle.agent.container.entrypoint", "--run-task"],

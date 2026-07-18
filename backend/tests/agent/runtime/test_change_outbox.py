@@ -693,14 +693,13 @@ def test_existing_outbox_schema_migrates_next_retry_column(test_workspace: Path)
 
 
 def test_formal_write_entry_inventory_is_bound_to_actual_executor_source() -> None:
-    from bridle.agent.tools.sandboxed_executor import SandboxedToolExecutor
-
     inventory = formal_write_entry_inventory()
-    source = inspect.getsource(SandboxedToolExecutor._apply_patch_to_workspace)
-    assert inventory["direct_mutation_methods"] == ["_apply_patch_to_workspace"]
-    assert inventory["boundary_callers"] == ["_propose_file_patch_impl"]
-    assert "self._patch_committer.commit(" in source
-    assert "if self._patch_committer is not None" in source
+    source = inspect.getsource(change_outbox_module.AtomicPatchCommitter.commit_many)
+    assert inventory["formal_entries"] == ["AtomicPatchCommitter.commit_many"]
+    assert inventory["required_committer"] == "AtomicPatchCommitter"
+    assert inventory["direct_mutation_methods"] == ["commit_many"]
+    assert "Publish one candidate change set" in source
+    assert "os.replace" in source
     assert inventory["source_sha256"] == change_outbox_module.hashlib.sha256(
         source.encode("utf-8")
     ).hexdigest()

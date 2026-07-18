@@ -92,7 +92,7 @@ def test_grant_hash_is_stable_for_normalized_input() -> None:
             _scope("workspace_path", "read", path="src/a.py"),
             _scope("plan_operation", "read", operation="overview"),
         ),
-        tool_grants=(ToolGrant("read_plan"), ToolGrant("read_code_map")),
+        tool_grants=(ToolGrant("read_plan"), ToolGrant("read_project_map")),
         skill_grants=(SkillGrant("testing", frozenset({"testing.python"})),),
         budget_grant=BudgetGrant(1, 5, 30.0),
     )
@@ -124,7 +124,7 @@ def test_subgrant_cannot_expand_any_scope() -> None:
         identity=_identity(),
         policy_version="v1",
         resource_scopes=(_scope("workspace_path", "read", "write", path="src"),),
-        tool_grants=(ToolGrant("read_plan"), ToolGrant("propose_file_patch")),
+        tool_grants=(ToolGrant("read_plan"), ToolGrant("execute_plan_node")),
         skill_grants=(
             SkillGrant("testing", frozenset({"testing.python", "testing.general"})),
         ),
@@ -151,7 +151,7 @@ def test_subgrant_cannot_expand_any_scope() -> None:
             parent,
             identity=child_identity,
             resource_scopes=(_scope("workspace_path", "read", path="outside.py"),),
-            tool_grants=(ToolGrant("run_allowed_tests"),),
+            tool_grants=(ToolGrant("run_command"),),
             skill_grants=(SkillGrant("review", frozenset({"review.general"})),),
             budget_grant=BudgetGrant(3, 11, 61.0),
         )
@@ -294,7 +294,7 @@ def test_each_subgrant_escalation_dimension_is_rejected(dimension: str) -> None:
         scopes[3] = replace(scopes[3], attributes=(("subject_run_id", "subject-2"),))
         arguments["resource_scopes"] = tuple(scopes)
     elif dimension == "tool_id":
-        arguments["tool_grants"] = (ToolGrant("run_allowed_tests"),)
+        arguments["tool_grants"] = (ToolGrant("run_command"),)
     elif dimension == "tool_action":
         arguments["tool_grants"] = (
             ToolGrant("read_plan", frozenset({"execute", "cancel"})),
@@ -394,7 +394,7 @@ def test_grant_hash_changes_for_each_effective_field(field_name: str) -> None:
     elif field_name == "scope_attribute":
         scope = replace(scope, attributes=(("path", "src/b.py"),))
     elif field_name == "tool_id":
-        tool = replace(tool, tool_id="read_code_map")
+        tool = replace(tool, tool_id="read_project_map")
     elif field_name == "tool_action":
         tool = replace(tool, actions=frozenset({"discover"}))
     elif field_name == "skill_id":

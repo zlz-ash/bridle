@@ -118,8 +118,8 @@ class TestDeepSeekAgentProvider:
                             "id": "call_1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
-                                "arguments": json.dumps({"path": "src/a.py"}),
+                                "name": "report_blocked",
+                                "arguments": json.dumps({"reason": "test-only completed call"}),
                             },
                         }],
                     },
@@ -173,7 +173,7 @@ class TestDeepSeekAgentProvider:
                         "id": "c",
                         "type": "function",
                         "function": {
-                            "name": "read_allowed_file",
+                            "name": "run_command",
                             "arguments": json.dumps({"path": "src/a.py"}),
                         },
                     }],
@@ -201,7 +201,7 @@ class TestDeepSeekAgentProvider:
         assert call_count == 1
         assert exc.value.error_code == "tool_budget_exhausted"
         last = exc.value.response_debug.get("last_tool_call") or {}
-        assert last.get("tool_name") == "read_allowed_file"
+        assert last.get("tool_name") == "run_command"
         assert "src/a.py" in (last.get("args_summary") or "")
 
     @pytest.mark.asyncio
@@ -219,7 +219,7 @@ class TestDeepSeekAgentProvider:
                             "id": "c1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({
                                     "path": "src/a.py",
                                     "API_KEY": "secret-value",
@@ -230,7 +230,7 @@ class TestDeepSeekAgentProvider:
                             "id": "c2",
                             "type": "function",
                             "function": {
-                                "name": "grep_code",
+                                "name": "web_search",
                                 "arguments": json.dumps({"query": "test"}),
                             },
                         },
@@ -255,7 +255,7 @@ class TestDeepSeekAgentProvider:
         with pytest.raises(DeepSeekProviderError) as exc:
             await provider.generate(_ctx(test_workspace))
         last = exc.value.response_debug.get("last_tool_call") or {}
-        assert last.get("tool_name") == "read_allowed_file"
+        assert last.get("tool_name") == "run_command"
         summary = last.get("args_summary") or ""
         assert "secret-value" not in summary
         assert "API_KEY" in summary or "***" in summary
@@ -271,7 +271,7 @@ class TestDeepSeekAgentProvider:
                         "id": "c",
                         "type": "function",
                         "function": {
-                            "name": "read_allowed_file",
+                            "name": "run_command",
                             "arguments": json.dumps({"path": "src/a.py"}),
                         },
                     }],
@@ -308,7 +308,7 @@ class TestDeepSeekAgentProvider:
                             "id": "c1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({"path": "src/a.py"}),
                             },
                         },
@@ -316,7 +316,7 @@ class TestDeepSeekAgentProvider:
                             "id": "c2",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({"path": "src/a.py"}),
                             },
                         },
@@ -358,7 +358,7 @@ class TestDeepSeekAgentProvider:
                         "id": "c",
                         "type": "function",
                         "function": {
-                            "name": "read_allowed_file",
+                            "name": "run_command",
                             "arguments": json.dumps({"path": "src/a.py"}),
                         },
                     }],
@@ -501,7 +501,7 @@ class TestToolCircuitBreaker:
                             "id": "call_1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({"path": "../secret.py"}),
                             },
                         }],
@@ -630,8 +630,8 @@ class TestToolCircuitBreaker:
                             "id": "call_success",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
-                                "arguments": json.dumps({"path": "src/a.py"}),
+                                "name": "report_blocked",
+                                "arguments": json.dumps({"reason": "test-only completed call"}),
                             },
                         }],
                     },
@@ -689,7 +689,7 @@ class TestToolCircuitBreaker:
                                 "id": f"call_{call_count}",
                                 "type": "function",
                                 "function": {
-                                    "name": "read_allowed_file",
+                                    "name": "run_command",
                                     "arguments": json.dumps({"path": "../secret.py"}),
                                 },
                             }],
@@ -717,8 +717,8 @@ class TestToolCircuitBreaker:
         tracker = ToolCallTracker()
         args = {"path": "../secret.py"}
         result1 = {"status": "failed", "error_code": "PathBoundaryError", "category": "policy", "retryable": False}
-        tracker.record_result("read_allowed_file", args, result1)
-        circuit = tracker.should_circuit_open("read_allowed_file", args)
+        tracker.record_result("run_command", args, result1)
+        circuit = tracker.should_circuit_open("run_command", args)
         assert circuit is not None
         assert circuit["error_code"] == "tool_circuit_open"
         assert circuit["consecutive_failures"] == 1
@@ -732,8 +732,8 @@ class TestToolCircuitBreaker:
         args1 = {"path": "../secret.py"}
         args2 = {"path": "src/a.py"}
         result1 = {"status": "failed", "error_code": "PathBoundaryError", "category": "policy", "retryable": False}
-        tracker.record_result("read_allowed_file", args1, result1)
-        circuit = tracker.should_circuit_open("read_allowed_file", args2)
+        tracker.record_result("run_command", args1, result1)
+        circuit = tracker.should_circuit_open("run_command", args2)
         assert circuit is None
 
     @pytest.mark.asyncio
@@ -752,7 +752,7 @@ class TestToolCircuitBreaker:
         assert circuit["error_code"] == "tool_circuit_open"
 
     @pytest.mark.asyncio
-    async def test_run_allowed_tests_retryable_allows_second_attempt(self, test_workspace: Path) -> None:
+    async def test_run_command_retryable_allows_second_attempt(self, test_workspace: Path) -> None:
         from bridle.agent.providers.deepseek_agent_provider import ToolCallTracker
 
         tracker = ToolCallTracker()
@@ -763,11 +763,11 @@ class TestToolCircuitBreaker:
             "category": "test_failure",
             "retryable": True,
         }
-        tracker.record_result("run_allowed_tests", args, fail)
-        assert tracker.should_circuit_open("run_allowed_tests", args) is None
+        tracker.record_result("run_command", args, fail)
+        assert tracker.should_circuit_open("run_command", args) is None
 
     @pytest.mark.asyncio
-    async def test_run_allowed_tests_circuit_opens_at_test_command_max(
+    async def test_run_command_circuit_opens_at_test_command_max(
         self,
         test_workspace: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -783,10 +783,10 @@ class TestToolCircuitBreaker:
             "category": "test_failure",
             "retryable": True,
         }
-        tracker.record_result("run_allowed_tests", args, fail)
-        assert tracker.should_circuit_open("run_allowed_tests", args) is None
-        tracker.record_result("run_allowed_tests", args, fail)
-        circuit = tracker.should_circuit_open("run_allowed_tests", args)
+        tracker.record_result("run_command", args, fail)
+        assert tracker.should_circuit_open("run_command", args) is None
+        tracker.record_result("run_command", args, fail)
+        circuit = tracker.should_circuit_open("run_command", args)
         assert circuit is not None
         assert circuit["error_code"] == "tool_circuit_open"
 
@@ -797,10 +797,10 @@ class TestToolCircuitBreaker:
         tracker = ToolCallTracker()
         args = {"path": "../secret.py"}
         fail = {"status": "failed", "error_code": "PathBoundaryError", "category": "policy", "retryable": False}
-        tracker.record_result("read_allowed_file", args, fail)
+        tracker.record_result("run_command", args, fail)
         success = {"status": "completed", "category": "success", "retryable": False}
-        tracker.record_result("read_allowed_file", args, success)
-        circuit = tracker.should_circuit_open("read_allowed_file", args)
+        tracker.record_result("run_command", args, success)
+        circuit = tracker.should_circuit_open("run_command", args)
         assert circuit is None
 
     @pytest.mark.asyncio
@@ -886,7 +886,7 @@ class TestReasoningContentInToolLoop:
                             "id": "call_1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({"path": "src/a.py"}),
                             },
                         }],
@@ -952,7 +952,7 @@ class TestReasoningContentInToolLoop:
                             "id": "call_1",
                             "type": "function",
                             "function": {
-                                "name": "read_allowed_file",
+                                "name": "run_command",
                                 "arguments": json.dumps({"path": "src/a.py"}),
                             },
                         }],

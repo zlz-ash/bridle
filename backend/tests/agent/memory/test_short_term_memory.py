@@ -123,8 +123,8 @@ class TestToolResultSummarizer:
             "status": "completed",
             "content": "file content here with lots of code " * 20,
         })
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
-        assert summary["tool_name"] == "read_allowed_file"
+        summary = ToolResultSummarizer.summarize("run_command", raw)
+        assert summary["tool_name"] == "run_command"
         assert summary["status"] == "completed"
         assert "content" not in summary or len(str(summary.get("result_summary", ""))) < len(raw)
         assert "file content here" not in json.dumps(summary)
@@ -134,7 +134,7 @@ class TestToolResultSummarizer:
             "status": "completed",
             "results": [{"command": "pytest", "exit_code": 0, "stdout": "long output " * 50, "stderr": ""}],
         })
-        summary = ToolResultSummarizer.summarize("run_allowed_tests", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         assert summary["status"] == "completed"
         assert "stdout" not in json.dumps(summary)
         assert "stderr" not in json.dumps(summary)
@@ -146,26 +146,26 @@ class TestToolResultSummarizer:
 
     def test_summarize_failed_result(self) -> None:
         raw = json.dumps({"status": "failed", "error_code": "path_not_allowed", "message": "Access denied"})
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         assert summary["status"] == "failed"
         assert summary.get("error_code") == "path_not_allowed"
 
     def test_summary_no_path_parameter(self) -> None:
         raw = json.dumps({"status": "completed", "content": "data", "path": "/secret/file.py"})
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         dumped = json.dumps(summary)
         assert "/secret/file.py" not in dumped
         assert "path" not in summary
 
     def test_summary_no_stdout_stderr(self) -> None:
         raw = json.dumps({"status": "completed", "stdout": "leaked", "stderr": "also leaked"})
-        summary = ToolResultSummarizer.summarize("run_allowed_tests", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         dumped = json.dumps(summary)
         assert "leaked" not in dumped
 
     def test_summary_no_file_full_content(self) -> None:
         raw = json.dumps({"status": "completed", "content": "import os\nimport sys\n" * 100})
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         dumped = json.dumps(summary)
         assert "import os" not in dumped
 
@@ -192,14 +192,14 @@ class TestToolResultSummarizerLogEvents:
 
         caplog.set_level(logging.INFO, logger="bridle")
         raw = json.dumps({"status": "completed", "content": "x" * 500})
-        ToolResultSummarizer.summarize("read_allowed_file", raw)
+        ToolResultSummarizer.summarize("run_command", raw)
         events = [
             r for r in caplog.records
             if getattr(r, "action", None) == "tool_result_summarized"
         ]
         assert len(events) == 1
         detail = getattr(events[0], "detail", {})
-        assert detail.get("tool_name") == "read_allowed_file"
+        assert detail.get("tool_name") == "run_command"
         assert "stdout" not in json.dumps(detail)
         assert "stderr" not in json.dumps(detail)
         assert "content" not in detail
@@ -214,9 +214,9 @@ class TestRecentWindowToolResultSanitization:
             "path": "src/secret.py",
         })
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
             {"role": "assistant", "content": "saw the file"},
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ] + [{"role": "assistant", "content": f"msg_{i}_" + "y" * 30} for i in range(10)]
         result = mem.compact(msgs)
         for m in result:
@@ -224,7 +224,7 @@ class TestRecentWindowToolResultSanitization:
             assert "import os" not in dumped
             assert "src/secret.py" not in dumped
 
-    def test_read_allowed_file_large_output_sanitized_in_recent(self) -> None:
+    def test_run_command_large_output_sanitized_in_recent(self) -> None:
         mem = ShortTermMemory(budget=150, recent_window=2)
         big_content = json.dumps({
             "status": "completed",
@@ -232,8 +232,8 @@ class TestRecentWindowToolResultSanitization:
             "path": "src/big_file.py",
         })
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": big_content},
-            {"role": "tool", "name": "read_allowed_file", "content": big_content},
+            {"role": "tool", "name": "run_command", "content": big_content},
+            {"role": "tool", "name": "run_command", "content": big_content},
         ]
         result = mem.compact(msgs)
         for m in result:
@@ -241,15 +241,15 @@ class TestRecentWindowToolResultSanitization:
             assert "x" * 100 not in dumped
             assert "src/big_file.py" not in dumped
 
-    def test_run_allowed_tests_stdout_sanitized_in_recent(self) -> None:
+    def test_run_command_stdout_sanitized_in_recent(self) -> None:
         mem = ShortTermMemory(budget=150, recent_window=2)
         test_result = json.dumps({
             "status": "completed",
             "results": [{"command": "pytest", "exit_code": 0, "stdout": "PASSED " * 200, "stderr": ""}],
         })
         msgs = [
-            {"role": "tool", "name": "run_allowed_tests", "content": test_result},
-            {"role": "tool", "name": "run_allowed_tests", "content": test_result},
+            {"role": "tool", "name": "run_command", "content": test_result},
+            {"role": "tool", "name": "run_command", "content": test_result},
         ]
         result = mem.compact(msgs)
         for m in result:
@@ -263,49 +263,49 @@ class TestToolSummaryStructureWithToolName:
         mem = ShortTermMemory(budget=150, recent_window=2)
         tool_result = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ] + [{"role": "assistant", "content": f"msg_{i}_" + "y" * 30} for i in range(10)]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
         for tm in tool_msgs:
             content = tm.get("content", "")
-            assert "unknown" not in content or "read_allowed_file" in content or "run_allowed_tests" in content
+            assert "unknown" not in content or "run_command" in content or "run_command" in content
 
-    def test_read_allowed_file_summary_has_tool_name_and_purpose(self) -> None:
+    def test_run_command_summary_has_tool_name_and_purpose(self) -> None:
         mem = ShortTermMemory(budget=150, recent_window=2)
         tool_result = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
         for tm in tool_msgs:
             content = tm.get("content", "")
-            assert "read_allowed_file" in content
+            assert "run_command" in content
             assert "Read file content" in content
 
-    def test_run_allowed_tests_summary_has_tool_name_and_purpose(self) -> None:
+    def test_run_command_summary_has_tool_name_and_purpose(self) -> None:
         mem = ShortTermMemory(budget=150, recent_window=2)
         tool_result = json.dumps({"status": "completed", "results": [{"stdout": "x" * 200}]})
         msgs = [
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_result},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
         for tm in tool_msgs:
             content = tm.get("content", "")
-            assert "run_allowed_tests" in content
-            assert "Run test commands" in content
+            assert "run_command" in content
+            assert "Run an exploratory candidate-container command" in content
 
     def test_failed_tool_summary_has_error_code(self) -> None:
         mem = ShortTermMemory(budget=150, recent_window=2)
         tool_result = json.dumps({"status": "failed", "error_code": "path_not_allowed"})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -317,8 +317,8 @@ class TestToolSummaryStructureWithToolName:
         mem = ShortTermMemory(budget=150, recent_window=2)
         tool_result = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_result},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
+            {"role": "tool", "name": "run_command", "content": tool_result},
         ]
         result = mem.compact(msgs)
         for m in result:
@@ -423,8 +423,8 @@ class TestToolSummaryFieldsPreservedUnderSmallBudget:
         mem = ShortTermMemory(budget=300, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -441,8 +441,8 @@ class TestToolSummaryFieldsPreservedUnderSmallBudget:
         tool_failed = json.dumps({"status": "failed", "error_code": "path_not_allowed"})
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_failed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_failed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -460,7 +460,7 @@ class TestToolResultSummarizerCategoryRetryable:
             "category": "policy",
             "retryable": False,
         })
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         assert summary["category"] == "policy"
         assert summary["retryable"] is False
 
@@ -471,7 +471,7 @@ class TestToolResultSummarizerCategoryRetryable:
             "retryable": False,
             "content": "x" * 500,
         })
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         assert summary["category"] == "success"
         assert summary["retryable"] is False
 
@@ -482,7 +482,7 @@ class TestToolResultSummarizerCategoryRetryable:
             "category": "policy",
             "retryable": False,
         })
-        summary = ToolResultSummarizer.summarize("read_allowed_file", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         formatted = ToolResultSummarizer.format_summary(summary)
         assert "category=policy" in formatted
         assert "retryable=False" in formatted
@@ -494,7 +494,7 @@ class TestToolResultSummarizerCategoryRetryable:
             "category": "runtime_timeout",
             "retryable": True,
         })
-        summary = ToolResultSummarizer.summarize("run_allowed_tests", raw)
+        summary = ToolResultSummarizer.summarize("run_command", raw)
         assert summary["category"] == "runtime_timeout"
         assert summary["retryable"] is True
 
@@ -504,8 +504,8 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -517,8 +517,8 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -534,7 +534,7 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_failed = json.dumps({"status": "failed", "error_code": "path_not_allowed"})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_failed},
+            {"role": "tool", "name": "run_command", "content": tool_failed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -548,8 +548,8 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         compacted_msgs = [
@@ -572,7 +572,7 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=50, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -582,8 +582,8 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         for m in result:
@@ -598,21 +598,21 @@ class TestAtLeastOneToolSummaryRetained:
         mem = ShortTermMemory(budget=80, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
         ]
         result = mem.compact(msgs)
         for m in result:
             content = str(m.get("content", ""))
             assert "unknown_completed" not in content
 
-    def test_read_allowed_file_and_run_allowed_tests_fields(self) -> None:
+    def test_run_command_and_run_command_fields(self) -> None:
         mem = ShortTermMemory(budget=400, recent_window=4)
         tool_completed = json.dumps({"status": "completed", "content": "x" * 500})
         tool_failed = json.dumps({"status": "failed", "error_code": "path_not_allowed"})
         msgs = [
-            {"role": "tool", "name": "read_allowed_file", "content": tool_completed},
-            {"role": "tool", "name": "run_allowed_tests", "content": tool_completed},
-            {"role": "tool", "name": "read_allowed_file", "content": tool_failed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_completed},
+            {"role": "tool", "name": "run_command", "content": tool_failed},
         ]
         result = mem.compact(msgs)
         tool_msgs = [m for m in result if m.get("role") == "tool"]

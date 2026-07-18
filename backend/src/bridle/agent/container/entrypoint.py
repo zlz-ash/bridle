@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -83,15 +84,38 @@ def _load_request_manifest(diagnostics_dir: Path) -> dict[str, Any]:
     return payload
 
 
-def _run_argv(argv: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
-    argv = [str(x) for x in argv]
-    if argv and argv[0] == "python":
-        argv[0] = sys.executable
+def _run_argv(
+    argv: list[str],
+    *,
+    cwd: Path,
+    timeout_seconds: int,
+    pytest_result_path: Path | None = None,
+) -> dict[str, Any]:
+    original_argv = [str(x) for x in argv]
+    executed_argv = list(original_argv)
+    fake_host_argv = (
+        os.name == "nt"
+        and os.environ.get("BRIDLE_FAKE_CONTAINER_RUNNER") == "1"
+        and len(executed_argv) == 3
+        and executed_argv[:2] == ["bash", "-lc"]
+    )
+    if fake_host_argv:
+        executed_argv = shlex.split(executed_argv[2], posix=True)
+    if executed_argv and executed_argv[0] == "python":
+        executed_argv[0] = sys.executable
+    is_pytest = _is_pytest_argv(executed_argv)
+    env = None
+    if is_pytest and pytest_result_path is not None:
+        pytest_result_path.unlink(missing_ok=True)
+        executed_argv.extend(["-p", "bridle.agent.container.pytest_result_plugin"])
+        env = dict(os.environ)
+        env["BRIDLE_PYTEST_RESULT_PATH"] = str(pytest_result_path)
+        env["BRIDLE_PYTEST_PROJECT_ROOT"] = str(cwd)
     started = time.monotonic()
     started_at = time.time()
     try:
         result = subprocess.run(
-            argv,
+            executed_argv,
             shell=False,
             cwd=cwd,
             capture_output=True,
@@ -99,11 +123,13 @@ def _run_argv(argv: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, 
             timeout=timeout_seconds,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         stdout, stdout_trunc = _truncate(result.stdout or "")
         stderr, stderr_trunc = _truncate(result.stderr or "")
-        return {
-            "argv": argv,
+        payload = {
+            "argv": original_argv,
+            "execution_adapter": "windows_fake_host_argv" if fake_host_argv else None,
             "exit_code": result.returncode,
             "stdout": stdout,
             "stderr": stderr,
@@ -114,11 +140,14 @@ def _run_argv(argv: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, 
             "finished_at": time.time(),
             "timed_out": False,
         }
+        if is_pytest:
+            payload.update(_load_pytest_result(pytest_result_path))
+        return payload
     except subprocess.TimeoutExpired as exc:
         stdout, stdout_trunc = _truncate(_as_text(exc.stdout))
         stderr, stderr_trunc = _truncate(_as_text(exc.stderr))
         return {
-            "argv": argv,
+            "argv": original_argv,
             "exit_code": -1,
             "stdout": stdout,
             "stderr": stderr or f"Command timed out after {timeout_seconds}s",
@@ -128,7 +157,54 @@ def _run_argv(argv: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, 
             "started_at": started_at,
             "finished_at": time.time(),
             "timed_out": True,
+            **(_load_pytest_result(pytest_result_path) if is_pytest else {}),
         }
+
+
+def _is_pytest_argv(argv: list[str]) -> bool:
+    if not argv:
+        return False
+    executable = Path(argv[0]).name.lower()
+    if executable in {"pytest", "pytest.exe"}:
+        return True
+    return (
+        executable in {"python", "python.exe"}
+        and len(argv) >= 3
+        and argv[1] == "-m"
+        and argv[2].lower() == "pytest"
+    )
+
+
+def _load_pytest_result(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.is_file():
+        return {
+            "case_results": [],
+            "collection_errors": [
+                {"node_id": "", "message": "pytest_observer_result_missing"}
+            ],
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "case_results": [],
+            "collection_errors": [
+                {"node_id": "", "message": "pytest_observer_result_invalid"}
+            ],
+        }
+    if payload.get("schema") != "bridle.pytest_case_results/v1":
+        return {
+            "case_results": [],
+            "collection_errors": [
+                {"node_id": "", "message": "pytest_observer_schema_invalid"}
+            ],
+        }
+    return {
+        "case_results": [dict(item) for item in payload.get("case_results") or []],
+        "collection_errors": [
+            dict(item) for item in payload.get("collection_errors") or []
+        ],
+    }
 
 
 def run_active_slot_task(
@@ -242,6 +318,7 @@ def _run_task_at_layout(
 
     results: list[dict[str, Any]] = []
     exit_code = 0
+    red_verification = request.get("red_verification") is True
     allowed_ids = {cmd.get("command_id") for cmd in request.get("commands") or []}
     for cmd in request.get("commands") or []:
         command_id = cmd.get("command_id")
@@ -253,13 +330,19 @@ def _run_task_at_layout(
                 exit_code=3,
                 results=results,
             )
-        result = _run_argv(argv, cwd=cwd, timeout_seconds=timeout_seconds)
+        result = _run_argv(
+            argv,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            pytest_result_path=layout.output / f"pytest-{command_id}.json",
+        )
         result["command_id"] = command_id
         result["raw_command"] = cmd.get("raw_command", " ".join(argv))
         results.append(result)
         if result["exit_code"] != 0 or result.get("timed_out"):
             exit_code = int(result["exit_code"]) if result["exit_code"] is not None else -1
-            break
+            if result.get("timed_out") or not red_verification:
+                break
 
     baseline_after = _scan_tree(baseline_dir)
     mocks_after = _scan_tree(mocks_dir)

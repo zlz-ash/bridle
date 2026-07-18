@@ -11,8 +11,16 @@ from sqlalchemy import func, select
 
 import bridle.agent.runtime.gateway as gateway_module
 import bridle.logging.facade as logging_facade_module
+from bridle.agent.container.boundary import compute_boundary_fingerprint
+from bridle.agent.container.candidate_service import CandidateExecutionService
+from bridle.agent.container.container_service import configure_runner
+from bridle.agent.container.image_identity import resolve_image_identity
 from bridle.agent.providers.agent_provider import AgentProviderFactory
 from bridle.agent.runtime.mailbox import MailboxResult
+from bridle.agent.runtime.modification_workflow import (
+    ModificationState,
+    ModificationWorkflow,
+)
 from bridle.agent.runtime.project_registry import reset_project_runtime_registry_for_tests
 from bridle.agent.runtime.schemas import AgentProposalSchema
 from bridle.features.project_map.store import ProjectPlanStore
@@ -21,6 +29,11 @@ from bridle.logging.schema import LogEvent
 from bridle.models.agent_runtime import (
     AgentRuntimeRecord,
     RuntimeInputResultRecord,
+)
+from tests.helpers.verification_fixtures import (
+    PassingStructuredRunner,
+    advance_to_implementing,
+    freeze_contract_for_candidate_identity,
 )
 
 
@@ -80,6 +93,14 @@ class _CaptureProvider:
                 await self._handlers["dispatch_child_agent"](
                     {"node_id": "child-node", "target_role": "mapping"}
                 )
+            )
+        else:
+            candidate_root = Path(
+                context.tool_capabilities["sandbox"]["workspace_root"]
+            )
+            (candidate_root / "src" / "example.py").write_text(
+                "VALUE = 1\n",
+                encoding="utf-8",
             )
         return AgentProposalSchema(summary=f"reply-{len(self._captured)}")
 
@@ -155,8 +176,13 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
     db,
     test_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Converse across roles; project/session inputs exit with continuous shared runtime context."""
+    caplog.set_level(
+        "INFO",
+        logger="bridle.agent.runtime.verification_orchestrator",
+    )
     root = test_workspace / "unified-runtime"
     root.mkdir()
     example = root / "src" / "example.py"
@@ -181,9 +207,9 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
         handlers = kwargs["runtime_tool_handlers"]
         assert set(handlers) == {
             "read_project_map",
-            "read_code_map",
+            "read_project_map",
             "patch_plan_nodes",
-            "select_node",
+            "execute_plan_node",
             "propose_semantic_annotation",
             "dispatch_child_agent",
         }
@@ -195,6 +221,30 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
         f"/api/v1/sessions/{session['id']}/converse",
         json={"content": "plan the change"},
     )
+    assert first.status_code == 201
+    store = ProjectPlanStore(root, project_id=project["id"])
+    snapshot = store.module_execution_snapshot("planned-node")
+    workflow = ModificationWorkflow(store)
+    contract = freeze_contract_for_candidate_identity(
+        workflow,
+        "planned-node",
+        project_root=root,
+        test_commands=list(snapshot["test_commands"]),
+        test_paths=[item["path"] for item in snapshot["test_entities"]],
+        map_seq=store.latest_change_seq(),
+        boundary_fingerprint=compute_boundary_fingerprint(
+            module_id=str(snapshot["module_id"]),
+            implementation_entities=list(snapshot["implementation_entities"]),
+            test_entities=list(snapshot["test_entities"]),
+            interfaces=list(snapshot.get("interfaces") or []),
+            readonly_files=[],
+            test_dir=snapshot.get("test_dir"),
+        ),
+        image_version=resolve_image_identity(CandidateExecutionService.DEFAULT_IMAGE),
+    )
+    advance_to_implementing(workflow, "planned-node", contract)
+    runner = PassingStructuredRunner(root)
+    configure_runner(root, runner)
     changed = await client.post(
         f"/api/v1/sessions/{session['id']}/role",
         json={"role": "executing", "actor": "user", "confirmed": True},
@@ -205,19 +255,12 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
         f"/api/v1/sessions/{session['id']}/converse",
         json={"content": "execute the next node", "node_id": "planned-node"},
     )
-    assert first.status_code == 201
     assert changed.status_code == 200
     assert second.status_code == 201, second.text
-    history = await client.get(f"/api/v1/sessions/{session['id']}/messages")
-    overview = await client.get(f"/api/v1/projects/{project['id']}/map/overview")
-    node = await client.get(f"/api/v1/projects/{project['id']}/map/nodes/planned-node")
 
     assert first.json()["content"] == "reply-1"
     assert changed.json()["role"] == "executing"
     assert second.json()["content"] == "reply-2"
-    assert [message["role"] for message in history.json()] == [
-        "user", "assistant", "user", "assistant",
-    ]
     assert captured[0].accessible_context["memory"][-1]["content"] == "plan the change"
     assert any(
         message["content"] == "reply-1"
@@ -237,6 +280,9 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
     assert sandbox["candidate_id"] is not None
     assert Path(sandbox["workspace_root"]).name == "project"
     assert "candidates" in sandbox["workspace_root"]
+    assert (Path(sandbox["workspace_root"]) / "src" / "example.py").read_text(
+        encoding="utf-8"
+    ) == "VALUE = 1\n"
     assert _hash_file(example) == formal_hash_before
     parent_count = int(
         (
@@ -291,13 +337,75 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
         root / ".bridle" / "runtime" / "modules" / module_id / "candidates" / sandbox["candidate_id"]
     )
     assert candidate_root.is_dir()
-    assert (candidate_root / "result.json").is_file()
-    result_payload = json.loads((candidate_root / "result.json").read_text(encoding="utf-8"))
+    result_path = candidate_root / "result.json"
+    for _ in range(300):
+        current = ModificationWorkflow(
+            ProjectPlanStore.open_existing(root)
+        ).get("planned-node")
+        result_payload = (
+            json.loads(result_path.read_text(encoding="utf-8"))
+            if result_path.is_file()
+            else None
+        )
+        if (
+            current["state"] == ModificationState.READY_TO_PUBLISH.value
+            and result_payload is not None
+            and result_payload["status"] == "ready"
+        ):
+            break
+        await asyncio.sleep(0.01)
+    assert current["state"] == ModificationState.READY_TO_PUBLISH.value
+    assert result_payload is not None
     assert result_payload["candidate_id"] == sandbox["candidate_id"]
-    assert result_payload["status"] == "blocked"
-    assert result_payload["error_code"] == "verification_incomplete"
-    assert result_payload.get("verification") is not None
-    assert result_payload["verification"]["all_required_passed"] is False
+    assert result_payload["status"] == "ready"
+    assert result_payload["error_code"] is None
+    assert result_payload["verification"]["status"] == "passed"
+    assert len(runner.executions) == 1
+    submitted_events = [
+        item
+        for item in workflow.events("planned-node")
+        if item["event"] == "submitted"
+    ]
+    assert len(submitted_events) == 1
+    assert submitted_events[0]["payload"]["candidate_id"] == sandbox["candidate_id"]
+    assert (
+        submitted_events[0]["payload"]["test_contract_version"]
+        == contract.contract_version
+    )
+    assert list(
+        (root / ".bridle" / "runtime" / "modules").rglob("result.json")
+    ) == [result_path]
+    verification_run = store.latest_verification_run("planned-node")
+    assert verification_run is not None
+    assert verification_run["candidate_id"] == sandbox["candidate_id"]
+    assert verification_run["phase"] == "final"
+    assert verification_run["state"] == "completed"
+    assert verification_run["outcome"]["event"] == "final_verification_passed"
+    assert verification_run["outcome"]["status"] == "passed"
+    assert result_payload["verification"]["run_id"] == verification_run["run_id"]
+    result_logs = [
+        record
+        for record in caplog.records
+        if getattr(record, "action", None) == "candidate_result_persisted"
+    ]
+    assert len(result_logs) == 1
+    assert result_logs[0].detail == {
+        "run_id": verification_run["run_id"],
+        "node_id": "planned-node",
+        "candidate_id": sandbox["candidate_id"],
+        "attempt": 1,
+        "status": "ready",
+        "duration_ms": result_payload["verification"]["duration_ms"],
+        "error_code": None,
+    }
+    history = await client.get(f"/api/v1/sessions/{session['id']}/messages")
+    overview = await client.get(f"/api/v1/projects/{project['id']}/map/overview")
+    node = await client.get(
+        f"/api/v1/projects/{project['id']}/map/nodes/planned-node"
+    )
+    assert [message["role"] for message in history.json()] == [
+        "user", "assistant", "user", "assistant",
+    ]
     assert captured[0].tool_capabilities["sandbox"].get("candidate_id") is None
     assert overview.json()["plan_node_count"] == 2
     assert node.json()["status"] == "running"
@@ -1318,7 +1426,7 @@ async def test_successful_provider_ack_failure_settles_once(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ack_failure_status", ["busy", "lost_lease"])
-async def test_executing_provider_error_persists_blocked_result(
+async def test_executing_provider_error_does_not_persist_candidate_result(
     client,
     test_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1429,12 +1537,10 @@ async def test_executing_provider_error_persists_blocked_result(
     candidate_roots = [
         path
         for path in (root / ".bridle" / "runtime" / "modules").rglob("candidates/*")
-        if path.is_dir() and (path / "result.json").is_file()
+        if path.is_dir()
     ]
     assert candidate_roots
-    result_payload = json.loads((candidate_roots[0] / "result.json").read_text(encoding="utf-8"))
-    assert result_payload["status"] == "blocked"
-    assert result_payload["error_code"] == "RuntimeError"
+    assert all(not (path / "result.json").exists() for path in candidate_roots)
     assert failed_ack_attempts == 1
     await asyncio.sleep(1.1)
     continued = await asyncio.wait_for(

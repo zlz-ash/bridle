@@ -66,7 +66,7 @@ class ToolCallTracker:
         last_retryable = state.get("last_retryable", False)
         last_error_code = state.get("last_error_code", "")
         timeout_errors = {"TestCommandTimeout", "WebSearchTimeout"}
-        if tool_name == "run_allowed_tests" and last_retryable:
+        if tool_name == "run_command" and last_retryable:
             max_failures = self._test_command_max
         elif last_error_code in timeout_errors:
             max_failures = self._timeout_max

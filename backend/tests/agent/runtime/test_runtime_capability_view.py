@@ -106,7 +106,7 @@ async def test_runtime_uses_immutable_generation_capability_view_without_per_cal
         "unknown_capability"
     )
     assert handle.capabilities.get_skill("missing")["error_code"] == "unknown_capability"
-    tool_registry._runtime_handlers["select_node"] = hidden
+    tool_registry._runtime_handlers["execute_plan_node"] = hidden
     skill_registry._skills["visible-skill"] = SkillDefinition(
         id="visible-skill",
         name="Mutated",

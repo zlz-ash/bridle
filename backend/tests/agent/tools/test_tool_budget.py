@@ -21,9 +21,9 @@ class TestToolBudgetTracker:
             ToolBudgetLimits(max_rounds=100, max_tool_calls=2, max_wall_seconds=300.0)
         )
         assert tracker.check_before_tool_call() is None
-        tracker.record_tool_call(tool_name="read_allowed_file", args_summary="path=src/a.py")
+        tracker.record_tool_call(tool_name="run_command", args_summary="path=src/a.py")
         assert tracker.check_before_tool_call() is None
-        tracker.record_tool_call(tool_name="grep_code", args_summary="query=test")
+        tracker.record_tool_call(tool_name="web_search", args_summary="query=test")
         assert tracker.check_before_tool_call() == "tool_calls"
         assert tracker.usage.tool_calls_used == 2
 
@@ -31,13 +31,13 @@ class TestToolBudgetTracker:
         tracker = ToolBudgetTracker(
             ToolBudgetLimits(max_rounds=8, max_tool_calls=8, max_wall_seconds=300.0)
         )
-        tracker.record_tool_call(tool_name="read_allowed_file", args_summary="path=src/a.py")
+        tracker.record_tool_call(tool_name="run_command", args_summary="path=src/a.py")
         tracker.record_tool_call(
-            tool_name="run_allowed_tests",
+            tool_name="run_command",
             args_summary="commands=['pytest']",
         )
         assert tracker.last_tool_call is not None
-        assert tracker.last_tool_call["tool_name"] == "run_allowed_tests"
+        assert tracker.last_tool_call["tool_name"] == "run_command"
 
 
 class TestBudgetForNodeMinutes:

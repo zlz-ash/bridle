@@ -9,17 +9,12 @@ RuntimeRole = Literal["planning", "executing", "mapping", "sidecar"]
 
 _SHARED_TOOL_RULES: dict[str, frozenset[RuntimeRole]] = {
     "read_project_map": frozenset({"planning", "executing", "mapping", "sidecar"}),
-    "read_code_map": frozenset({"planning", "executing", "mapping", "sidecar"}),
-    "read_workspace_file": frozenset({"planning", "executing", "mapping", "sidecar"}),
-    "search_code": frozenset({"planning", "executing", "mapping", "sidecar"}),
     "patch_plan_nodes": frozenset({"planning"}),
-    "propose_file_patch": frozenset({"executing"}),
     "propose_semantic_annotation": frozenset({"mapping"}),
     "dispatch_child_agent": frozenset({"planning"}),
-    "run_allowed_tests": frozenset({"executing"}),
-    "select_node": frozenset({"executing"}),
+    "run_command": frozenset({"executing"}),
+    "execute_plan_node": frozenset({"executing"}),
     "report_blocked": frozenset({"planning", "executing", "mapping"}),
-    "child_agent_result_summary": frozenset({"sidecar"}),
 }
 
 

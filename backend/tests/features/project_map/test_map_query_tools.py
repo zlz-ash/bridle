@@ -31,17 +31,17 @@ def _open_seed(store: ProjectPlanStore) -> str:
     return spots[0]["id"]
 
 
-def test_mapping_role_rejects_propose_file_patch() -> None:
+def test_mapping_role_rejects_execute_plan_node() -> None:
     with pytest.raises(ForbiddenError) as error:
-        RuntimeRolePolicy.require("mapping", "propose_file_patch")
+        RuntimeRolePolicy.require("mapping", "execute_plan_node")
     assert error.value.api_error.code == "role_capability_denied"
 
 
 def test_mapping_manifest_allows_annotation_not_code_patch() -> None:
     manifest = RuntimeRolePolicy.manifest("mapping")
     assert manifest["propose_semantic_annotation"]["allowed"] is True
-    assert manifest["propose_file_patch"]["allowed"] is False
-    assert manifest["read_code_map"]["allowed"] is True
+    assert manifest["execute_plan_node"]["allowed"] is False
+    assert manifest["read_project_map"]["allowed"] is True
 
 
 def test_map_query_requires_blind_spot_seed_for_mapping(test_workspace: Path) -> None:

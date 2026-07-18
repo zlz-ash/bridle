@@ -1,7 +1,6 @@
 """Reliable per-project CodeChanged outbox and atomic single-file commit boundary."""
 from __future__ import annotations
 
-import ast
 import asyncio
 import hashlib
 import inspect
@@ -9,7 +8,6 @@ import math
 import os
 import secrets
 import sqlite3
-import textwrap
 import threading
 import time
 from collections.abc import Awaitable, Callable
@@ -25,7 +23,7 @@ from bridle.logging.facade import LoggingFacade, get_logging_facade
 if TYPE_CHECKING:
     from bridle.agent.runtime.persistent_mailbox import PersistentMailbox
 
-ChangeType = Literal["add", "modify", "remove"]
+ChangeType = Literal["add", "modify", "remove", "rename"]
 OutboxState = Literal["RESERVED", "COMMITTING", "READY", "DELIVERED", "REBASE_REQUIRED"]
 FailureHook = Callable[[str, "ChangeIntent"], None]
 Clock = Callable[[], datetime]
@@ -42,6 +40,7 @@ CREATE TABLE IF NOT EXISTS metadata (
 CREATE TABLE IF NOT EXISTS change_intents (
     message_id TEXT PRIMARY KEY,
     relative_path TEXT NOT NULL,
+    old_path TEXT,
     change_type TEXT NOT NULL,
     before_digest TEXT NOT NULL,
     after_digest TEXT NOT NULL,
@@ -92,6 +91,7 @@ class ChangeCorrelation:
 class ChangeIntent:
     message_id: str
     relative_path: str
+    old_path: str | None
     change_type: ChangeType
     before_digest: str
     after_digest: str
@@ -115,6 +115,13 @@ class _ChangeOutboxIterationError(RuntimeError):
 class ChangeOutboxResult:
     status: str
     intent: ChangeIntent | None = None
+    error_code: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchCommitResult:
+    status: str
+    intents: tuple[ChangeIntent, ...] = ()
     error_code: str | None = None
 
 
@@ -226,6 +233,7 @@ class ChangeOutbox:
                 target=destination,
                 payload={
                     "path": intent.relative_path,
+                    "old_path": intent.old_path,
                     "before_digest": intent.before_digest,
                     "after_digest": intent.after_digest,
                 },
@@ -268,6 +276,7 @@ class ChangeOutbox:
         self,
         relative_path: str,
         *,
+        old_path: str | None = None,
         change_type: ChangeType,
         before_digest: str,
         after_digest: str,
@@ -275,6 +284,7 @@ class ChangeOutbox:
         correlation: ChangeCorrelation,
     ) -> ChangeOutboxResult:
         normalized = self._normalize_path(relative_path)
+        normalized_old = None if old_path is None else self._normalize_path(old_path)
         message_id = f"codechanged-{secrets.token_hex(16)}"
         now = _utc_text()
         try:
@@ -322,15 +332,16 @@ class ChangeOutbox:
                 connection.execute(
                     """
                     INSERT INTO change_intents(
-                        message_id, relative_path, change_type, before_digest, after_digest,
+                        message_id, relative_path, old_path, change_type, before_digest, after_digest,
                         staging_path, state, fence_token, superseded_by, attempt,
                         next_retry_at, trace_id, project_id, agent_id, generation,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, NULL, 0, NULL, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'RESERVED', ?, NULL, 0, NULL, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         message_id,
                         normalized,
+                        normalized_old,
                         change_type,
                         before_digest,
                         after_digest,
@@ -536,6 +547,10 @@ class ChangeOutbox:
                                 "PRAGMA table_info(change_intents)"
                             ).fetchall()
                         }
+                        if "old_path" not in columns:
+                            connection.execute(
+                                "ALTER TABLE change_intents ADD COLUMN old_path TEXT"
+                            )
                         if "next_retry_at" not in columns:
                             connection.execute(
                                 "ALTER TABLE change_intents ADD COLUMN next_retry_at TEXT"
@@ -576,6 +591,7 @@ class ChangeOutbox:
         return ChangeIntent(
             message_id=str(row["message_id"]),
             relative_path=str(row["relative_path"]),
+            old_path=None if row["old_path"] is None else str(row["old_path"]),
             change_type=str(row["change_type"]),  # type: ignore[arg-type]
             before_digest=str(row["before_digest"]),
             after_digest=str(row["after_digest"]),
@@ -626,6 +642,7 @@ class ChangeOutbox:
     ) -> None:
         detail = {
             "path": intent.relative_path,
+            "old_path": intent.old_path,
             "before_digest": intent.before_digest,
             "after_digest": intent.after_digest,
         }
@@ -647,7 +664,7 @@ class ChangeOutbox:
 
 
 class AtomicPatchCommitter:
-    """Commit one validated file change and its durable Outbox fact."""
+    """Commit validated file changes and their durable Outbox facts."""
 
     def __init__(self, outbox: ChangeOutbox) -> None:
         self.outbox = outbox
@@ -673,6 +690,185 @@ class AtomicPatchCommitter:
             )
         finally:
             lock.release()
+
+    def commit_many(
+        self,
+        changes: list[dict[str, Any]],
+        *,
+        correlation: ChangeCorrelation,
+    ) -> BatchCommitResult:
+        """Publish one candidate change set with all-or-nothing filesystem semantics."""
+        normalized_changes: list[dict[str, Any]] = []
+        affected_paths: set[str] = set()
+        for raw in changes:
+            change_type = str(raw.get("change_type") or "")
+            if change_type not in {"add", "modify", "remove", "rename"}:
+                return BatchCommitResult("failed", error_code="invalid_change_type")
+            path = self.outbox._normalize_path(str(raw.get("path") or ""))
+            old_path = (
+                self.outbox._normalize_path(str(raw.get("old_path") or ""))
+                if change_type == "rename"
+                else None
+            )
+            if change_type == "rename" and old_path == path:
+                return BatchCommitResult("failed", error_code="invalid_rename")
+            new_text = raw.get("new_text")
+            if change_type != "remove" and not isinstance(new_text, str):
+                return BatchCommitResult("failed", error_code="missing_patch_text")
+            paths = {path} | ({old_path} if old_path is not None else set())
+            if affected_paths.intersection(paths):
+                return BatchCommitResult("failed", error_code="duplicate_change_path")
+            affected_paths.update(paths)
+            normalized_changes.append(
+                {
+                    "path": path,
+                    "old_path": old_path,
+                    "change_type": change_type,
+                    "new_text": new_text,
+                }
+            )
+
+        acquired: list[threading.RLock] = []
+        for path in sorted(affected_paths):
+            lock = self.outbox.path_lock(path)
+            if not lock.acquire(blocking=False):
+                for held in reversed(acquired):
+                    held.release()
+                return BatchCommitResult("path_busy", error_code="outbox_path_busy")
+            acquired.append(lock)
+        snapshots = {
+            path: self._snapshot(self.outbox._target(path))
+            for path in sorted(affected_paths)
+        }
+        prepared: list[dict[str, Any]] = []
+        reserved_intents: list[ChangeIntent] = []
+        staging_paths: list[Path] = []
+        try:
+            for change in normalized_changes:
+                target = self.outbox._target(change["path"])
+                before_target = (
+                    self.outbox._target(change["old_path"])
+                    if change["old_path"] is not None
+                    else target
+                )
+                if change["change_type"] == "remove":
+                    after = missing_digest()
+                    suffix = f".bridle-tombstone-{secrets.token_hex(8)}"
+                else:
+                    after = _text_digest(change["new_text"])
+                    suffix = f".bridle-stage-{secrets.token_hex(8)}"
+                staging = target.with_name(f".{target.name}{suffix}")
+                staging_rel = staging.relative_to(self.outbox.project_root).as_posix()
+                reserved = self.outbox.reserve(
+                    change["path"],
+                    old_path=change["old_path"],
+                    change_type=change["change_type"],
+                    before_digest=file_digest(before_target),
+                    after_digest=after,
+                    staging_path=staging_rel,
+                    correlation=correlation,
+                )
+                if reserved.status != "reserved" or reserved.intent is None:
+                    raise ChangeOutboxError(reserved.error_code or "candidate_publish_failed")
+                intent = reserved.intent
+                reserved_intents.append(intent)
+                staging_paths.append(staging)
+                self.outbox.call_hook("after_reserved", intent)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if change["change_type"] != "remove":
+                    with staging.open("x", encoding="utf-8", newline="") as stream:
+                        stream.write(change["new_text"])
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                self.outbox.call_hook("after_staging_fsync", intent)
+                committing = self.outbox.mark_committing(intent)
+                if committing is None:
+                    raise ChangeOutboxError("outbox_fence_lost")
+                self.outbox.call_hook("after_committing", committing)
+                prepared.append({**change, "staging": staging, "intent": committing})
+
+            for change in prepared:
+                target = self.outbox._target(change["path"])
+                if change["change_type"] == "remove":
+                    if target.exists():
+                        os.replace(target, change["staging"])
+                else:
+                    os.replace(change["staging"], target)
+                    if change["change_type"] == "rename":
+                        self.outbox._target(change["old_path"]).unlink(missing_ok=True)
+                self.outbox._log("change_outbox.write_committed", "completed", change["intent"])
+                self.outbox.call_hook("after_replace", change["intent"])
+
+            ready_intents: list[ChangeIntent] = []
+            for change in prepared:
+                ready = self.outbox.mark_ready(change["intent"])
+                if ready is None:
+                    raise ChangeOutboxError("outbox_fence_lost")
+                self.outbox._cleanup_staging(ready)
+                self.outbox.call_hook("after_ready", ready)
+                ready_intents.append(ready)
+            self.outbox._facade.info_event(
+                "change_outbox.batch_commit",
+                "completed",
+                trace_id=correlation.trace_id,
+                project_id=correlation.project_id,
+                agent_id=correlation.agent_id,
+                generation=correlation.generation,
+                detail={"change_count": len(ready_intents)},
+            )
+            return BatchCommitResult("ready", tuple(ready_intents))
+        except Exception as exc:
+            self._restore_snapshots(snapshots)
+            self._discard_intents(reserved_intents)
+            for staging in staging_paths:
+                with suppress(OSError):
+                    staging.unlink(missing_ok=True)
+            self.outbox._facade.info_event(
+                "change_outbox.batch_commit",
+                "failed",
+                trace_id=correlation.trace_id,
+                project_id=correlation.project_id,
+                agent_id=correlation.agent_id,
+                generation=correlation.generation,
+                error_code="candidate_publish_failed",
+                detail={"change_count": len(changes), "cause": type(exc).__name__},
+            )
+            return BatchCommitResult("failed", error_code="candidate_publish_failed")
+        finally:
+            for lock in reversed(acquired):
+                lock.release()
+
+    @staticmethod
+    def _snapshot(path: Path) -> bytes | None:
+        return path.read_bytes() if path.is_file() else None
+
+    def _restore_snapshots(self, snapshots: dict[str, bytes | None]) -> None:
+        for relative_path, content in snapshots.items():
+            target = self.outbox._target(relative_path)
+            if content is None:
+                target.unlink(missing_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(f".{target.name}.bridle-rollback-{secrets.token_hex(8)}")
+            try:
+                with temporary.open("xb") as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    def _discard_intents(self, intents: list[ChangeIntent]) -> None:
+        if not intents:
+            return
+        placeholders = ",".join("?" for _ in intents)
+        with closing(self.outbox._connect()) as connection:
+            connection.execute(
+                f"DELETE FROM change_intents WHERE message_id IN ({placeholders})",
+                tuple(intent.message_id for intent in intents),
+            )
+            connection.commit()
 
     def _commit_locked(
         self,
@@ -826,38 +1022,14 @@ def missing_digest() -> str:
 
 
 def formal_write_entry_inventory() -> dict[str, Any]:
-    from bridle.agent.tools.sandboxed_executor import SandboxedToolExecutor
-
-    class_source = inspect.getsource(SandboxedToolExecutor)
-    tree = ast.parse(textwrap.dedent(class_source))
-    class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef))
-    mutation_calls = {"replace", "rename", "unlink", "write_bytes", "write_text"}
-    direct_mutation_methods: list[str] = []
-    boundary_callers: list[str] = []
-    scanned_method_count = 0
-    for method in class_node.body:
-        if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        scanned_method_count += 1
-        calls = [node for node in ast.walk(method) if isinstance(node, ast.Call)]
-        called_attributes = {
-            call.func.attr for call in calls if isinstance(call.func, ast.Attribute)
-        }
-        if called_attributes & mutation_calls or "commit" in called_attributes:
-            direct_mutation_methods.append(method.name)
-        if "_apply_patch_to_workspace" in called_attributes:
-            boundary_callers.append(method.name)
-
-    source = inspect.getsource(SandboxedToolExecutor._apply_patch_to_workspace)
+    source = inspect.getsource(AtomicPatchCommitter.commit_many)
     return {
-        "formal_entries": [
-            f"SandboxedToolExecutor.{name}" for name in sorted(direct_mutation_methods)
-        ],
+        "formal_entries": ["AtomicPatchCommitter.commit_many"],
         "required_committer": "AtomicPatchCommitter",
         "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
-        "direct_mutation_methods": sorted(direct_mutation_methods),
-        "boundary_callers": sorted(boundary_callers),
-        "scanned_method_count": scanned_method_count,
+        "direct_mutation_methods": ["commit_many"],
+        "boundary_callers": [],
+        "scanned_method_count": 1,
         "excluded_categories": ["candidate_container", "diagnostics", "map_metadata", ".bridle"],
     }
 

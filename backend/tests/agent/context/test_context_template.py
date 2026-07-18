@@ -44,14 +44,14 @@ class TestContextTemplateBuilder:
         ctx = _minimal_ctx()
         builder = ContextTemplateBuilder(ctx)
         messages = builder.build_messages()
-        content = messages[0]["content"]
-        assert "implement" in content.lower()
-        assert "metric" in content.lower() or "indicator" in content.lower()
-        assert "test" in content.lower()
-        assert "completion confirmation" in content.lower()
-        assert "run the allowed tests" in content.lower() or "allowed tests" in content.lower()
-        assert "inspect completion evidence" in content.lower()
-        assert "report_blocked" in content
+        lowered = messages[0]["content"].lower()
+        assert "write the test" in lowered
+        assert "authoritative red verification" in lowered
+        assert "implement" in lowered
+        assert "authoritative final verification" in lowered
+        assert "inspect returned evidence" in lowered
+        assert "completion confirmation" in lowered
+        assert "report_blocked" in lowered
 
     def test_user_payload_contains_context_layers(self) -> None:
         ctx = _minimal_ctx()
@@ -102,21 +102,17 @@ class TestContextTemplateBuilder:
         builder = ContextTemplateBuilder(ctx)
         messages = builder.build_messages()
         payload = json.loads(messages[1]["content"])
-        assert len(payload["tool_context"]) == 7
+        assert len(payload["tool_context"]) == 3
 
-    def test_tool_context_default_has_seven_descriptors(self) -> None:
+    def test_tool_context_default_has_minimal_descriptors(self) -> None:
         ctx = _minimal_ctx()
         builder = ContextTemplateBuilder(ctx)
         payload = builder.build_payload()
-        assert len(payload.tool_context) == 7
-        names = [d["name"] for d in payload.tool_context]
-        assert "read_allowed_file" in names
-        assert "propose_file_patch" in names
-        assert "run_allowed_tests" in names
-        assert "report_blocked" in names
-        assert "child_agent_result_summary" in names
-        assert "grep_code" in names
-        assert "web_search" in names
+        assert [d["name"] for d in payload.tool_context] == [
+            "run_command",
+            "report_blocked",
+            "web_search",
+        ]
 
     def test_tool_context_default_each_descriptor_has_required_fields(self) -> None:
         ctx = _minimal_ctx()
@@ -154,8 +150,8 @@ class TestContextTemplateBuilder:
         messages = builder.build_messages()
         content = messages[0]["content"]
         assert "summary" in content
-        assert "file_patches" in content
         assert "tests_to_run" in content
+        assert "file_patches" not in content
 
 
 class TestContextTemplateBuilderWithMemory:
@@ -170,12 +166,12 @@ class TestContextTemplateBuilderWithMemory:
 
     def test_tool_context_injected(self) -> None:
         ctx = _minimal_ctx()
-        tool_ctx = [{"name": "read_allowed_file", "purpose": "Read files"}]
+        tool_ctx = [{"name": "run_command", "purpose": "Read files"}]
         builder = ContextTemplateBuilder(ctx, tool_context=tool_ctx)
         messages = builder.build_messages()
         payload = json.loads(messages[1]["content"])
         assert len(payload["tool_context"]) == 1
-        assert payload["tool_context"][0]["name"] == "read_allowed_file"
+        assert payload["tool_context"][0]["name"] == "run_command"
 
     def test_child_agent_results_default_empty(self) -> None:
         ctx = _minimal_ctx()
@@ -267,7 +263,7 @@ class TestContextTemplateBuilderLogEvents:
         ]
         assert len(events) == 1
         detail = getattr(events[0], "detail", {})
-        assert detail.get("tool_count") == 7
+        assert detail.get("tool_count") == 3
         assert "stdout" not in json.dumps(detail)
         assert "stderr" not in json.dumps(detail)
 
@@ -295,10 +291,9 @@ class TestContextTemplateBuilderLogEvents:
 
 
 class TestToolContextDisclosure:
-    def test_default_tool_context_has_seven_entries(self) -> None:
+    def test_default_tool_context_has_three_entries(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
-        assert len(descriptors) <= 7
-        assert len(descriptors) == 7
+        assert len(descriptors) == 3
 
     def test_each_descriptor_has_standard_fields(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
@@ -342,12 +337,12 @@ class TestToolContextDisclosure:
         builder = ContextTemplateBuilder(ctx, tool_context=tool_dicts)
         messages = builder.build_messages()
         payload = json.loads(messages[1]["content"])
-        assert len(payload["tool_context"]) == 7
-        assert payload["tool_context"][0]["name"] == "read_allowed_file"
+        assert len(payload["tool_context"]) == 3
+        assert payload["tool_context"][0]["name"] == "run_command"
 
-    def test_tool_context_capped_at_seven(self) -> None:
+    def test_tool_context_is_minimal(self) -> None:
         descriptors = AgentToolRegistry.tool_descriptors()
-        assert len(descriptors) <= 7
+        assert len(descriptors) == 3
 
     def test_system_message_contains_circuit_breaker_guidance(self) -> None:
         ctx = _minimal_ctx()

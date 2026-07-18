@@ -12,9 +12,7 @@ _COMPACTED_PREFIX = "[compacted] "
 
 class ToolResultSummarizer:
     _TOOL_PURPOSES = {
-        "read_allowed_file": "Read file content",
-        "propose_file_patch": "Propose file patch",
-        "run_allowed_tests": "Run test commands",
+        "run_command": "Run an exploratory candidate-container command",
         "report_blocked": "Report blocked status",
     }
 

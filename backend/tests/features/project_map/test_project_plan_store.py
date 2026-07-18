@@ -951,3 +951,57 @@ def test_semantic_terminal_commit_rejects_stale_owner_after_concurrent_run_switc
     events = store.changes(after_seq=0, limit=1000)
     assert not any(event["operation"] == "ready" for event in events["items"])
 
+
+def test_due_verification_run_is_claimed_once_under_concurrency(
+    test_workspace: Path,
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = ProjectPlanStore(test_workspace, project_id="verification-due-claim")
+    store.initialize(scan_if_created=False)
+    run = store.enqueue_verification_run(
+        run_id="verify-due-claim",
+        node_id="node-due-claim",
+        phase="red",
+        source_revision=3,
+        contract_version="contract-due-claim",
+    )
+    first = store.claim_verification_run(
+        run["run_id"],
+        now_timestamp=100.0,
+        lease_seconds=30,
+    )
+    assert first is not None
+    deferred = store.defer_verification_run(
+        run["run_id"],
+        lease_token=first["lease_token"],
+        error_code="container_temporarily_unavailable",
+        now_timestamp=100.0,
+        max_attempts=5,
+    )
+    assert deferred["next_retry_at"] == 101.0
+    assert store.claim_verification_run(
+        run["run_id"],
+        now_timestamp=100.999,
+        lease_seconds=30,
+    ) is None
+
+    barrier = threading.Barrier(2)
+
+    def claim_once() -> dict | None:
+        reopened = ProjectPlanStore.open_existing(test_workspace)
+        barrier.wait(timeout=5)
+        return reopened.claim_verification_run(
+            run["run_id"],
+            now_timestamp=101.0,
+            lease_seconds=30,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = list(pool.map(lambda _index: claim_once(), range(2)))
+
+    winners = [item for item in claimed if item is not None]
+    assert len(winners) == 1
+    assert winners[0]["attempt"] == 2
+

@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from bridle.agent.runtime.modification_workflow import ModificationEvent, ModificationWorkflow
 from bridle.agent.safety.sandbox_policy import SandboxPolicy
 from bridle.api.errors import ConflictError
 from bridle.features.project_map.modify_loop_service import CONSISTENCY_GATE_ERROR, TDD_GATE_ERROR
 from bridle.features.project_map.store import ProjectPlanStore
+from tests.helpers.modification_workflow import freeze_test_contract_for_workflow
 
 pytestmark = pytest.mark.usefixtures("test_workspace")
 
@@ -20,6 +22,29 @@ def _write(workspace: Path, rel: str, content: str) -> None:
     target = workspace / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
+
+
+def _advance_modification(
+    store: ProjectPlanStore,
+    node_id: str,
+    events: tuple[ModificationEvent, ...],
+) -> None:
+    workflow = ModificationWorkflow(store)
+    for sequence, event in enumerate(events, start=1):
+        if (
+            event is ModificationEvent.TEST_CONTRACT_APPROVED
+            and workflow.active_test_contract(node_id) is None
+        ):
+            freeze_test_contract_for_workflow(
+                workflow,
+                node_id,
+                int(workflow.get(node_id)["revision"]),
+            )
+        workflow.apply(
+            node_id,
+            event=event,
+            event_id=f"{node_id}-{sequence}-{event.value}",
+        )
 
 
 def test_mock_path_is_readonly_for_patch_policy(test_workspace: Path) -> None:
@@ -48,7 +73,7 @@ def test_consistency_gate_rejects_undeclared_exposed_symbols(test_workspace: Pat
     )
 
     with pytest.raises(ConflictError) as error:
-        store.verify_node("consumer", exposed_symbols={"fetch", "secret_leak"}, has_red=True, has_green=True)
+        store.verify_node("consumer", exposed_symbols={"fetch", "secret_leak"})
     assert error.value.api_error.code == CONSISTENCY_GATE_ERROR
 
 
@@ -67,7 +92,7 @@ def test_consistency_gate_rejects_exposed_symbols_when_no_interface_map(test_wor
         connection.close()
 
     with pytest.raises(ConflictError) as error:
-        store.verify_node("n-empty", exposed_symbols={"anything"}, has_red=True, has_green=True)
+        store.verify_node("n-empty", exposed_symbols={"anything"})
     assert error.value.api_error.code == CONSISTENCY_GATE_ERROR
 
     connection = sqlite3.connect(store.database_path)
@@ -94,8 +119,21 @@ def test_tdd_gate_rejects_red_without_green(test_workspace: Path) -> None:
     finally:
         connection.close()
 
+    _advance_modification(
+        store,
+        "n-red",
+        (
+            ModificationEvent.START,
+            ModificationEvent.TEST_CONTRACT_APPROVED,
+            ModificationEvent.RED_ALLOWED,
+            ModificationEvent.RED_VERIFICATION_STARTED,
+            ModificationEvent.RED_CONFIRMED,
+            ModificationEvent.IMPLEMENTATION_STARTED,
+        ),
+    )
+
     with pytest.raises(ConflictError) as error:
-        store.verify_node("n-red", exposed_symbols=set(), has_red=True, has_green=False)
+        store.verify_node("n-red", exposed_symbols=set())
     assert error.value.api_error.code == TDD_GATE_ERROR
 
     connection = sqlite3.connect(store.database_path)
@@ -105,7 +143,7 @@ def test_tdd_gate_rejects_red_without_green(test_workspace: Path) -> None:
         ).fetchone()[0]
     finally:
         connection.close()
-    assert status == "failed"
+    assert status == "verifying"
 
 
 def test_tdd_gate_rejects_without_red(test_workspace: Path) -> None:
@@ -122,9 +160,12 @@ def test_tdd_gate_rejects_without_red(test_workspace: Path) -> None:
     finally:
         connection.close()
 
+    _advance_modification(store, "n1", (ModificationEvent.START,))
+
     with pytest.raises(ConflictError) as error:
-        store.verify_node("n1", exposed_symbols=set(), has_red=False, has_green=False)
+        store.verify_node("n1", exposed_symbols=set())
     assert error.value.api_error.code == TDD_GATE_ERROR
+    assert store.get_node("n1")["status"] == "verifying"
 
 
 def test_dispatch_and_complete_node_flow(test_workspace: Path) -> None:
@@ -146,7 +187,23 @@ def test_dispatch_and_complete_node_flow(test_workspace: Path) -> None:
     dispatched = store.dispatch_child_agent("svc", target_role="executing")
     assert dispatched["status"] == "executing"
 
-    node = store.verify_node("svc", exposed_symbols=set(), has_red=True, has_green=True)
+    _advance_modification(
+        store,
+        "svc",
+        (
+            ModificationEvent.START,
+            ModificationEvent.TEST_CONTRACT_APPROVED,
+            ModificationEvent.RED_ALLOWED,
+            ModificationEvent.RED_VERIFICATION_STARTED,
+            ModificationEvent.RED_CONFIRMED,
+            ModificationEvent.IMPLEMENTATION_STARTED,
+            ModificationEvent.SUBMITTED,
+            ModificationEvent.FINAL_VERIFICATION_STARTED,
+            ModificationEvent.FINAL_VERIFICATION_PASSED,
+        ),
+    )
+
+    node = store.verify_node("svc", exposed_symbols=set())
     assert node["status"] == "completed"
 
 
