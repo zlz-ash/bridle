@@ -3,7 +3,7 @@
 <!-- DOC_ROLE: canonical -->
 <!-- READ_WHEN: 规划功能、测试合同、CI 用例或验收范围时 -->
 <!-- SKIP_WHEN: 只需要技术实现细节或运行命令时 -->
-<!-- PRIMARY_SOURCES: .ai-dev/spec/requirements.json, .ai-dev/evidence/requirements-agent-runtime-mail-map-20260713.json, .ai-dev/docs/ln-110/context-store.json -->
+<!-- PRIMARY_SOURCES: .ai-dev/project-docs/context-window.json, .ai-dev/project-docs/requirements.json, backend/src/bridle/agent, backend/src/bridle/features/sessions -->
 
 # 项目需求
 
@@ -16,6 +16,7 @@
 | 会话与 Agent Runtime | [FR-BRD-020 到 FR-BRD-029](#functional-requirements) |
 | 前端体验 | [FR-BRD-030 到 FR-BRD-034](#functional-requirements) |
 | 错误、观测与安全 | [FR-BRD-040 到 FR-BRD-046](#functional-requirements) |
+| 上下文窗口、工具结果与模型终止 | [FR-BRD-050 到 FR-BRD-057](#functional-requirements) |
 | 地图与容器门禁 | [FR-CI-001 到 FR-CI-006](#functional-requirements) |
 | 实现证据 | [implementation_status.md](implementation_status.md) |
 
@@ -59,6 +60,14 @@
 | FR-BRD-044 | MUST | 中文与 Unicode CLI 输出必须基于真实编码内容检查。 | `backend/tests/cli`, `AGENTS.md` | 验收不以终端代码页的表面显示代替 UTF-8 内容检查。 |
 | FR-BRD-045 | MUST | 数据库初始化必须如实使用当前 metadata creation 行为。 | `backend/src/bridle/database.py`, `backend/src/bridle/cli.py` | 启动创建当前 schema，但不把该行为描述成完整迁移工作流。 |
 | FR-BRD-046 | MUST | 日志和 observability 不得改变业务返回值或控制面结果。 | `backend/src/bridle/observability` | 日志、sink 或外部观测适配失败时，业务合同仍由原始执行结果决定。 |
+| FR-BRD-050 | MUST | 顶层 `short_term_memory` 必须是模型输入的唯一会话记忆入口，当前用户消息在一次模型请求中只出现一次。 | `.ai-dev/project-docs/context-window.json` | Context 模板不再从 `accessible_context` 或其他旧字段重复渲染会话记忆；同一请求中的当前用户消息无重复副本。 |
+| FR-BRD-051 | MUST | 父 Runtime 必须为每个 session 维护动态短期记忆窗口，并用摘要、检查点锚点和锚点后增量支持持久化与冷恢复。 | `.ai-dev/project-docs/context-window.json` | 热态后续轮次只读取进程内窗口；首次加载或进程重启时从持久化检查点与锚点后增量恢复，不把全会话历史重新送入压缩流程，也不重复或遗漏消息。 |
+| FR-BRD-052 | MUST | 窗口超过水位时，记忆优化器只能处理已有摘要和本次被淘汰的对话消息。 | `.ai-dev/project-docs/context-window.json` | 优化请求不携带完整历史且不提供工具；优化失败、超时、空输出或非法输出时使用确定性回退并记录结构化日志。 |
+| FR-BRD-053 | MUST | 工具结果必须完整保留到紧接着的一次模型请求，成功消费后再由代码替换为确定性收据。 | `.ai-dev/project-docs/context-window.json` | 未消费结果完整可见；已消费历史只保留实际存在的白名单诊断字段，相同输入生成字节稳定的收据，失败 `error_summary` 最多 240 个字符，未知大字段不进入收据。 |
+| FR-BRD-054 | MUST | 模型必须以可校验的 `completed` 或 `blocked` 结构决定正常退出。 | `.ai-dev/project-docs/context-window.json` | `tool_calls` 继续既有执行链；非法或空终态进入模型修复路径；`blocked` 必须携带原因；只有合法终态可以正常返回。 |
+| FR-BRD-055 | MUST | Agent 正常完成不得由完整 prompt token 预算、固定工具轮数或固定工具调用数决定。 | `.ai-dev/project-docs/context-window.json` | provider 整轮只保留绝对墙钟看门狗，单次 HTTP 请求保留独立 timeout；墙钟超时、请求超时、取消、关闭和权限预算耗尽均属于异常终止，不能伪装为 `completed`。 |
+| FR-BRD-056 | MUST | 模型业务上下文与本地观测必须分层处理。 | `.ai-dev/project-docs/context-window.json` | 模型后续轮次使用窗口与工具收据控制上下文；配置的本地 Langfuse 继续接收完整 `messages`、`tools`、响应和首次完整工具结果，观测失败不改变业务结果。 |
+| FR-BRD-057 | MUST | 上下文改造完成后必须移除旧的重复记忆入口，不保留新旧双实现。 | `.ai-dev/project-docs/context-window.json` | `accessible_context` 不再生产 memory；确认无生产来源的 `long_term_memory` 与 `rag` 空壳字段被移除；新增运行态、日志与流水线临时文件保持 Git 忽略且不新增网络上传路径。 |
 | FR-CI-001 | MUST | 地图门禁必须执行后端 project-map 测试和已确认的前端地图同步测试。 | `.ai-dev/spec/requirements.json` | 门禁不把无关聊天或 workspace 测试混入地图用例集合。 |
 | FR-CI-002 | MUST | 地图门禁必须检查每个已评审地图用例均被收集并通过。 | `.ai-dev/spec/requirements.json` | 任一映射用例失败或未收集时 job 失败；全部通过时才成功。 |
 | FR-CI-003 | MUST | 容器门禁必须先执行平台无关的容器单元与合同测试。 | `.ai-dev/spec/requirements.json` | `backend/tests/agent/container` 中映射到门禁的评审用例全部被收集并通过。 |
@@ -74,15 +83,17 @@
 | 远程写入 | 创建 Issue、触发 GitHub Actions、提交、推送、PR 或发布不属于已授权功能范围。 |
 | CI Author | CI Author 的允许路径由 `.ai-dev/spec/requirements.json` 控制，不得修改产品代码或业务测试。 |
 | 状态证据 | “存在源码”只足以标记 Implemented；只有实际运行记录才能标记 Verified。 |
+| 上下文与观测分层 | prompt 内的动态窗口和工具收据负责控制模型上下文；本地 Langfuse 的完整观测不回灌到后续 prompt，也不受业务窗口压缩规则约束。 |
+| 正常与异常退出 | `completed`、`blocked` 是模型正常终态；墙钟超时、请求超时、取消、关闭和权限拒绝是异常看门狗结果，二者不得混用。 |
 | 本阶段排除项 | 不新增 Runtime/Mail UI 或远程 API，不引入远程 broker，不监听外部文件变化，不自动恢复父/子 Runtime，也不承诺多文件全局事务。 |
 
 ## Maintenance
 
-**Last Updated:** 2026-07-13
+**Last Updated:** 2026-07-19
 
 **Update Triggers:**
 
-- API、CLI、地图查询、会话行为、Runtime/Mail/Outbox、能力隔离、前端同步或容器边界发生变化。
+- API、CLI、地图查询、会话行为、Runtime/Mail/Outbox、上下文窗口、工具结果生命周期、模型终止、能力隔离、前端同步或容器边界发生变化。
 - 需求基线新增、合并或废弃稳定 ID。
 - 已评审测试合同改变某个 CI CASE ID 的覆盖范围。
 

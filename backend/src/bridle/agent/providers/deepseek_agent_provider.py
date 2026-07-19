@@ -1,6 +1,8 @@
 """DeepSeek agent provider with tool-call loop."""
 from __future__ import annotations
 
+import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -8,17 +10,18 @@ import re
 import time
 from typing import Any
 
-from bridle.agent.tools.registry import AgentToolRegistry
 from bridle.agent.context.template import ContextTemplateBuilder
+from bridle.agent.memory.short_term_memory import ToolResultReceiptBuilder
 from bridle.agent.providers.deepseek_client import DeepSeekHttpError
+from bridle.agent.runtime.schemas import AgentContext, AgentProposalSchema
+from bridle.agent.tools.budget import ToolBudgetLimits, ToolBudgetTracker, summarize_tool_args
 from bridle.agent.tools.deepseek_schema import build_deepseek_tools
 from bridle.agent.tools.proposal_path_validator import ProposalPathValidator
 from bridle.agent.tools.proposal_test_validator import validate_proposal_tests_to_run
-from bridle.agent.tools.budget import ToolBudgetLimits, ToolBudgetTracker, summarize_tool_args
+from bridle.agent.tools.registry import AgentToolRegistry
 from bridle.logging.jsonl import log_event
 from bridle.observability import get_observability
 from bridle.observability.schema import PromptLineage
-from bridle.agent.runtime.schemas import AgentContext, AgentProposalSchema
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 
@@ -184,7 +187,7 @@ def sanitize_model_response_text(content: str) -> str:
         return f"{key_quoted}: ***"
 
     def _redact_env_kv(match: re.Match[str]) -> str:
-        key, sep, value = match.group(1), match.group(2), match.group(3)
+        key, sep = match.group(1), match.group(2)
         if key.lower().replace("-", "_") == "authorization":
             return match.group(0)
         if not _key_name_is_sensitive(key):
@@ -198,7 +201,7 @@ def sanitize_model_response_text(content: str) -> str:
 
 def _sorted_dict_keys(value: Any) -> list[str]:
     if isinstance(value, dict):
-        return sorted(str(key) for key in value.keys())
+        return sorted(str(key) for key in value)
     return []
 
 
@@ -259,14 +262,14 @@ def summarize_chat_response_envelope(
     summary = {
         "choice_count": len(choices),
         "finish_reason": str(choice.get("finish_reason") or ""),
-        "message_keys": sorted(str(key) for key in message.keys()),
+        "message_keys": sorted(str(key) for key in message),
         "content_is_null": content is None,
         "content_length": 0 if content is None else len(str(content)),
         "tool_call_count": len(tool_calls),
         "has_reasoning_content": bool(_optional_preview(reasoning)),
         "has_refusal": bool(_optional_preview(refusal)),
         "has_annotations": annotations is not None and bool(annotations),
-        "usage_keys": sorted(str(key) for key in usage.keys()),
+        "usage_keys": sorted(str(key) for key in usage),
         "reasoning_content_preview": _optional_preview(reasoning),
         "refusal_preview": _optional_preview(refusal),
     }
@@ -304,10 +307,8 @@ class DeepSeekAgentProvider:
         *,
         client: Any,
         model: str,
-        max_tool_rounds: int = 8,
-        max_tool_calls: int = 32,
         max_wall_seconds: float = 300.0,
-        registry: AgentToolRegistry,
+        registry: AgentToolRegistry | None,
         strict_tools: bool = False,
         timeout_seconds: float = 120,
         run_id: str | None = None,
@@ -315,10 +316,7 @@ class DeepSeekAgentProvider:
     ) -> None:
         self._client = client
         self._model = model
-        self._max_tool_rounds = max(1, int(max_tool_rounds))
         self._budget_limits = ToolBudgetLimits(
-            max_rounds=self._max_tool_rounds,
-            max_tool_calls=max(1, int(max_tool_calls)),
             max_wall_seconds=max(1.0, float(max_wall_seconds)),
         )
         self._registry = registry
@@ -327,8 +325,84 @@ class DeepSeekAgentProvider:
         self._run_id = run_id
         self._node_id = node_id
 
+    async def optimize_memory(self, summary: str, evicted: list[dict[str, Any]]) -> str:
+        """Optimize only the prior summary and newly evicted messages, with no tools."""
+        log_event(
+            "deepseek_memory_optimizer",
+            "started",
+            run_id=self._run_id,
+            node_id=self._node_id,
+            detail={"provider": self.name, "evicted_count": len(evicted)},
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Optimize a rolling short-term memory. Preserve decisions, constraints, "
+                    "unresolved work, and identifiers. Return only the optimized memory text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"prior_summary": summary, "evicted_messages": evicted},
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            },
+        ]
+        start = time.monotonic()
+        try:
+            response = await self._client.chat_completion(
+                messages=messages,
+                model=self._model,
+                timeout_seconds=self._timeout_seconds,
+            )
+            self._record_generation(
+                request_messages=copy.deepcopy(messages),
+                tools=[],
+                response=response,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                run_id=self._run_id,
+                node_id=self._node_id,
+                name="memory.optimizer",
+                prompt_name="session_memory.optimizer",
+            )
+            choice = (response.get("choices") or [{}])[0]
+            content = str((choice.get("message") or {}).get("content") or "").strip()
+            if not content:
+                raise DeepSeekProviderError("memory_optimizer_empty")
+        except asyncio.CancelledError:
+            log_event(
+                "deepseek_memory_optimizer",
+                "failed",
+                run_id=self._run_id,
+                node_id=self._node_id,
+                detail={"provider": self.name, "error_code": "cancelled"},
+            )
+            raise
+        except Exception as exc:
+            log_event(
+                "deepseek_memory_optimizer",
+                "failed",
+                run_id=self._run_id,
+                node_id=self._node_id,
+                detail={"provider": self.name, "error_code": type(exc).__name__},
+            )
+            raise
+        log_event(
+            "deepseek_memory_optimizer",
+            "completed",
+            run_id=self._run_id,
+            node_id=self._node_id,
+            detail={"provider": self.name, "evicted_count": len(evicted)},
+        )
+        return content
+
     async def generate(self, context: AgentContext) -> AgentProposalSchema:
         registry = self._registry
+        if registry is None:
+            raise DeepSeekProviderError("tool_registry_required")
         policy = registry._policy  # noqa: SLF001 -worker-built registry shares policy
         tool_descriptors = registry.available_tool_descriptors()
         tool_context = [d.model_dump() for d in tool_descriptors]
@@ -358,8 +432,27 @@ class DeepSeekAgentProvider:
             detail={"provider": self.name, "model": self._model},
         )
         start = time.monotonic()
+        wall_deadline = (
+            asyncio.get_running_loop().time() + self._budget_limits.max_wall_seconds
+        )
         tracker = ToolCallTracker()
         budget_tracker = ToolBudgetTracker(self._budget_limits, start_time=start)
+        consumed_tool_message_ids: set[int] = set()
+
+        async def await_with_wall_deadline(awaitable: Any) -> Any:
+            wall_timeout = asyncio.timeout_at(wall_deadline)
+            try:
+                async with wall_timeout:
+                    return await awaitable
+            except TimeoutError as exc:
+                if not wall_timeout.expired():
+                    raise
+                report = budget_tracker.build_exhausted_report("wall_seconds")
+                raise DeepSeekProviderError(
+                    "tool_budget_exhausted",
+                    "Tool budget exhausted: wall_seconds",
+                    response_debug=report,
+                ) from exc
 
         try:
             while True:
@@ -373,12 +466,50 @@ class DeepSeekAgentProvider:
                     )
                 budget_tracker.begin_round()
 
-                response = await self._client.chat_completion(
-                    messages=messages,
-                    model=self._model,
-                    tools=tools,
-                    timeout_seconds=self._timeout_seconds,
+                request_messages = copy.deepcopy(messages)
+                response = await await_with_wall_deadline(
+                    self._client.chat_completion(
+                        messages=request_messages,
+                        model=self._model,
+                        tools=tools,
+                        timeout_seconds=self._timeout_seconds,
+                    )
                 )
+                duration_ms = int((time.monotonic() - start) * 1000)
+                self._record_generation(
+                    request_messages=request_messages,
+                    tools=tools,
+                    response=response,
+                    duration_ms=duration_ms,
+                    run_id=policy.run_id,
+                    node_id=policy.node_id,
+                )
+                for prior in messages:
+                    if prior.get("role") != "tool":
+                        continue
+                    message_identity = id(prior)
+                    if message_identity in consumed_tool_message_ids:
+                        continue
+                    call_id = str(prior.get("tool_call_id", ""))
+                    log_event(
+                        "deepseek_tool_result_consumed",
+                        "completed",
+                        run_id=policy.run_id,
+                        node_id=policy.node_id,
+                        detail={"tool_call_id": call_id, "tool_name": prior.get("name")},
+                    )
+                    prior["content"] = ToolResultReceiptBuilder.build(
+                        str(prior.get("name", "")),
+                        str(prior.get("content", "")),
+                    )
+                    consumed_tool_message_ids.add(message_identity)
+                    log_event(
+                        "deepseek_tool_result_replaced",
+                        "completed",
+                        run_id=policy.run_id,
+                        node_id=policy.node_id,
+                        detail={"tool_call_id": call_id, "tool_name": prior.get("name")},
+                    )
                 choice = (response.get("choices") or [{}])[0]
                 message = choice.get("message") or {}
                 finish_reason = choice.get("finish_reason")
@@ -420,10 +551,12 @@ class DeepSeekAgentProvider:
                                 },
                             )
                         else:
-                            result = await registry.execute(
-                                tool_name,
-                                args,
-                                tool_call_id=str(tc.get("id", "")),
+                            result = await await_with_wall_deadline(
+                                registry.execute(
+                                    tool_name,
+                                    args,
+                                    tool_call_id=str(tc.get("id", "")),
+                                )
                             )
                             tracker.record_result(tool_name, args, result)
                             result = tracker.enrich_result(tool_name, args, result)
@@ -443,7 +576,29 @@ class DeepSeekAgentProvider:
                 content = message.get("content")
                 if content and str(content).strip():
                     content_str = str(content)
-                    proposal = parse_proposal_content(content_str)
+                    try:
+                        proposal = parse_proposal_content(content_str)
+                    except DeepSeekProviderError as exc:
+                        if exc.error_code != "invalid_agent_proposal":
+                            raise
+                        messages.append({"role": "assistant", "content": content_str})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Your terminal response is invalid. Return one JSON object with "
+                                "terminal_status set to completed or blocked, a reason string, "
+                                "a non-empty summary, file_patches, and tests_to_run. "
+                                f"Validation error: {exc}"
+                            ),
+                        })
+                        log_event(
+                            "deepseek_terminal_repair_requested",
+                            "completed",
+                            run_id=policy.run_id,
+                            node_id=policy.node_id,
+                            detail={"error_code": exc.error_code},
+                        )
+                        continue
                     _validate_proposal(proposal, context, model_content=content_str)
                     duration_ms = int((time.monotonic() - start) * 1000)
                     log_event(
@@ -456,6 +611,7 @@ class DeepSeekAgentProvider:
                             "provider": self.name,
                             "model": self._model,
                             "finish_reason": finish_reason,
+                            "terminal_status": proposal.terminal_status,
                             "token_usage": response.get("usage"),
                         },
                     )
@@ -467,60 +623,44 @@ class DeepSeekAgentProvider:
                         duration_ms=duration_ms,
                         detail={"provider": self.name, "model": self._model},
                     )
-                    # Full-fidelity upload: send complete messages + tools to
-                    # Langfuse so the prompt ->response chain is fully
-                    # inspectable in the UI. Bridle runs locally and the trace
-                    # backend is the user's own Langfuse project, so we accept
-                    # the size + content-on-cloud trade-off in exchange for
-                    # real prompt debuggability.
-                    get_observability().record_generation(
-                        name="model.generation",
-                        model=self._model,
-                        input_summary={
-                            "messages": messages,
-                            "tools": tools,
-                            "messages_count": len(messages),
-                            "tools_count": len(tools),
-                        },
-                        output_summary={
-                            "content": content_str,
-                            "finish_reason": finish_reason,
-                            "proposal": {
-                                "summary": proposal.summary,
-                                "file_patches": [
-                                    fp.model_dump() if hasattr(fp, "model_dump") else fp
-                                    for fp in proposal.file_patches
-                                ],
-                                "tests_to_run": list(proposal.tests_to_run),
-                            },
-                        },
-                        usage=response.get("usage") if isinstance(response.get("usage"), dict) else {},
-                        duration_ms=duration_ms,
-                        metadata={
-                            "run_id": policy.run_id,
-                            "node_id": policy.node_id,
-                            "provider": self.name,
-                        },
-                        prompt_lineage=PromptLineage(
-                            prompt_name="node_agent.context_template",
-                            prompt_version="v1",
-                            rendered_messages=messages,
-                        ),
-                    )
                     return proposal
 
-                raise DeepSeekProviderError(
-                    "invalid_agent_proposal",
-                    "Assistant returned empty content without tool calls",
-                    response_debug=summarize_chat_response_envelope(response),
+                messages.append({
+                    "role": "assistant",
+                    "content": "" if content is None else str(content),
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your terminal response is empty. Return one JSON object with "
+                        "terminal_status set to completed or blocked, a reason string, "
+                        "a non-empty summary, file_patches, and tests_to_run."
+                    ),
+                })
+                log_event(
+                    "deepseek_terminal_repair_requested",
+                    "completed",
+                    run_id=policy.run_id,
+                    node_id=policy.node_id,
+                    detail={"error_code": "invalid_agent_proposal", "reason": "empty_content"},
                 )
+                continue
 
-            report = budget_tracker.build_exhausted_report("rounds")
-            raise DeepSeekProviderError(
-                "tool_budget_exhausted",
-                "Tool budget exhausted: rounds",
-                response_debug=report,
+        except asyncio.CancelledError:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            log_event(
+                "deepseek_request_cancelled",
+                "failed",
+                run_id=policy.run_id,
+                node_id=policy.node_id,
+                duration_ms=duration_ms,
+                detail={
+                    "error_code": "cancelled",
+                    "provider": self.name,
+                    "model": self._model,
+                },
             )
+            raise
         except DeepSeekProviderError as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
             log_event(
@@ -575,6 +715,39 @@ class DeepSeekAgentProvider:
                 detail={"error_code": type(exc).__name__, "provider": self.name, "model": self._model},
             )
             raise DeepSeekProviderError(type(exc).__name__, str(exc)) from exc
+
+    def _record_generation(
+        self,
+        *,
+        request_messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        response: dict[str, Any],
+        duration_ms: int,
+        run_id: str | None,
+        node_id: str | None,
+        name: str = "model.generation",
+        prompt_name: str = "node_agent.context_template",
+    ) -> None:
+        """Record each actual model request with full prompt, tools, and response."""
+        get_observability().record_generation(
+            name=name,
+            model=self._model,
+            input_summary={
+                "messages": request_messages,
+                "tools": tools,
+                "messages_count": len(request_messages),
+                "tools_count": len(tools),
+            },
+            output_summary=response,
+            usage=response.get("usage") if isinstance(response.get("usage"), dict) else {},
+            duration_ms=duration_ms,
+            metadata={"run_id": run_id, "node_id": node_id, "provider": self.name},
+            prompt_lineage=PromptLineage(
+                prompt_name=prompt_name,
+                prompt_version="v1",
+                rendered_messages=request_messages,
+            ),
+        )
 
 
 def parse_proposal_content(content: str) -> AgentProposalSchema:

@@ -135,11 +135,18 @@ def create_app(
                 from bridle.models.project_runtime_recovery import (
                     ProjectRuntimeRecoveryRecord,
                 )
+                from bridle.models.project_session_memory import (
+                    ProjectSessionMemoryRecord,
+                )
 
                 bind = application_sessions.kw["bind"]
                 async with bind.begin() as connection:
                     await connection.run_sync(
                         ProjectRuntimeRecoveryRecord.__table__.create,
+                        checkfirst=True,
+                    )
+                    await connection.run_sync(
+                        ProjectSessionMemoryRecord.__table__.create,
                         checkfirst=True,
                     )
                 if active_lifecycle is not None:

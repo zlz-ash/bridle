@@ -146,3 +146,16 @@ class TestFakeAgentProvider:
         r2 = await provider.generate(ctx)
         assert r1.model_dump() == r2.model_dump()
 
+    @pytest.mark.asyncio
+    async def test_memory_optimizer_is_deterministic(self) -> None:
+        from bridle.agent.providers.fake_agent_provider import FakeAgentProvider
+
+        provider = FakeAgentProvider()
+        evicted = [{"role": "user", "content": "old request"}]
+        first = await provider.optimize_memory("prior", evicted)
+        second = await provider.optimize_memory("prior", evicted)
+
+        assert first == second
+        assert "prior" in first
+        assert "old request" in first
+

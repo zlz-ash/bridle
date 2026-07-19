@@ -15,7 +15,12 @@ from bridle.agent.container.boundary import compute_boundary_fingerprint
 from bridle.agent.container.candidate_service import CandidateExecutionService
 from bridle.agent.container.container_service import configure_runner
 from bridle.agent.container.image_identity import resolve_image_identity
+from bridle.agent.context.template import ContextTemplateBuilder
 from bridle.agent.providers.agent_provider import AgentProviderFactory
+from bridle.agent.providers.deepseek_agent_provider import (
+    DeepSeekAgentProvider,
+    DeepSeekProviderError,
+)
 from bridle.agent.runtime.mailbox import MailboxResult
 from bridle.agent.runtime.modification_workflow import (
     ModificationState,
@@ -23,7 +28,9 @@ from bridle.agent.runtime.modification_workflow import (
 )
 from bridle.agent.runtime.project_registry import reset_project_runtime_registry_for_tests
 from bridle.agent.runtime.schemas import AgentProposalSchema
+from bridle.agent.tools.registry import AgentToolRegistry
 from bridle.features.project_map.store import ProjectPlanStore
+from bridle.features.sessions.service import ProjectSessionService
 from bridle.logging.facade import LoggingFacade
 from bridle.logging.schema import LogEvent
 from bridle.models.agent_runtime import (
@@ -102,7 +109,64 @@ class _CaptureProvider:
                 "VALUE = 1\n",
                 encoding="utf-8",
             )
-        return AgentProposalSchema(summary=f"reply-{len(self._captured)}")
+        return AgentProposalSchema(
+            terminal_status="completed",
+            reason="",
+            summary=f"reply-{len(self._captured)}",
+        )
+
+
+class _RenderedContextProvider:
+    """Capture the exact template messages a real model provider would receive."""
+
+    name = "rendered-capture"
+
+    def __init__(
+        self,
+        captured: list[dict],
+        proposal: AgentProposalSchema | None = None,
+    ) -> None:
+        self._captured = captured
+        self._proposal = proposal
+
+    async def generate(self, context):
+        child_results = list(context.tool_capabilities.get("child_agent_results", []))
+        builder = ContextTemplateBuilder(
+            context,
+            child_agent_results=child_results,
+        )
+        messages = builder.build_messages()
+        self._captured.append({
+            "context": context,
+            "messages": messages,
+            "payload": json.loads(messages[1]["content"]),
+        })
+        if self._proposal is not None:
+            return self._proposal
+        return AgentProposalSchema(
+            terminal_status="completed",
+            reason="",
+            summary=f"reply-{len(self._captured)}",
+        )
+
+
+class _BlockingRenderedContextProvider(_RenderedContextProvider):
+    def __init__(
+        self,
+        captured: list[dict],
+        first_provider_entered: asyncio.Event,
+        release_first: asyncio.Event,
+    ) -> None:
+        super().__init__(captured)
+        self._first_provider_entered = first_provider_entered
+        self._release_first = release_first
+
+    async def generate(self, context):
+        proposal = await super().generate(context)
+        if len(self._captured) == 1:
+            self._first_provider_entered.set()
+            await self._release_first.wait()
+        return proposal
 
 
 class _DispatchProvider:
@@ -170,6 +234,632 @@ class _EventSink:
         self.events.append(event)
 
 
+class _AdmissionEventSink(_EventSink):
+    def __init__(self, session_id: str) -> None:
+        super().__init__()
+        self._session_id = session_id
+        self.admission_waiting = asyncio.Event()
+
+    def emit(self, event: LogEvent) -> None:
+        super().emit(event)
+        if (
+            event.action == "session_turn.admission_waiting"
+            and event.session_id == self._session_id
+        ):
+            self.admission_waiting.set()
+
+
+@pytest.mark.asyncio
+async def test_gateway_context_is_incremental_complete_and_deduplicated(
+    client,
+    db,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", None)
+    root = test_workspace / "incremental-rendered-context"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Incremental rendered context"},
+        )
+    ).json()
+    captured: list[dict] = []
+
+    def create_provider(context=None, **kwargs):
+        assert context is not None
+        return _RenderedContextProvider(captured)
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    first = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "first request"},
+    )
+    assert first.status_code == 201, first.text
+
+    original_list_messages = ProjectSessionService.list_messages
+
+    async def forbidden_history(*_args, **_kwargs):
+        raise AssertionError("hot path must not read full message history")
+
+    async def forbidden_checkpoint(*_args, **_kwargs):
+        raise AssertionError("hot path must not re-read checkpoint or delta")
+
+    monkeypatch.setattr(ProjectSessionService, "list_messages", forbidden_history)
+    monkeypatch.setattr(ProjectSessionService, "get_memory_checkpoint", forbidden_checkpoint)
+    monkeypatch.setattr(ProjectSessionService, "list_messages_after", forbidden_checkpoint)
+    second = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "second request"},
+    )
+    assert second.status_code == 201, second.text
+
+    second_payload = captured[1]["payload"]
+    rendered = json.dumps(captured[1]["messages"], ensure_ascii=False)
+    memory_contents = [
+        str(item.get("content", ""))
+        for item in second_payload["short_term_memory"]
+    ]
+    assert rendered.count("second request") == 1
+    assert "second request" not in memory_contents
+    assert "first request" in memory_contents
+    assert "reply-1" in memory_contents
+    assert memory_contents.index("first request") < memory_contents.index("reply-1")
+
+    history = await original_list_messages(db, session["id"])
+    assert [(item.role, item.content) for item in history] == [
+        ("user", "first request"),
+        ("assistant", "reply-1"),
+        ("user", "second request"),
+        ("assistant", "reply-2"),
+    ]
+    await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_serializes_context_construction_for_concurrent_session_turns(
+    client,
+    db,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    root = test_workspace / "concurrent-context-order"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Concurrent context order"},
+        )
+    ).json()
+    manager = gateway_module.SessionMemoryWindowManager(
+        budget=100_000,
+        recent_window=20,
+    )
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", manager)
+    sink = _AdmissionEventSink(session["id"])
+    monkeypatch.setattr(
+        logging_facade_module,
+        "_global_facade",
+        LoggingFacade(sinks=[sink]),
+    )
+    captured: list[dict] = []
+    first_provider_entered = asyncio.Event()
+    release_first = asyncio.Event()
+
+    def create_provider(context=None, **_kwargs):
+        assert context is not None
+        return _BlockingRenderedContextProvider(
+            captured,
+            first_provider_entered,
+            release_first,
+        )
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    session_factory = gateway_module.async_sessionmaker(db.bind, expire_on_commit=False)
+
+    async def observe_fixed_or_legacy_interleaving() -> tuple[str, str | None]:
+        while True:
+            if sink.admission_waiting.is_set():
+                return "admission", None
+            workers = [
+                worker
+                for worker in gateway_module._parent_workers.values()
+                if worker.session_id == session["id"]
+            ]
+            queued_ids = [
+                message_id
+                for worker in workers
+                for message_id in worker._jobs
+            ]
+            if queued_ids:
+                return "legacy-parent-queue", queued_ids[0]
+            await asyncio.sleep(0)
+
+    async with session_factory() as first_db, session_factory() as second_db:
+        first_turn = asyncio.create_task(
+            gateway_module.AgentGateway.converse(
+                first_db,
+                session["id"],
+                "concurrent-user-1",
+            )
+        )
+        await asyncio.wait_for(first_provider_entered.wait(), timeout=5)
+        second_turn = asyncio.create_task(
+            gateway_module.AgentGateway.converse(
+                second_db,
+                session["id"],
+                "concurrent-user-2",
+            )
+        )
+        try:
+            interleaving, queued_user_id = await asyncio.wait_for(
+                observe_fixed_or_legacy_interleaving(),
+                timeout=5,
+            )
+            before_release = await ProjectSessionService.list_messages(db, session["id"])
+            queued_ids = {
+                message_id
+                for worker in gateway_module._parent_workers.values()
+                if worker.session_id == session["id"]
+                for message_id in worker._jobs
+            }
+            if interleaving == "admission":
+                assert all(
+                    message.content != "concurrent-user-2"
+                    for message in before_release
+                )
+                assert queued_user_id is None
+                assert all(
+                    message.id not in queued_ids
+                    for message in before_release
+                    if message.content == "concurrent-user-2"
+                )
+            else:
+                assert queued_user_id is not None
+                assert queued_user_id in queued_ids
+        finally:
+            release_first.set()
+
+        first_reply, second_reply = await asyncio.wait_for(
+            asyncio.gather(first_turn, second_turn),
+            timeout=5,
+        )
+
+    try:
+        assert [first_reply.content, second_reply.content] == ["reply-1", "reply-2"]
+        first_context = captured[0]["context"]
+        second_context = captured[1]["context"]
+        assert first_context.instruction == "concurrent-user-1"
+        assert all(
+            message.get("content") != "concurrent-user-2"
+            for message in first_context.short_term_memory
+        )
+        assert second_context.instruction == "concurrent-user-2"
+        assert [
+            (message.get("role"), message.get("content"))
+            for message in second_context.short_term_memory
+        ] == [
+            ("user", "concurrent-user-1"),
+            ("assistant", "reply-1"),
+        ]
+
+        history = await ProjectSessionService.list_messages(db, session["id"])
+        expected = [
+            ("user", "concurrent-user-1"),
+            ("assistant", "reply-1"),
+            ("user", "concurrent-user-2"),
+            ("assistant", "reply-2"),
+        ]
+        assert [(message.role, message.content) for message in history] == expected
+        hot_messages = manager._states[session["id"]].memory._messages
+        assert [
+            (message.get("id"), message.get("role"), message.get("content"))
+            for message in hot_messages
+        ] == [
+            (message.id, message.role, message.content)
+            for message in history
+        ]
+        parent_workers = [
+            worker
+            for worker in gateway_module._parent_workers.values()
+            if worker.session_id == session["id"]
+        ]
+        assert len(parent_workers) == 1
+    finally:
+        await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_recovers_checkpoint_delta_after_runtime_restart(
+    client,
+    db,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+
+    async def optimizer(summary: str, evicted: list[dict]) -> str:
+        delta = "|".join(
+            f"{item.get('id')}:{item.get('content')}"
+            for item in evicted
+        )
+        return "|".join(part for part in (summary, delta) if part)
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_session_memory_manager",
+        gateway_module.SessionMemoryWindowManager(
+            budget=20,
+            recent_window=1,
+            optimizer=optimizer,
+        ),
+    )
+    root = test_workspace / "cold-recovered-context"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Cold recovered context"},
+        )
+    ).json()
+    captured: list[dict] = []
+
+    def create_provider(context=None, **kwargs):
+        assert context is not None
+        return _RenderedContextProvider(captured)
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    await ProjectSessionService.ensure_memory_table(db)
+    await ProjectSessionService.ensure_memory_table(db)
+    first = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "old-" + "x" * 40},
+    )
+    second = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "before restart"},
+    )
+    assert first.status_code == second.status_code == 201
+    checkpoint = await ProjectSessionService.get_memory_checkpoint(db, session["id"])
+    assert checkpoint is not None
+    assert checkpoint.anchor_message_id
+    assert checkpoint.summary
+    checkpoint_anchor = checkpoint.anchor_message_id
+    checkpoint_summary = checkpoint.summary
+
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(
+        gateway_module,
+        "_session_memory_manager",
+        gateway_module.SessionMemoryWindowManager(
+            budget=20,
+            recent_window=1,
+            optimizer=optimizer,
+        ),
+    )
+    original_list_after = ProjectSessionService.list_messages_after
+    delta_anchors: list[str | None] = []
+
+    async def counted_delta(*args, **kwargs):
+        delta_anchors.append(kwargs.get("after_message_id"))
+        return await original_list_after(*args, **kwargs)
+
+    async def forbidden_full_history(*_args, **_kwargs):
+        raise AssertionError("cold recovery must use checkpoint plus delta")
+
+    monkeypatch.setattr(ProjectSessionService, "list_messages_after", counted_delta)
+    monkeypatch.setattr(ProjectSessionService, "list_messages", forbidden_full_history)
+    third = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "after restart"},
+    )
+    assert third.status_code == 201, third.text
+
+    recovered = json.dumps(captured[-1]["messages"], ensure_ascii=False)
+    assert delta_anchors == [checkpoint_anchor]
+    assert recovered.count("after restart") == 1
+    assert "before restart" in recovered
+    assert "reply-2" in recovered
+    assert checkpoint_summary in recovered
+    await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_context_has_one_memory_entry_and_preserves_other_sections(
+    client,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", None)
+    root = test_workspace / "single-memory-entry"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Single memory entry"},
+        )
+    ).json()
+    captured: list[dict] = []
+
+    def create_provider(context=None, **kwargs):
+        assert context is not None
+        return _RenderedContextProvider(captured)
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    response = await client.post(
+        f"/api/v1/sessions/{session['id']}/converse",
+        json={"content": "inspect context layers"},
+    )
+    assert response.status_code == 201, response.text
+
+    payload = captured[0]["payload"]
+    assert "short_term_memory" in payload
+    assert isinstance(payload["short_term_memory"], list)
+    assert "memory" not in payload["accessible_context"]
+    assert "long_term_memory" not in payload
+    assert "rag" not in payload
+    assert payload["accessible_context"]["project_map"]
+    assert isinstance(payload["accessible_context"]["skill_ids"], list)
+    assert payload["accessible_context"]["session_role"] == "planning"
+    assert payload["tool_context"]
+    assert payload["tool_capabilities"]["sandbox"]["project_id"] == project["id"]
+    assert payload["child_agent_results"] == []
+    await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_persists_completed_and_blocked_terminal_decisions(
+    client,
+    db,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", None)
+    sink = _EventSink()
+    monkeypatch.setattr(
+        logging_facade_module,
+        "_global_facade",
+        LoggingFacade(sinks=[sink]),
+    )
+    root = test_workspace / "gateway-terminal-decisions"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    completed_session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Completed terminal"},
+        )
+    ).json()
+    blocked_session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Blocked terminal"},
+        )
+    ).json()
+    proposals = [
+        AgentProposalSchema(
+            terminal_status="completed",
+            reason="",
+            summary="completed summary",
+        ),
+        AgentProposalSchema(
+            terminal_status="blocked",
+            reason="dependency unavailable",
+            summary="cannot continue",
+        ),
+    ]
+
+    def create_provider(context=None, **kwargs):
+        assert context is not None
+        return _RenderedContextProvider([], proposals.pop(0))
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    completed = await client.post(
+        f"/api/v1/sessions/{completed_session['id']}/converse",
+        json={"content": "finish this"},
+    )
+    blocked = await client.post(
+        f"/api/v1/sessions/{blocked_session['id']}/converse",
+        json={"content": "try blocked work"},
+    )
+    assert completed.status_code == blocked.status_code == 201
+    assert completed.json()["content"] == "completed summary"
+    assert blocked.json()["content"] == "[blocked] dependency unavailable"
+
+    completed_history = await ProjectSessionService.list_messages(db, completed_session["id"])
+    blocked_history = await ProjectSessionService.list_messages(db, blocked_session["id"])
+    assert completed_history[-1].role == "assistant"
+    assert completed_history[-1].content == "completed summary"
+    assert blocked_history[-1].role == "assistant"
+    assert blocked_history[-1].content == "[blocked] dependency unavailable"
+    terminal_events = [event for event in sink.events if event.action == "agent_terminal_decision"]
+    assert [event.detail["terminal_status"] for event in terminal_events] == [
+        "completed",
+        "blocked",
+    ]
+    assert terminal_events[1].detail["reason"] == "dependency unavailable"
+    await client.post(f"/api/v1/sessions/{completed_session['id']}/close")
+    await client.post(f"/api/v1/sessions/{blocked_session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_does_not_apply_request_timeout_to_full_provider_turn(
+    client,
+    db,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", None)
+    monkeypatch.setenv("BRIDLE_AGENT_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("BRIDLE_DEEPSEEK_MAX_WALL_SECONDS", "1")
+    sink = _EventSink()
+    monkeypatch.setattr(
+        logging_facade_module,
+        "_global_facade",
+        LoggingFacade(sinks=[sink]),
+    )
+    root = test_workspace / "gateway-request-timeout-boundary"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Delayed completion"},
+        )
+    ).json()
+    observed_limits: list[tuple[int, float]] = []
+
+    class _DelayedCompletedProvider:
+        name = "delayed-completed"
+
+        async def generate(self, _context):
+            config = AgentProviderFactory.get_config()
+            observed_limits.append(
+                (
+                    config["timeout_seconds"],
+                    config["deepseek_max_wall_seconds"],
+                )
+            )
+            await asyncio.sleep(0.01)
+            return AgentProposalSchema(
+                terminal_status="completed",
+                reason="",
+                summary="completed after request timeout",
+            )
+
+    def create_provider(context=None, **kwargs):
+        assert context is not None
+        return _DelayedCompletedProvider()
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    try:
+        response = await client.post(
+            f"/api/v1/sessions/{session['id']}/converse",
+            json={"content": "finish after one slow request"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["content"] == "completed after request timeout"
+        assert observed_limits == [(0, 1.0)]
+
+        history = await ProjectSessionService.list_messages(db, session["id"])
+        assert history[-1].role == "assistant"
+        assert history[-1].content == "completed after request timeout"
+        terminal_events = [
+            event
+            for event in sink.events
+            if event.action == "agent_terminal_decision"
+            and event.session_id == session["id"]
+        ]
+        assert [event.detail["terminal_status"] for event in terminal_events] == [
+            "completed"
+        ]
+        assert terminal_events[0].detail["provider"] == "delayed-completed"
+    finally:
+        await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
+@pytest.mark.asyncio
+async def test_gateway_wall_watchdog_releases_same_session_turn_lock(
+    client,
+    test_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _restart_gateway_for_test()
+    monkeypatch.setattr(gateway_module, "_session_memory_manager", None)
+    root = test_workspace / "gateway-wall-watchdog-lock-release"
+    root.mkdir()
+    project = await _open_ready_project(client, root)
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"project_id": project["id"], "title": "Wall watchdog lock release"},
+        )
+    ).json()
+    provider_calls = 0
+    request_started = asyncio.Event()
+    request_cancelled = asyncio.Event()
+    release = asyncio.Event()
+    request_timeouts: list[float] = []
+
+    class _BlockingClient:
+        async def chat_completion(self, **kwargs):
+            request_timeouts.append(kwargs["timeout_seconds"])
+            request_started.set()
+            try:
+                await release.wait()
+            finally:
+                request_cancelled.set()
+            raise AssertionError("blocked request must be cancelled by the wall watchdog")
+
+    class _CompletedProvider:
+        name = "completed-after-wall-timeout"
+
+        async def generate(self, _context):
+            return AgentProposalSchema(
+                terminal_status="completed",
+                reason="",
+                summary="continued after wall timeout",
+            )
+
+    def create_provider(context=None, **kwargs):
+        nonlocal provider_calls
+        assert context is not None
+        provider_calls += 1
+        if provider_calls == 1:
+            registry = AgentToolRegistry.from_context(
+                context,
+                runtime_handlers=kwargs["runtime_tool_handlers"],
+                test_backend=kwargs["test_backend"],
+            )
+            return DeepSeekAgentProvider(
+                client=_BlockingClient(),
+                model="deepseek-chat",
+                max_wall_seconds=1.0,
+                timeout_seconds=23,
+                registry=registry,
+            )
+        return _CompletedProvider()
+
+    monkeypatch.setattr(AgentProviderFactory, "create", staticmethod(create_provider))
+    try:
+        with pytest.raises(DeepSeekProviderError) as exc:
+            await asyncio.wait_for(
+                client.post(
+                    f"/api/v1/sessions/{session['id']}/converse",
+                    json={"content": "block until provider wall deadline"},
+                ),
+                timeout=2.0,
+            )
+        assert exc.value.error_code == "tool_budget_exhausted"
+        assert exc.value.response_debug.get("budget", {}).get("type") == "wall_seconds"
+        assert request_started.is_set()
+        assert request_cancelled.is_set()
+        assert request_timeouts == [23]
+
+        continued = await asyncio.wait_for(
+            client.post(
+                f"/api/v1/sessions/{session['id']}/converse",
+                json={"content": "continue after provider wall deadline"},
+            ),
+            timeout=2.0,
+        )
+        assert continued.status_code == 201, continued.text
+        assert continued.json()["content"] == "continued after wall timeout"
+        assert provider_calls == 2
+    finally:
+        await client.post(f"/api/v1/sessions/{session['id']}/close")
+
+
 @pytest.mark.asyncio
 async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
     client,
@@ -206,7 +896,6 @@ async def test_same_session_keeps_messages_tools_skills_and_memory_across_roles(
         assert context is not None
         handlers = kwargs["runtime_tool_handlers"]
         assert set(handlers) == {
-            "read_project_map",
             "read_project_map",
             "patch_plan_nodes",
             "execute_plan_node",

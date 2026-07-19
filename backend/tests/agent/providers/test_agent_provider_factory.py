@@ -127,8 +127,6 @@ class TestAgentProviderFactory:
         self._clean_env(monkeypatch)
         cfg = AgentProviderFactory.get_config()
         assert cfg["deepseek_strict_tools"] is False
-        assert cfg["deepseek_max_tool_rounds"] == 8
-        assert cfg["deepseek_max_tool_calls"] == 32
         assert cfg["deepseek_max_wall_seconds"] == 300.0
 
     def test_no_api_key_in_logs_on_fallback(self, monkeypatch, caplog) -> None:
@@ -168,6 +166,7 @@ class TestConfiguredStubProvider:
         assert result.summary != ""
         assert isinstance(result.file_patches, list)
         assert isinstance(result.tests_to_run, list)
+
 
     @pytest.mark.asyncio
     async def test_respects_timeout(self, monkeypatch) -> None:
@@ -210,4 +209,65 @@ class TestConfiguredStubProvider:
         r1 = await provider.generate(ctx)
         r2 = await provider.generate(ctx)
         assert r1.model_dump() == r2.model_dump()
+
+
+def test_factory_and_node_budget_ignore_legacy_round_call_limits(
+    monkeypatch,
+    test_workspace,
+) -> None:
+    from bridle.agent.providers import deepseek_agent_provider as deepseek_module
+    from bridle.agent.providers import openai_client as openai_client_module
+    from bridle.agent.providers.agent_provider import AgentProviderFactory
+    from bridle.agent.runtime.authorization import BudgetGrant
+    from bridle.agent.runtime.schemas import AgentContext
+    from bridle.agent.tools.budget import budget_for_node_minutes
+
+    monkeypatch.setenv("BRIDLE_AGENT_PROVIDER", "deepseek")
+    monkeypatch.setenv("BRIDLE_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS", "1")
+    monkeypatch.setenv("BRIDLE_DEEPSEEK_MAX_TOOL_CALLS", "1")
+    captured: dict = {}
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            captured["client"] = kwargs
+
+    class DummyProvider:
+        name = "deepseek"
+
+        def __init__(self, **kwargs) -> None:
+            captured["provider"] = kwargs
+
+    monkeypatch.setattr(openai_client_module, "HttpOpenAICompatibleClient", DummyClient)
+    monkeypatch.setattr(deepseek_module, "DeepSeekAgentProvider", DummyProvider)
+    context = AgentContext(
+        instruction="x",
+        node={"id": "n1"},
+        tool_capabilities={
+            "sandbox": {
+                "run_id": "r1",
+                "node_id": "n1",
+                "workspace_root": str(test_workspace),
+                "allowed_files": [],
+                "node_tests": [],
+            }
+        },
+    )
+
+    AgentProviderFactory.create(
+        context,
+        budget_override={
+            "max_rounds": 1,
+            "max_tool_calls": 1,
+            "max_wall_seconds": 42,
+        },
+    )
+
+    assert set(budget_for_node_minutes(30)) == {"max_wall_seconds"}
+    assert "deepseek_max_tool_rounds" not in AgentProviderFactory.get_config()
+    assert "deepseek_max_tool_calls" not in AgentProviderFactory.get_config()
+    assert "max_tool_rounds" not in captured["provider"]
+    assert "max_tool_calls" not in captured["provider"]
+    assert captured["provider"]["max_wall_seconds"] == 42
+    assert BudgetGrant(max_tool_calls=3).max_tool_calls == 3
 
