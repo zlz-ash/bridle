@@ -4,73 +4,39 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-
-# Bounds for node-scaled budget. Coefficients tuned for LLM speed (~0.2x of human
-# wall time when skipping full test suites) and aggressive per-round granularity
-# (~3 minutes of estimated human work per LLM round).
+# Bounds for the exceptional wall-clock watchdog. Normal termination is model-owned.
 _DEFAULT_ESTIMATED_MINUTES = 60
-_ROUNDS_MIN = 8
-_ROUNDS_MAX = 60
-_ROUNDS_DIVISOR_MINUTES = 3  # 1 round per 3 estimated minutes
-_TOOL_CALLS_MIN = 32
-_TOOL_CALLS_MAX = 240
-_TOOL_CALLS_PER_ROUND = 4
 _WALL_SECONDS_MIN = 60.0
 _WALL_SECONDS_MAX = 1800.0
 _WALL_SECONDS_PER_MINUTE = 12.0  # = 0.2 * 60 (LLM wall budget vs human estimate)
 
 
 def budget_for_node_minutes(estimated_minutes: int | None) -> dict[str, float]:
-    """Compute a (max_rounds, max_tool_calls, max_wall_seconds) budget tuned to a
-    node's estimated_minutes. Env vars take precedence so operators can override
-    in production / debugging without touching code.
+    """Compute the exceptional wall-clock watchdog for a plan node.
 
     Returns a dict mutable by callers (e.g. AgentProviderFactory.create) without
     affecting subsequent calls. Always returns positive ints/floats within
     documented bounds.
     """
     est = max(int(estimated_minutes or _DEFAULT_ESTIMATED_MINUTES), 1)
-    rounds_proportional = est // _ROUNDS_DIVISOR_MINUTES
-    max_rounds = min(_ROUNDS_MAX, max(_ROUNDS_MIN, rounds_proportional))
-    max_tool_calls = min(
-        _TOOL_CALLS_MAX,
-        max(_TOOL_CALLS_MIN, rounds_proportional * _TOOL_CALLS_PER_ROUND),
-    )
     max_wall_seconds = min(
         _WALL_SECONDS_MAX,
         max(_WALL_SECONDS_MIN, float(est) * _WALL_SECONDS_PER_MINUTE),
     )
-    budget: dict[str, float] = {
-        "max_rounds": int(max_rounds),
-        "max_tool_calls": int(max_tool_calls),
-        "max_wall_seconds": float(max_wall_seconds),
-    }
+    budget: dict[str, float] = {"max_wall_seconds": float(max_wall_seconds)}
     # Env override (highest precedence)
-    if (raw := os.getenv("BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS")):
-        try:
-            budget["max_rounds"] = int(raw)
-        except ValueError:
-            pass
-    if (raw := os.getenv("BRIDLE_DEEPSEEK_MAX_TOOL_CALLS")):
-        try:
-            budget["max_tool_calls"] = int(raw)
-        except ValueError:
-            pass
     if (raw := os.getenv("BRIDLE_DEEPSEEK_MAX_WALL_SECONDS")):
-        try:
+        with suppress(ValueError):
             budget["max_wall_seconds"] = float(raw)
-        except ValueError:
-            pass
     return budget
 
 
 @dataclass(frozen=True)
 class ToolBudgetLimits:
-    max_rounds: int
-    max_tool_calls: int
     max_wall_seconds: float
 
 
@@ -110,8 +76,6 @@ class ToolBudgetTracker:
 
     def check_before_round(self) -> str | None:
         self.sync_wall_clock()
-        if self.usage.rounds_used >= self.limits.max_rounds:
-            return "rounds"
         if self.usage.wall_seconds_used >= self.limits.max_wall_seconds:
             return "wall_seconds"
         return None
@@ -121,8 +85,6 @@ class ToolBudgetTracker:
 
     def check_before_tool_call(self) -> str | None:
         self.sync_wall_clock()
-        if self.usage.tool_calls_used >= self.limits.max_tool_calls:
-            return "tool_calls"
         if self.usage.wall_seconds_used >= self.limits.max_wall_seconds:
             return "wall_seconds"
         return None
@@ -161,8 +123,6 @@ class ToolBudgetTracker:
             "budget": {
                 "type": budget_type,
                 "limits": {
-                    "max_rounds": self.limits.max_rounds,
-                    "max_tool_calls": self.limits.max_tool_calls,
                     "max_wall_seconds": self.limits.max_wall_seconds,
                 },
                 "used": {

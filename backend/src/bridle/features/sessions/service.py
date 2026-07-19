@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bridle.agent.runtime.mailbox import AgentAddress
@@ -19,6 +19,8 @@ from bridle.features.sessions.schemas import (
 from bridle.logging.facade import LoggingFacade, get_logging_facade
 from bridle.models.project_message import ProjectMessageRecord
 from bridle.models.project_session import ProjectSessionRecord
+from bridle.models.project_session_memory import ProjectSessionMemoryRecord
+from bridle.utils.datetime_util import utc_now_naive
 
 
 class ProjectSessionService:
@@ -207,6 +209,143 @@ class ProjectSessionService:
             )
         ).scalars().all()
         return [ProjectMessageReadSchema.model_validate(record) for record in records]
+
+    @staticmethod
+    async def ensure_memory_table(db: AsyncSession) -> None:
+        """Create the checkpoint table for existing local databases, idempotently."""
+        bind = db.bind
+        if bind is None:
+            raise RuntimeError("session_memory_database_bind_required")
+        facade = get_logging_facade()
+        facade.info_event("session_memory_table.ensure", "started")
+        try:
+            async with bind.begin() as connection:
+                await connection.run_sync(
+                    ProjectSessionMemoryRecord.__table__.create,
+                    checkfirst=True,
+                )
+        except Exception as exc:
+            facade.info_event(
+                "session_memory_table.ensure",
+                "failed",
+                error_code=type(exc).__name__,
+            )
+            raise
+        facade.info_event("session_memory_table.ensure", "completed")
+
+    @staticmethod
+    async def get_memory_checkpoint(
+        db: AsyncSession,
+        session_id: str,
+    ) -> ProjectSessionMemoryRecord | None:
+        """Read the summary checkpoint without loading original conversation history."""
+        await ProjectSessionService._load(db, session_id)
+        record = await db.get(ProjectSessionMemoryRecord, session_id)
+        get_logging_facade().info_event(
+            "session_memory_checkpoint.read",
+            "completed",
+            session_id=session_id,
+            detail={"found": record is not None},
+        )
+        return record
+
+    @staticmethod
+    async def list_messages_after(
+        db: AsyncSession,
+        session_id: str,
+        *,
+        after_message_id: str | None,
+    ) -> list[ProjectMessageReadSchema]:
+        """Read only messages newer than the persisted summary anchor."""
+        await ProjectSessionService._load(db, session_id)
+        statement = select(ProjectMessageRecord).where(
+            ProjectMessageRecord.session_id == session_id
+        )
+        if after_message_id:
+            anchor = (
+                await db.execute(
+                    select(ProjectMessageRecord).where(
+                        ProjectMessageRecord.session_id == session_id,
+                        ProjectMessageRecord.id == after_message_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if anchor is not None:
+                statement = statement.where(
+                    or_(
+                        ProjectMessageRecord.created_at > anchor.created_at,
+                        and_(
+                            ProjectMessageRecord.created_at == anchor.created_at,
+                            ProjectMessageRecord.id > anchor.id,
+                        ),
+                    )
+                )
+        records = (
+            await db.execute(
+                statement.order_by(ProjectMessageRecord.created_at, ProjectMessageRecord.id)
+            )
+        ).scalars().all()
+        get_logging_facade().info_event(
+            "session_memory_delta.read",
+            "completed",
+            session_id=session_id,
+            detail={"after_message_id": after_message_id, "message_count": len(records)},
+        )
+        return [ProjectMessageReadSchema.model_validate(record) for record in records]
+
+    @staticmethod
+    async def update_memory_checkpoint(
+        db: AsyncSession,
+        session_id: str,
+        *,
+        summary: str,
+        anchor_message_id: str,
+    ) -> ProjectSessionMemoryRecord:
+        """Atomically advance the summary checkpoint after a successful compaction."""
+        facade = get_logging_facade()
+        facade.info_event(
+            "session_memory_checkpoint.update",
+            "started",
+            session_id=session_id,
+            detail={"anchor_message_id": anchor_message_id},
+        )
+        try:
+            await ProjectSessionService._load(db, session_id)
+            anchor = (
+                await db.execute(
+                    select(ProjectMessageRecord).where(
+                        ProjectMessageRecord.session_id == session_id,
+                        ProjectMessageRecord.id == anchor_message_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if anchor is None:
+                raise ValueError("session_memory_anchor_not_found")
+            record = await db.get(ProjectSessionMemoryRecord, session_id)
+            if record is None:
+                record = ProjectSessionMemoryRecord(session_id=session_id)
+                db.add(record)
+            record.summary = summary
+            record.anchor_message_id = anchor_message_id
+            record.updated_at = utc_now_naive()
+            await db.commit()
+            await db.refresh(record)
+        except Exception as exc:
+            await db.rollback()
+            facade.info_event(
+                "session_memory_checkpoint.update",
+                "failed",
+                session_id=session_id,
+                error_code=type(exc).__name__,
+            )
+            raise
+        facade.info_event(
+            "session_memory_checkpoint.update",
+            "completed",
+            session_id=session_id,
+            detail={"anchor_message_id": anchor_message_id},
+        )
+        return record
 
     @staticmethod
     async def _load(db: AsyncSession, session_id: str) -> ProjectSessionRecord:

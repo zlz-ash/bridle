@@ -64,8 +64,8 @@ class TestContextTemplateBuilder:
         assert "node" in payload
         assert "short_term_memory" in payload
         assert "tool_context" in payload
-        assert "long_term_memory" in payload
-        assert "rag" in payload
+        assert "long_term_memory" not in payload
+        assert "rag" not in payload
 
     def test_user_payload_preserves_original_fields(self) -> None:
         ctx = _minimal_ctx()
@@ -75,20 +75,6 @@ class TestContextTemplateBuilder:
         assert payload["instruction"] == "Implement feature X"
         assert payload["node"]["id"] == "n1"
         assert payload["allowed_files"] == ["src/a.py"]
-
-    def test_long_term_memory_default_empty(self) -> None:
-        ctx = _minimal_ctx()
-        builder = ContextTemplateBuilder(ctx)
-        messages = builder.build_messages()
-        payload = json.loads(messages[1]["content"])
-        assert payload["long_term_memory"] == {}
-
-    def test_rag_default_empty(self) -> None:
-        ctx = _minimal_ctx()
-        builder = ContextTemplateBuilder(ctx)
-        messages = builder.build_messages()
-        payload = json.loads(messages[1]["content"])
-        assert payload["rag"] == {}
 
     def test_short_term_memory_default_empty(self) -> None:
         ctx = _minimal_ctx()
@@ -141,8 +127,43 @@ class TestContextTemplateBuilder:
         payload = builder.build_payload()
         assert isinstance(payload, ContextPayload)
         assert payload.instruction == "Implement feature X"
-        assert payload.long_term_memory == {}
-        assert payload.rag == {}
+        assert not hasattr(payload, "long_term_memory")
+        assert not hasattr(payload, "rag")
+
+    def test_context_renders_only_one_short_term_memory_entry(self) -> None:
+        ctx = _minimal_ctx(
+            accessible_context={
+                "project": {"name": "demo"},
+                "skills": ["pytest"],
+                "session_role": "parent",
+            }
+        )
+        builder = ContextTemplateBuilder(
+            ctx,
+            short_term_memory=[
+                {"role": "system", "content": "[compacted] prior work"},
+                {"role": "user", "content": "latest request"},
+            ],
+            child_agent_results=[
+                {
+                    "node_id": "n2",
+                    "status": "completed",
+                    "result_summary": "done",
+                }
+            ],
+        )
+
+        payload = json.loads(builder.build_messages()[1]["content"])
+
+        assert list(key for key in payload if key == "short_term_memory") == [
+            "short_term_memory"
+        ]
+        assert payload["accessible_context"]["project"]["name"] == "demo"
+        assert payload["accessible_context"]["skills"] == ["pytest"]
+        assert payload["accessible_context"]["session_role"] == "parent"
+        assert payload["child_agent_results"][0]["node_id"] == "n2"
+        assert "long_term_memory" not in payload
+        assert "rag" not in payload
 
     def test_proposal_output_format_in_system(self) -> None:
         ctx = _minimal_ctx()

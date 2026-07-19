@@ -34,6 +34,9 @@ class AgentProvider(Protocol):
     async def generate(self, context: AgentContext) -> AgentProposalSchema:
         ...
 
+    async def optimize_memory(self, summary: str, evicted: list[dict[str, Any]]) -> str:
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Fake provider (default, no network)
@@ -58,10 +61,31 @@ class FakeAgentProvider:
         tests_to_run = self._build_tests(context.tests)
 
         return AgentProposalSchema(
+            terminal_status="completed",
+            reason="",
             summary=summary,
             file_patches=file_patches,
             tests_to_run=tests_to_run,
         )
+
+    async def optimize_memory(self, summary: str, evicted: list[dict[str, Any]]) -> str:
+        """Produce a deterministic local summary without tools or network I/O."""
+        parts = [summary.strip()] if summary.strip() else []
+        parts.extend(
+            f"{item.get('role', 'unknown')}: {str(item.get('content', '')).strip()}"
+            for item in evicted
+            if str(item.get("content", "")).strip()
+        )
+        result = " | ".join(parts) or "No prior conversation retained"
+        logger.info(
+            "agent_memory_optimizer_completed",
+            extra={
+                "action": "agent_memory_optimizer_completed",
+                "status": "completed",
+                "detail": {"provider": self.name, "evicted_count": len(evicted)},
+            },
+        )
+        return result
 
     @staticmethod
     def _build_summary(instruction: str, allowed_files: list[str], accessible: dict) -> str:
@@ -138,10 +162,16 @@ class ConfiguredStubProvider:
         tests_to_run = [str(t) for t in context.tests if str(t).strip()]
 
         return AgentProposalSchema(
+            terminal_status="completed",
+            reason="",
             summary=summary,
             file_patches=file_patches,
             tests_to_run=tests_to_run,
         )
+
+    async def optimize_memory(self, summary: str, evicted: list[dict[str, Any]]) -> str:
+        result = await FakeAgentProvider().optimize_memory(summary, evicted)
+        return f"[STUB:{self._model}] {result}"
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +189,12 @@ class AgentProviderFactory:
     - BRIDLE_AGENT_TIMEOUT_SECONDS: timeout (default: 120)
     - HTTPS_PROXY: proxy URL (default: http://127.0.0.1:7890)
     - BRIDLE_DEEPSEEK_STRICT_TOOLS: use beta strict tools (default: false)
-    - BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS: tool loop limit (default: 8)
-    - BRIDLE_DEEPSEEK_MAX_TOOL_CALLS: total tool calls per generate (default: 32)
     - BRIDLE_DEEPSEEK_MAX_WALL_SECONDS: wall-clock budget per generate (default: 300)
     """
 
     DEFAULT_PROXY = "http://127.0.0.1:7890"
     DEFAULT_TIMEOUT = 120
     DEFAULT_MODEL = "unknown"
-    DEFAULT_MAX_TOOL_ROUNDS = 8
-    DEFAULT_MAX_TOOL_CALLS = 32
     DEFAULT_MAX_WALL_SECONDS = 300.0
 
     @staticmethod
@@ -185,11 +211,7 @@ class AgentProviderFactory:
 
         Args:
             context: AgentContext for tool registry (deepseek path requires it).
-            budget_override: Optional per-call budget that overrides env-based
-                defaults for deepseek's tool loop. Keys: max_rounds (int),
-                max_tool_calls (int), max_wall_seconds (float). Missing keys
-                fall back to env defaults. Used by node worker to scale budget
-                with each node's estimated_minutes.
+            budget_override: Optional per-call wall-clock watchdog override.
         """
         cfg = AgentProviderFactory.get_config()
         provider_name = cfg["provider"]
@@ -220,10 +242,10 @@ class AgentProviderFactory:
             return ConfiguredStubProvider(model=model, timeout_seconds=timeout, proxy=proxy)
 
         if provider_name == "deepseek" or provider_name == "openai_compatible":
-            from bridle.agent.tools.registry import AgentToolRegistry
             from bridle.agent.providers.deepseek_agent_provider import DeepSeekAgentProvider
             from bridle.agent.providers.deepseek_client import DEEPSEEK_BETA_BASE, DEEPSEEK_DEFAULT_BASE
             from bridle.agent.providers.openai_client import HttpOpenAICompatibleClient
+            from bridle.agent.tools.registry import AgentToolRegistry
 
             if context is None:
                 logger.warning(
@@ -251,14 +273,10 @@ class AgentProviderFactory:
             client = HttpOpenAICompatibleClient(api_key=api_key, base_url=base_url, proxy=proxy)
             snap = context.tool_capabilities.get("sandbox", {}) if context.tool_capabilities else {}
             override = budget_override or {}
-            max_tool_rounds = int(override.get("max_rounds", cfg["deepseek_max_tool_rounds"]))
-            max_tool_calls = int(override.get("max_tool_calls", cfg["deepseek_max_tool_calls"]))
             max_wall_seconds = float(override.get("max_wall_seconds", cfg["deepseek_max_wall_seconds"]))
             return DeepSeekAgentProvider(
                 client=client,
                 model=model,
-                max_tool_rounds=max_tool_rounds,
-                max_tool_calls=max_tool_calls,
                 max_wall_seconds=max_wall_seconds,
                 registry=registry,
                 strict_tools=cfg["deepseek_strict_tools"],
@@ -282,6 +300,43 @@ class AgentProviderFactory:
         return FakeAgentProvider()
 
     @staticmethod
+    def create_memory_optimizer() -> Callable[[str, list[dict[str, Any]]], Awaitable[str]]:
+        """Create the configured provider's tool-free memory optimizer entry."""
+        cfg = AgentProviderFactory.get_config()
+        provider_name = cfg["provider"]
+        if provider_name == "configured_stub":
+            return ConfiguredStubProvider(
+                model=cfg["model"],
+                timeout_seconds=cfg["timeout_seconds"],
+                proxy=cfg["proxy"],
+            ).optimize_memory
+        if provider_name not in {"deepseek", "openai_compatible"} or not cfg["api_key"]:
+            return FakeAgentProvider().optimize_memory
+
+        from bridle.agent.providers.deepseek_agent_provider import DeepSeekAgentProvider
+        from bridle.agent.providers.deepseek_client import DEEPSEEK_BETA_BASE, DEEPSEEK_DEFAULT_BASE
+        from bridle.agent.providers.openai_client import HttpOpenAICompatibleClient
+
+        base_url = (
+            cfg["beta_base_url"] or DEEPSEEK_BETA_BASE
+            if cfg["deepseek_strict_tools"]
+            else cfg["base_url"] or DEEPSEEK_DEFAULT_BASE
+        )
+        client = HttpOpenAICompatibleClient(
+            api_key=cfg["api_key"],
+            base_url=base_url,
+            proxy=cfg["proxy"],
+        )
+        return DeepSeekAgentProvider(
+            client=client,
+            model=cfg["model"],
+            max_wall_seconds=cfg["deepseek_max_wall_seconds"],
+            registry=None,
+            strict_tools=cfg["deepseek_strict_tools"],
+            timeout_seconds=float(cfg["timeout_seconds"]),
+        ).optimize_memory
+
+    @staticmethod
     def get_config() -> dict:
         """Read provider configuration from environment."""
         strict_raw = os.getenv("BRIDLE_DEEPSEEK_STRICT_TOOLS", "false").lower()
@@ -294,15 +349,6 @@ class AgentProviderFactory:
             ),
             "proxy": os.getenv("HTTPS_PROXY", AgentProviderFactory.DEFAULT_PROXY),
             "deepseek_strict_tools": strict_raw in ("1", "true", "yes"),
-            "deepseek_max_tool_rounds": int(
-                os.getenv("BRIDLE_DEEPSEEK_MAX_TOOL_ROUNDS", str(AgentProviderFactory.DEFAULT_MAX_TOOL_ROUNDS))
-            ),
-            "deepseek_max_tool_calls": int(
-                os.getenv(
-                    "BRIDLE_DEEPSEEK_MAX_TOOL_CALLS",
-                    str(AgentProviderFactory.DEFAULT_MAX_TOOL_CALLS),
-                )
-            ),
             "deepseek_max_wall_seconds": float(
                 os.getenv(
                     "BRIDLE_DEEPSEEK_MAX_WALL_SECONDS",

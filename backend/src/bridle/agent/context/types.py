@@ -44,6 +44,4 @@ class ContextPayload(BaseModel):
     tool_capabilities: dict[str, Any]
     short_term_memory: list[dict[str, Any]]
     tool_context: list[dict[str, Any]]
-    long_term_memory: dict[str, Any]
-    rag: dict[str, Any]
     child_agent_results: list[dict[str, Any]]

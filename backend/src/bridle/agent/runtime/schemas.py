@@ -62,9 +62,17 @@ class AgentProposalSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    terminal_status: Literal["completed", "blocked"]
+    reason: str
     summary: str = Field(min_length=1)
     file_patches: list[FilePatchSchema] = Field(default_factory=list)
     tests_to_run: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_terminal_reason(self) -> AgentProposalSchema:
+        if self.terminal_status == "blocked" and not self.reason.strip():
+            raise ValueError("Blocked terminal proposals require a reason")
+        return self
 
 
 class AgentContext(BaseModel):
@@ -80,6 +88,7 @@ class AgentContext(BaseModel):
     constraints: dict = Field(default_factory=dict)
     review_checks: list[str] = Field(default_factory=list)
     expected_outputs: dict = Field(default_factory=dict)
+    short_term_memory: list[dict] = Field(default_factory=list)
     accessible_context: dict = Field(default_factory=dict)
     tool_capabilities: dict = Field(default_factory=dict)
 

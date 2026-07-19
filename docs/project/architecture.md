@@ -3,7 +3,7 @@
 <!-- DOC_ROLE: canonical -->
 <!-- READ_WHEN: 需要理解组件关系、关键运行链路、技术边界或变更影响时 -->
 <!-- SKIP_WHEN: 只需要功能需求、API 字段或单个测试命令时 -->
-<!-- PRIMARY_SOURCES: .ai-dev/docs/ln-110/context-store.json, docs/project/requirements.md, docs/reference/adrs -->
+<!-- PRIMARY_SOURCES: .ai-dev/project-docs/context-window.json, docs/project/requirements.md, docs/project/agent_runtime.md, docs/reference/adrs -->
 
 # 系统架构
 
@@ -14,7 +14,7 @@
 | 目标与约束 | [1. Introduction and Goals](#1-introduction-and-goals)、[2. Constraints](#2-constraints) |
 | C4 边界 | [3. Context and Scope](#3-context-and-scope)、[5. Building Block View](#5-building-block-view) |
 | 运行链路 | [6. Runtime View](#6-runtime-view) |
-| Agent Runtime 目标设计 | [Agent Runtime](agent_runtime.md) |
+| Agent Runtime 当前契约 | [Agent Runtime](agent_runtime.md) |
 | 横切策略与 ADR | [7. Crosscutting Concepts](#7-crosscutting-concepts)、[8. Architecture Decisions](#8-architecture-decisions-adrs) |
 | 质量与风险 | [9. Quality Requirements](#9-quality-requirements)、[10. Risks and Technical Debt](#10-risks-and-technical-debt) |
 
@@ -178,7 +178,7 @@ flowchart LR
 | Feature Routers | 暴露 projects、project_map、sessions、workspace、system API。 | `backend/src/bridle/features` |
 | Service / Store | 承载业务编排、本地持久化和项目状态。 | `backend/src/bridle/features` |
 | Project-map Indexing | 生成增量与语义项目地图，暴露关系、候选和刷新入口。 | `backend/src/bridle/features/project_map` |
-| Agent Runtime | 当前管理 provider、上下文、内存、工具、安全与容器执行；项目 Mapper、会话子 Agent、统一 Grant 与销毁协议仍为 [Planned 目标设计](agent_runtime.md)。 | `backend/src/bridle/agent` |
+| Agent Runtime | 统一 provider、动态上下文窗口、记忆检查点、工具结果生命周期、模型终态、能力视图与父/子/Map Runtime；当前契约见 [Agent Runtime 目标架构](agent_runtime.md)。 | `backend/src/bridle/agent`, `backend/src/bridle/features/sessions` |
 | Frontend Hooks | 协调地图分页、水位、重试、取消和运行时数据。 | `frontend/src/hooks` |
 | UI / Layout | 组合地图、workspace、会话输入和检查器。 | `frontend/src/components`, `frontend/src/layout` |
 
@@ -329,7 +329,7 @@ flowchart TB
 
 ## Maintenance
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-07-19
 
 **Update Triggers:**
 

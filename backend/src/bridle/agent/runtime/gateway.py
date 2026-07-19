@@ -64,6 +64,186 @@ Provider = Callable[[str], Awaitable[str]]
 
 
 @dataclass
+class _SessionMemoryState:
+    memory: ShortTermMemory
+    lock: asyncio.Lock
+    needs_recovery: bool = True
+
+
+class SessionMemoryWindowManager:
+    """Keep one incremental memory window per active project session."""
+
+    def __init__(
+        self,
+        *,
+        budget: int = 4000,
+        recent_window: int = 4,
+        optimizer: Callable[[str, list[dict]], Awaitable[str]] | None = None,
+    ) -> None:
+        self._budget = budget
+        self._recent_window = recent_window
+        self._optimizer = optimizer
+        self._states: dict[str, _SessionMemoryState] = {}
+        self._turn_locks: dict[str, asyncio.Lock] = {}
+
+    def turn_lock(self, session_id: str) -> asyncio.Lock:
+        """Return the single admission boundary for one session's complete turn."""
+        return self._turn_locks.setdefault(session_id, asyncio.Lock())
+
+    async def context_for_turn(
+        self,
+        db: AsyncSession,
+        session_id: str,
+        *,
+        current_message: ProjectMessageReadSchema,
+    ) -> list[dict]:
+        state = self._states.get(session_id)
+        if state is None:
+            state = _SessionMemoryState(
+                memory=ShortTermMemory(
+                    budget=self._budget,
+                    recent_window=self._recent_window,
+                    optimizer=self._optimizer,
+                    run_id=session_id,
+                ),
+                lock=asyncio.Lock(),
+            )
+            self._states[session_id] = state
+
+        async with state.lock:
+            cold_start = state.needs_recovery
+            try:
+                if cold_start:
+                    checkpoint = await ProjectSessionService.get_memory_checkpoint(db, session_id)
+                    anchor = None if checkpoint is None else checkpoint.anchor_message_id
+                    delta = await ProjectSessionService.list_messages_after(
+                        db,
+                        session_id,
+                        after_message_id=anchor,
+                    )
+                    messages = [message.model_dump(mode="json") for message in delta]
+                    current_payload = current_message.model_dump(mode="json")
+                    if not any(message.get("id") == current_message.id for message in messages):
+                        messages.append(current_payload)
+                    state.memory.restore(
+                        summary="" if checkpoint is None else checkpoint.summary,
+                        messages=[],
+                        anchor_message_id=anchor,
+                    )
+                else:
+                    messages = [current_message.model_dump(mode="json")]
+
+                previous_anchor = state.memory.anchor_message_id
+                window = await state.memory.append(messages)
+                new_anchor = state.memory.anchor_message_id
+                if new_anchor is not None and new_anchor != previous_anchor:
+                    await ProjectSessionService.update_memory_checkpoint(
+                        db,
+                        session_id,
+                        summary=state.memory.summary,
+                        anchor_message_id=new_anchor,
+                    )
+                state.needs_recovery = False
+                get_logging_facade().info_event(
+                    "session_memory_window.update",
+                    "completed",
+                    session_id=session_id,
+                    detail={
+                        "cold_start": cold_start,
+                        "appended_count": len(messages),
+                        "window_count": len(window),
+                        "checkpoint_advanced": new_anchor != previous_anchor,
+                    },
+                )
+                return [
+                    message
+                    for message in window
+                    if message.get("id") != current_message.id
+                ]
+            except asyncio.CancelledError:
+                state.needs_recovery = True
+                get_logging_facade().info_event(
+                    "session_memory_window.update",
+                    "cancelled",
+                    session_id=session_id,
+                    detail={
+                        "cold_start": cold_start,
+                        "current_message_id": current_message.id,
+                    },
+                )
+                raise
+
+    async def record_persisted_message(
+        self,
+        db: AsyncSession,
+        session_id: str,
+        *,
+        message: ProjectMessageReadSchema,
+    ) -> None:
+        """Advance the hot window after an assistant message is durably persisted."""
+        state = self._states.get(session_id)
+        if state is None:
+            get_logging_facade().info_event(
+                "session_memory_window.persisted_message",
+                "skipped",
+                session_id=session_id,
+                detail={"message_id": message.id, "role": message.role},
+            )
+            return
+
+        async with state.lock:
+            try:
+                previous_anchor = state.memory.anchor_message_id
+                window = await state.memory.append([message.model_dump(mode="json")])
+                new_anchor = state.memory.anchor_message_id
+                if new_anchor is not None and new_anchor != previous_anchor:
+                    await ProjectSessionService.update_memory_checkpoint(
+                        db,
+                        session_id,
+                        summary=state.memory.summary,
+                        anchor_message_id=new_anchor,
+                    )
+                get_logging_facade().info_event(
+                    "session_memory_window.persisted_message",
+                    "completed",
+                    session_id=session_id,
+                    detail={
+                        "message_id": message.id,
+                        "role": message.role,
+                        "window_count": len(window),
+                        "checkpoint_advanced": new_anchor != previous_anchor,
+                    },
+                )
+            except asyncio.CancelledError:
+                state.needs_recovery = True
+                get_logging_facade().info_event(
+                    "session_memory_window.persisted_message",
+                    "cancelled",
+                    session_id=session_id,
+                    detail={"message_id": message.id, "role": message.role},
+                )
+                raise
+
+    def drop(self, session_id: str) -> None:
+        self._states.pop(session_id, None)
+        turn_lock = self._turn_locks.get(session_id)
+        if turn_lock is None or not turn_lock.locked():
+            self._turn_locks.pop(session_id, None)
+
+
+_session_memory_manager: SessionMemoryWindowManager | None = None
+
+
+def _memory_manager() -> SessionMemoryWindowManager:
+    global _session_memory_manager
+    if _session_memory_manager is None:
+        _session_memory_manager = SessionMemoryWindowManager(
+            optimizer=AgentProviderFactory.create_memory_optimizer(),
+        )
+    return _session_memory_manager
+
+
+@dataclass
 class _ParentJob:
     sequence_no: int
     message_id: str
@@ -896,11 +1076,80 @@ class AgentGateway:
         await lifecycle.close_session(session_id)
         for runtime_id in runtime_ids:
             _parent_workers.pop(runtime_id, None)
+        if _session_memory_manager is not None:
+            _session_memory_manager.drop(session_id)
         db.expire_all()
         return await ProjectSessionService.get(db, session.id)
 
     @staticmethod
     async def converse(
+        db: AsyncSession,
+        session_id: str,
+        content: str,
+        *,
+        node_id: str | None = None,
+    ) -> ProjectMessageReadSchema:
+        """Serialize one session's complete turn before any durable input is created."""
+        manager = _memory_manager()
+        turn_lock = manager.turn_lock(session_id)
+        facade = get_logging_facade()
+        waiting = turn_lock.locked()
+        started = time.monotonic()
+        acquired = False
+        facade.info_event(
+            "session_turn.admission",
+            "started",
+            session_id=session_id,
+            detail={"waiting": waiting},
+        )
+        if waiting:
+            facade.info_event(
+                "session_turn.admission_waiting",
+                "started",
+                session_id=session_id,
+            )
+        try:
+            await turn_lock.acquire()
+            acquired = True
+            waited_ms = int((time.monotonic() - started) * 1000)
+            if waiting:
+                facade.info_event(
+                    "session_turn.admission_waiting",
+                    "completed",
+                    session_id=session_id,
+                    detail={"waited_ms": waited_ms},
+                )
+            facade.info_event(
+                "session_turn.admission",
+                "completed",
+                session_id=session_id,
+                detail={"waited_ms": waited_ms},
+            )
+            return await AgentGateway._converse_serialized(
+                db,
+                session_id,
+                content,
+                node_id=node_id,
+            )
+        except asyncio.CancelledError:
+            facade.info_event(
+                "session_turn.admission",
+                "cancelled",
+                session_id=session_id,
+                detail={"acquired": acquired},
+            )
+            raise
+        finally:
+            if acquired:
+                turn_lock.release()
+                facade.info_event(
+                    "session_turn.admission_released",
+                    "completed",
+                    session_id=session_id,
+                )
+
+    @staticmethod
+    async def _converse_serialized(
         db: AsyncSession,
         session_id: str,
         content: str,
@@ -1030,9 +1279,11 @@ class AgentGateway:
             delivery.attempt += 1
             delivery.mail_enqueued_at = datetime.now(UTC).replace(tzinfo=None)
             await db.commit()
-            messages = await ProjectSessionService.list_messages(db, session_id)
-            memory_input = [message.model_dump(mode="json") for message in messages]
-            memory = ShortTermMemory(run_id=session_id).compact(memory_input)
+            memory = await _memory_manager().context_for_turn(
+                db,
+                session_id,
+                current_message=input_message,
+            )
             overview = store.overview()
             skill_ids = SkillRegistry.default().list_ids()
             capabilities = RuntimeRolePolicy.manifest(session.role)
@@ -1169,8 +1420,8 @@ class AgentGateway:
                 node=context_node,
                 allowed_files=allowed_files,
                 tests=node_tests,
+                short_term_memory=memory,
                 accessible_context={
-                    "memory": memory,
                     "project_map": overview,
                     "skill_ids": skill_ids,
                     "session_role": session.role,
@@ -1406,7 +1657,6 @@ class AgentGateway:
                 "patch_plan_nodes": patch_plan_nodes,
                 "execute_plan_node": execute_plan_node,
             }
-            provider_config = AgentProviderFactory.get_config()
             parent_ready = asyncio.Event()
             provider_names: list[str] = []
 
@@ -1421,10 +1671,20 @@ class AgentGateway:
                     test_backend=container_test_backend,
                 )
                 provider_names.append(provider.name)
-                proposal = await asyncio.wait_for(
-                    provider.generate(provider_context),
-                    timeout=float(provider_config["timeout_seconds"]),
+                proposal = await provider.generate(provider_context)
+                facade.info_event(
+                    "agent_terminal_decision",
+                    "completed",
+                    trace_id=runtime_trace_id,
+                    session_id=session_id,
+                    detail={
+                        "terminal_status": proposal.terminal_status,
+                        "reason": proposal.reason,
+                        "provider": provider.name,
+                    },
                 )
+                if proposal.terminal_status == "blocked":
+                    return f"[blocked] {proposal.reason}"
                 return proposal.summary
 
             async with _parent_runtime_lock:
@@ -1450,6 +1710,11 @@ class AgentGateway:
                     trace_id=runtime_trace_id,
                 )
                 parent_completed = True
+                await _memory_manager().record_persisted_message(
+                    db,
+                    session_id,
+                    message=assistant,
+                )
             finally:
                 if not parent_completed:
                     for child_handle in child_handles:

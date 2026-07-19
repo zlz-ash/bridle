@@ -17,6 +17,7 @@
 
 # Runtime artifacts
 .bridle/runtime/
+/.ai-dev-runtime/
 .ai-dev/evidence/final-audit.json
 .ai-dev/ci/runs/release-full-local/
 .ai-dev/*
